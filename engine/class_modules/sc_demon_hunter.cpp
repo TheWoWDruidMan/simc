@@ -4,6 +4,11 @@
 // ==========================================================================
 
 #include "action/parse_effects.hpp"
+// BracketSim legacy compatibility: Shadowlands conduits. Values live in
+// legacy_conduits.hpp because Midnight ships neither the ConduitRank table nor
+// most conduit spells, and the client's own conduit tooltips are stale - a live
+// in-game test proved the archived 9.2.7 numbers are what the game runs.
+#include "player/legacy_conduits.hpp"
 #include "class_modules/apl/apl_demon_hunter.hpp"
 #include "report/charts.hpp"
 #include "report/highchart.hpp"
@@ -62,6 +67,9 @@ public:
 
     // Aldrachi Reaver
     buff_t* reavers_mark;
+
+    // BracketSim legacy compatibility: Serrated Glaive (conduit 152).
+    buff_t* legacy_exposed_wound;
 
     // Set Bonuses
   } debuffs;
@@ -417,7 +425,79 @@ public:
 
     // Set Bonuses
     buff_t* soulburst;  // MID2 Devourer 2p
+
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+    buff_t* legacy_furious_gaze;
+    buff_t* revolving_blades;
+    buff_t* seething_power;
+    buff_t* thirsting_blades;
+    buff_t* thirsting_blades_driver;
+
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    // Chaos Theory is also a current talent, so the legendary carries a
+    // legacy_ prefix and the two stack.
+    buff_t* legacy_blazing_slaughter;
+    buff_t* legacy_chaos_theory;
+    buff_t* legacy_fel_bombardment;
+    buff_t* legacy_spirit_of_the_darkness_flame;
+    buff_t* legacy_blind_faith;
+    // BracketSim legacy compatibility: Soul Furnace (conduit 172).
+    buff_t* legacy_soul_furnace;
   } buff;
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. Two of
+  // these share a name with a modern talent, so those carry a legacy_ prefix
+  // and both sources can be active at once.
+  struct azerite_powers_t
+  {
+    azerite_power_t legacy_chaotic_transformation;
+    azerite_power_t eyes_of_rage;
+    azerite_power_t legacy_furious_gaze;
+    azerite_power_t revolving_blades;
+    azerite_power_t seething_power;
+    azerite_power_t thirsting_blades;
+  } azerite;
+
+  // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
+  // has no runeforge DBC, so each one is switched on by the bonus id its
+  // original legendary item carried and is inert on any other character.
+  // BracketSim legacy compatibility: Shadowlands covenant abilities. Midnight
+  // has no covenant DBC, but every covenant spell still resolves, so they are
+  // looked up by id and gated on the chosen covenant.
+  // BracketSim legacy compatibility: Shadowlands conduits, as id:rank pairs.
+  legacy_conduit::set_t legacy_conduits;
+
+  struct legacy_covenant_t
+  {
+    std::string chosen = "none";
+    const spell_data_t* elysian_decree = spell_data_t::not_found();
+    const spell_data_t* sinful_brand = spell_data_t::not_found();
+    const spell_data_t* fodder_to_the_flame = spell_data_t::not_found();
+    const spell_data_t* the_hunt = spell_data_t::not_found();
+  } legacy_covenant;
+
+  struct shadowlands_legacy_t
+  {
+    bool legacy_shadowlands_enabled = true;
+    bool blazing_slaughter = false;
+    bool burning_wound = false;
+    bool chaos_theory = false;
+    bool collective_anguish = false;
+    bool darker_nature = false;
+    bool darkest_hour = false;
+    bool darkglare_medallion = false;
+    bool erratic_fel_core = false;
+    bool fel_bombardment = false;
+    bool fel_flame_fortification = false;
+    bool fiery_soul = false;
+    bool razelikhs_defilement = false;
+    bool spirit_of_the_darkness_flame = false;
+    // These two need a covenant ability to hang off, so they only do anything
+    // when the matching covenant is chosen as well.
+    bool agony_gaze = false;
+    bool blind_faith = false;
+    bool demonic_oath = false;
+  } shadowlands_legacy;
 
   // Talents
   struct talents_t
@@ -1010,6 +1090,8 @@ public:
     cooldown_t* throw_glaive;
     cooldown_t* vengeful_retreat;
     cooldown_t* soul_splitter_icd;
+    // BracketSim legacy compatibility: Darkest Hour (Shadowlands runeforge).
+    cooldown_t* legacy_darkest_hour;
 
     // Devourer
     cooldown_t* consume;
@@ -1281,6 +1363,8 @@ public:
   void init_special_effects() override;
   void init_rng() override;
   void init_scaling() override;
+  // BracketSim legacy compatibility: Vision of Perfection.
+  void vision_of_perfection_proc() override;
   void init_spells() override;
   void init_blizzard_action_list() override;
   void init_items() override;
@@ -1908,6 +1992,23 @@ struct soul_fragment_t
     {
       make_event<delayed_execute_event_t>( *dh->sim, dh, consume_action, dh, delay );
     }
+
+    // Legacy Azerite: Eyes of Rage shortens Eye Beam every time a fragment is eaten.
+    if ( dh->azerite.eyes_of_rage.ok() )
+    {
+      timespan_t eor = dh->azerite.eyes_of_rage.spell_ref().effectN( 1 ).time_value();
+      // Battle for Azeroth testing showed two ranks doubled the reduction despite
+      // the tooltip, and that a single rank did the same alongside Demonic Appetite.
+      if ( dh->bugs && dh->azerite.eyes_of_rage.n_items() > 1 )
+        eor *= 2;
+
+      dh->cooldown.eye_beam->adjust( -eor );
+    }
+
+    // BracketSim legacy compatibility: Soul Furnace (conduit 172) stacks on
+    // every fragment consumed, whatever consumed it.
+    if ( dh->legacy_conduits.has( 172 ) )
+      dh->buff.legacy_soul_furnace->trigger();
 
     dh->buff.soul_fragments->decrement();
     remove();
@@ -3953,6 +4054,28 @@ struct eye_beam_base_t : public student_of_suffering_trigger_t<final_breath_trig
       return m;
     }
 
+    // BracketSim legacy compatibility: Serrated Glaive (conduit 152). This is
+    // the single place Shadowlands read the debuff, and Midnight's spell data
+    // names the same one ability.
+    double composite_target_multiplier( player_t* target ) const override
+    {
+      double m = demon_hunter_spell_t::composite_target_multiplier( target );
+
+      m *= 1.0 + td( target )->debuffs.legacy_exposed_wound->check_value();
+
+      return m;
+    }
+
+    // Legacy Azerite: Eyes of Rage
+    double bonus_da( const action_state_t* s ) const override
+    {
+      double b = demon_hunter_spell_t::bonus_da( s );
+
+      b += dh()->azerite.eyes_of_rage.value( 2 );
+
+      return b;
+    }
+
     timespan_t execute_time() const override
     {
       // Eye Beam is applied via a player aura and experiences aura delay in applying damage tick events
@@ -4008,6 +4131,14 @@ struct eye_beam_base_t : public student_of_suffering_trigger_t<final_breath_trig
          d->current_tick >= ( d->num_ticks() - dh()->options.channel_tick_cutoff_benefit ) )
     {
       dh()->buff.furious_gaze->trigger();
+    }
+
+    // BracketSim legacy compatibility: the Azerite trait of the same name is a
+    // separate haste buff, so both can be up at once.
+    if ( dh()->azerite.legacy_furious_gaze.ok() &&
+         d->current_tick >= ( d->num_ticks() - dh()->options.channel_tick_cutoff_benefit ) )
+    {
+      dh()->buff.legacy_furious_gaze->trigger();
     }
 
     if ( dh()->talent.havoc.eternal_hunt_3->ok() &&
@@ -4202,6 +4333,20 @@ struct fel_devastation_t : public final_breath_trigger_t<demon_hunter_spell_t>
   {
     base_t::last_tick( d );
 
+    // BracketSim legacy compatibility: Darkglare Medallion. Same mechanic as the
+    // current Darkglare Boon talent, rolled separately from its own spell.
+    if ( dh()->shadowlands_legacy.darkglare_medallion )
+    {
+      const spell_data_t* dm = dh()->find_spell( 337534 );
+      double base_cooldown = dh()->talent.vengeance.fel_devastation->cooldown().total_seconds();
+      timespan_t cdr = timespan_t::from_seconds(
+          dh()->rng().range( dm->effectN( 1 ).percent(), dm->effectN( 2 ).percent() ) * base_cooldown );
+      dh()->cooldown.fel_devastation->adjust( -cdr );
+      dh()->resource_gain( RESOURCE_FURY,
+                           dh()->rng().range( dm->effectN( 3 ).base_value(), dm->effectN( 4 ).base_value() ),
+                           dh()->gain.darkglare_boon );
+    }
+
     if ( dh()->talent.vengeance.darkglare_boon->ok() )
     {
       // CDR reduction and Fury refund are separate rolls per Realz
@@ -4365,6 +4510,16 @@ struct fiery_brand_t : public demon_hunter_spell_t
     add_child( dot_action );
   }
 
+  // BracketSim legacy compatibility: Spirit of the Darkness Flame.
+  double composite_da_multiplier( const action_state_t* s ) const override
+  {
+    double m = demon_hunter_spell_t::composite_da_multiplier( s );
+
+    m *= 1.0 + dh()->buff.legacy_spirit_of_the_darkness_flame->check_stack_value();
+
+    return m;
+  }
+
   void impact( action_state_t* s ) override
   {
     demon_hunter_spell_t::impact( s );
@@ -4381,6 +4536,10 @@ struct fiery_brand_t : public demon_hunter_spell_t
     dot_action->schedule_execute( fb_state );
 
     dh()->buff.fiery_brand->trigger();
+
+    // BracketSim legacy compatibility: Spirit of the Darkness Flame is spent by
+    // the Fiery Brand it was stacked for.
+    dh()->buff.legacy_spirit_of_the_darkness_flame->expire();
   }
 
   dot_t* get_dot( player_t* t ) override
@@ -4463,6 +4622,11 @@ struct sigil_of_flame_t : public demon_hunter_spell_t
       {
         td( s->target )->debuffs.frailty->trigger();
       }
+
+      // BracketSim legacy compatibility: Spirit of the Darkness Flame. Every
+      // enemy the Sigil catches makes the next Fiery Brand hit harder.
+      if ( result_is_hit( s->result ) && dh()->shadowlands_legacy.spirit_of_the_darkness_flame )
+        dh()->buff.legacy_spirit_of_the_darkness_flame->trigger();
     }
 
     dot_t* get_dot( player_t* t ) override
@@ -4511,11 +4675,31 @@ struct sigil_of_flame_t : public demon_hunter_spell_t
   {
     demon_hunter_spell_t::execute();
 
-    debug_cast<demon_hunter_sigil_t*>( dh()->active.sigil_of_flame )->place_sigil( execute_state->target );
+    // Null when this action was built on spell data that is not ok - the
+    // constructor guards the assignment with `data().ok()`.
+    if ( auto* sigil = dh()->active.sigil_of_flame )
+      debug_cast<demon_hunter_sigil_t*>( sigil )->place_sigil( execute_state->target );
   }
 
   std::unique_ptr<expr_t> create_expression( util::string_view name ) override
   {
+    /*
+     * The same null hazard as Sigil of Spite, which crashed at level 45 - see
+     * the long note there. `action.sigil_of_flame.placed` is in the default
+     * action list too, and the constructor only builds the sigil when
+     * `data().ok()`, so the two can disagree. Not observed crashing at any
+     * bracket this project builds; guarded because the shape is identical and
+     * the cost is nothing.
+     */
+    if ( !dh()->active.sigil_of_flame )
+    {
+      if ( util::str_compare_ci( name, "sigil_placed" ) || util::str_compare_ci( name, "placed" ) )
+        return expr_t::create_constant( name, false );
+      if ( util::str_compare_ci( name, "activation_time" ) || util::str_compare_ci( name, "delay" ) )
+        return expr_t::create_constant( name, 0.0 );
+      return demon_hunter_spell_t::create_expression( name );
+    }
+
     if ( auto e = debug_cast<demon_hunter_sigil_t*>( dh()->active.sigil_of_flame )->create_sigil_expression( name ) )
       return e;
 
@@ -4746,6 +4930,9 @@ struct immolation_aura_t : public demon_hunter_spell_t
 
       if ( result_is_hit( s->result ) )
       {
+        // BracketSim legacy compatibility: Fel Bombardment.
+        dh()->buff.legacy_fel_bombardment->trigger();
+
         bool spawn_fallout_soul = false;
         if ( dh()->talent.vengeance.fallout->ok() )
         {
@@ -5006,6 +5193,14 @@ struct metamorphosis_t : public mass_acceleration_trigger_t<demon_hunter_spell_t
         dh()->buff.metamorphosis->extend_duration_or_trigger();
 
         if ( dh()->talent.havoc.chaotic_transformation->ok() )
+        {
+          dh()->cooldown.eye_beam->reset( false );
+          dh()->cooldown.blade_dance->reset( false );
+        }
+
+        // Legacy Azerite: Chaotic Transformation does the same, independently of
+        // the modern talent of the same name.
+        if ( dh()->azerite.legacy_chaotic_transformation.ok() )
         {
           dh()->cooldown.eye_beam->reset( false );
           dh()->cooldown.blade_dance->reset( false );
@@ -5469,6 +5664,24 @@ struct sigil_of_spite_t : public demon_hunter_spell_t
   sigil_of_spite_t( demon_hunter_t* p, util::string_view options_str )
     : demon_hunter_spell_t( "sigil_of_spite", p, p->talent.vengeance.sigil_of_spite, options_str )
   {
+    // BracketSim legacy compatibility: the TALENT unlocks before the SPELL.
+    //
+    // Sigil of Spite's damage spell (389860) is Spell Level 48 and the talent
+    // node that grants it carries no such gate, so a level 45 Vengeance demon
+    // hunter selects the talent, `data().ok()` is true, and the sigil below is
+    // built on not_found - which ends the run on iteration 0 with "could not
+    // find spell data for Action 'sigil_of_spite_sigil' (0)". the author's own
+    // a test character is exactly that character.
+    //
+    // There is nothing to place without the damage spell, and `execute()` would
+    // dereference a sigil that was never built, so the cast is disabled the way
+    // `action_t::check_spell` disables any action whose spell is not ok.
+    if ( data().ok() && !p->spec.sigil_of_spite_damage->ok() )
+    {
+      background = true;
+      return;
+    }
+
     if ( data().ok() && !p->active.sigil_of_spite )
     {
       p->active.sigil_of_spite = p->get_background_action<sigil_of_spite_sigil_t>(
@@ -5491,12 +5704,44 @@ struct sigil_of_spite_t : public demon_hunter_spell_t
   void execute() override
   {
     demon_hunter_spell_t::execute();
-    debug_cast<demon_hunter_sigil_t*>( dh()->active.sigil_of_spite )->place_sigil( target );
+    // Null when the damage spell outlevels the talent - see the constructor.
+    if ( auto* sigil = dh()->active.sigil_of_spite )
+      debug_cast<demon_hunter_sigil_t*>( sigil )->place_sigil( target );
     dh()->buff.reavers_glaive->trigger();
   }
 
   std::unique_ptr<expr_t> create_expression( util::string_view name ) override
   {
+    /*
+     * BracketSim legacy compatibility: THE SIGIL MAY NOT EXIST.
+     *
+     * The constructor disables this cast when the talent is selectable but its
+     * damage spell (389860, Spell Level 48) is not - a level 45 Vengeance demon
+     * hunter, the author's own a test character. It returns early, so `active.sigil_of_spite`
+     * stays null.
+     *
+     * The default action list asks anyway: `action.sigil_of_spite.placed`
+     * appears on six lines, and every one routed straight through a null
+     * `debug_cast` into `create_sigil_expression`, which reads `sigil_delay` off
+     * `this`. That is a null dereference at APL-parse time, and the whole run
+     * died with no output at all - exit 139, not an error message.
+     *
+     * The module already knows the right answer for a sigil that is not there:
+     * `demon_hunter_t::create_expression` returns constant false when
+     * `find_action( "sigil_of_spite" )` finds nothing. A sigil that can never be
+     * placed is never placed, and its delay is zero, so answer the same way
+     * rather than falling through to the base class, which would throw on names
+     * only a sigil understands.
+     */
+    if ( !dh()->active.sigil_of_spite )
+    {
+      if ( util::str_compare_ci( name, "sigil_placed" ) || util::str_compare_ci( name, "placed" ) )
+        return expr_t::create_constant( name, false );
+      if ( util::str_compare_ci( name, "activation_time" ) || util::str_compare_ci( name, "delay" ) )
+        return expr_t::create_constant( name, 0.0 );
+      return demon_hunter_spell_t::create_expression( name );
+    }
+
     if ( auto e = debug_cast<demon_hunter_sigil_t*>( dh()->active.sigil_of_spite )->create_sigil_expression( name ) )
       return e;
 
@@ -5514,6 +5759,14 @@ struct the_hunt_dot_t : public demon_hunter_spell_t
     dual         = true;
     aoe          = as<int>( p->spec.the_hunt->effectN( 2 ).trigger()->effectN( 1 ).base_value() );
     dot_behavior = DOT_NONE;
+
+    // BracketSim legacy compatibility: the conduit Unnatural Malice (281)
+    // raises the damage over time The Hunt leaves behind, and nothing else
+    // about it. Spell 344358's effect 1 is a periodic-damage modifier.
+    //
+    // RE-HOMED on the upstream merge of 19 September 2026: this struct used to
+    // be nested inside the_hunt_base_t and upstream lifted it to top level.
+    base_td_multiplier *= 1.0 + p->legacy_conduits.percent( 281 );
   }
 };
 
@@ -5521,6 +5774,7 @@ struct the_hunt_base_t
   : public voidrush_trigger_t<hungering_slash_trigger_t<
         unbound_chaos_trigger_t<inertia_trigger_trigger_t<exergy_trigger_t<demon_hunter_spell_t>>>>>
 {
+
   struct the_hunt_damage_t : public demon_hunter_spell_t
   {
     the_hunt_damage_t( util::string_view n, demon_hunter_t* p )
@@ -5571,6 +5825,15 @@ struct the_hunt_base_t
     dh()->buff.reavers_glaive->trigger();
 
     dh()->buff.empowered_eye_beam->trigger();
+
+    // BracketSim legacy compatibility: Blazing Slaughter. The Hunt wraps the
+    // Demon Hunter in an Immolation Aura and grants Agility per enemy struck.
+    if ( dh()->shadowlands_legacy.blazing_slaughter )
+    {
+      dh()->buff.immolation_aura->trigger();
+      dh()->buff.legacy_blazing_slaughter->trigger(
+          std::max( 1, as<int>( dh()->sim->target_non_sleeping_list.size() ) ) );
+    }
   }
 
   timespan_t travel_time() const override
@@ -5621,6 +5884,21 @@ struct the_hunt_t : public the_hunt_base_t
       return false;
     }
     return the_hunt_base_t::action_ready();
+  }
+
+  void execute() override
+  {
+    the_hunt_base_t::execute();
+
+    // BracketSim legacy compatibility: The Hunt is the Night Fae demon hunter ability and survived as a talent.
+    // Hooked on the_hunt_t rather than on the_hunt_base_t, which Predator's
+    // Wake also derives from and which is a different ability.
+    //
+    // Fires the soulbind traits that ride this covenant's class ability.
+    if ( dh()->shadowlands_legacy.legacy_shadowlands_enabled &&
+         util::str_compare_ci( dh()->legacy_covenant.chosen, "night_fae" ) )
+      player->legacy_soulbinds.covenant_ability_cast(
+          player, legacy_soulbind::COVENANT_NIGHT_FAE, cooldown );
   }
 };
 
@@ -7076,6 +7354,14 @@ struct blade_dance_base_t
     {
       double m = base_t::composite_da_multiplier( s );
       m *= 1.0 + dh()->talent.havoc.first_blood->effectN( 1 ).percent();
+
+      // BracketSim legacy compatibility: the conduit Dancing with Fate (151)
+      // pays out on the FINAL slash of Blade Dance only, which is what
+      // last_attack marks. Shadowlands reached it through the conduit spell's
+      // family mask; 339228 is not in Midnight, so the flag is the gate.
+      if ( last_attack )
+        m *= 1.0 + dh()->legacy_conduits.percent( 151 );
+
       return m;
     }
 
@@ -7120,6 +7406,18 @@ struct blade_dance_base_t
       glaive_tempest_targets = as<unsigned>( p->talent.havoc.glaive_tempest->effectN( 2 ).base_value() );
       if ( p->talent.havoc.first_blood->ok() )
         target_filter_callback = secondary_targets_only();
+    }
+
+    // BracketSim legacy compatibility: the conduit Dancing with Fate (151),
+    // the non-First-Blood half of Blade Dance. Same gate: the final slash only.
+    double composite_da_multiplier( const action_state_t* s ) const override
+    {
+      double m = demon_hunter_attack_t::composite_da_multiplier( s );
+
+      if ( last_attack )
+        m *= 1.0 + dh()->legacy_conduits.percent( 151 );
+
+      return m;
     }
 
     void impact( action_state_t* s ) override
@@ -7236,7 +7534,16 @@ struct blade_dance_base_t
 
     base_t::execute();
 
+    // Legacy Azerite: Revolving Blades cheapens the next Blade Dance, one stack
+    // per enemy struck by the final slash. Hooked on the parent cast rather than
+    // on a damage child: which child actually swings depends on First Blood.
+    if ( dh()->azerite.revolving_blades.ok() )
+      dh()->buff.revolving_blades->trigger( std::max( 1, as<int>( dh()->sim->target_non_sleeping_list.size() ) ) );
+
     dh()->buff.chaos_theory->trigger();
+    // BracketSim legacy compatibility: the Chaos Theory legendary shares its
+    // name with the current talent, rolls its own chance, and stacks with it.
+    dh()->buff.legacy_chaos_theory->trigger();
 
     // Metamorphosis benefit and Essence Break stats tracking
     if ( dh()->buff.metamorphosis->up() )
@@ -7488,6 +7795,12 @@ struct chaos_strike_base_t
         chance += dh()->buff.chaos_theory->data().effectN( 2 ).percent();
       }
 
+      // BracketSim legacy compatibility: Chaos Theory (Shadowlands runeforge).
+      if ( dh()->buff.legacy_chaos_theory->check() )
+      {
+        chance += dh()->buff.legacy_chaos_theory->data().effectN( 2 ).percent();
+      }
+
       if ( dh()->talent.havoc.critical_chaos->ok() )
       {
         // DFALPHA TOCHECK -- Double check this uses the correct crit calculations
@@ -7524,10 +7837,15 @@ struct chaos_strike_base_t
       base_t::impact( s );
 
       // Relentless Onslaught cannot self-proc and is delayed by ~300ms after the normal OH impact
-      if ( dh()->talent.havoc.relentless_onslaught->ok() && result_is_hit( s->result ) && may_refund &&
-           !parent->from_onslaught )
+      // BracketSim legacy compatibility: the conduit Relentless Onslaught (150)
+      // adds its chance to the modern talent's, and works perfectly well
+      // WITHOUT the talent - taking one and not the other is a real choice a
+      // player makes, so neither is allowed to gate the other.
+      if ( ( dh()->talent.havoc.relentless_onslaught->ok() || dh()->legacy_conduits.has( 150 ) ) &&
+           result_is_hit( s->result ) && may_refund && !parent->from_onslaught )
       {
         double chance = dh()->talent.havoc.relentless_onslaught->effectN( 1 ).percent();
+        chance += dh()->legacy_conduits.percent( 150 );
         if ( dh()->cooldown.relentless_onslaught_icd->up() && dh()->rng().roll( chance ) )
         {
           make_event<delayed_execute_event_t>( *sim, dh(), dh()->active.relentless_onslaught, target, this->delay );
@@ -7609,6 +7927,11 @@ struct chaos_strike_base_t
     {
       dh()->spawn_soul_fragment( dh()->proc.soul_fragment_from_demonic_appetite, soul_fragment::LESSER );
     }
+
+    // BracketSim legacy compatibility: Seething Power stacks Agility on every
+    // Chaos Strike / Annihilation.
+    if ( dh()->azerite.seething_power.ok() )
+      dh()->buff.seething_power->trigger();
 
     if ( dh()->talent.aldrachi_reaver.broken_spirit->ok() &&
          rng().roll( dh()->talent.aldrachi_reaver.broken_spirit->effectN( 4 ).percent() ) )
@@ -7774,6 +8097,16 @@ struct demon_blades_t : public demon_hunter_attack_t
     energize_delta = energize_amount * data().effectN( 2 ).m_delta();
   }
 
+  // Legacy Azerite: Chaotic Transformation
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = demon_hunter_attack_t::bonus_da( s );
+
+    b += dh()->azerite.legacy_chaotic_transformation.value( 2 );
+
+    return b;
+  }
+
   double composite_energize_amount( const action_state_t* s ) const override
   {
     double ea = base_t::composite_energize_amount( s );
@@ -7790,7 +8123,7 @@ struct demon_blades_t : public demon_hunter_attack_t
   {
     base_t::impact( s );
 
-    if ( dh()->spec.burning_wound_debuff->ok() )
+    if ( dh()->spec.burning_wound_debuff->ok() || dh()->shadowlands_legacy.burning_wound )
     {
       dh()->active.burning_wound->execute_on_target( s->target );
     }
@@ -7955,6 +8288,10 @@ struct fel_rush_t : public inertia_trigger_t<demon_hunter_attack_t>
     base_teleport_distance                = execute_action->radius - 5;
     movement_directionality               = movement_direction_type::OMNI;
     p->buff.fel_rush_move->distance_moved = base_teleport_distance;
+
+    // BracketSim legacy compatibility: Erratic Fel Core.
+    if ( p->shadowlands_legacy.erratic_fel_core )
+      cooldown->duration *= 1.0 + p->find_spell( 337685 )->effectN( 1 ).percent();
 
     // Add damage modifiers in fel_rush_damage_t, not here.
   }
@@ -8186,6 +8523,14 @@ struct soul_cleave_t
         m *= 1.0 + dh()->talent.vengeance.focused_cleave->effectN( 1 ).percent();
       }
 
+      // BracketSim legacy compatibility: Soul Furnace (conduit 172) pays out
+      // only at the tenth stack, and pays out once. The expire lives in the
+      // parent's execute() so it happens after every target is hit.
+      if ( dh()->buff.legacy_soul_furnace->at_max_stacks() )
+      {
+        m *= 1.0 + dh()->buff.legacy_soul_furnace->check_value();
+      }
+
       return m;
     }
   };
@@ -8237,10 +8582,65 @@ struct soul_cleave_t
 
     trigger_untethered_rage( fragments_consumed );
 
+    // BracketSim legacy compatibility: Fiery Soul pulls Fiery Brand forward for
+    // every fragment Soul Cleave ate; Razelikh's Defilement pulls a Sigil
+    // forward once per cast.
+    if ( dh()->shadowlands_legacy.fiery_soul )
+      dh()->get_cooldown( "fiery_brand" )->adjust(
+          -timespan_t::from_seconds( dh()->find_spell( 337547 )->effectN( 1 ).base_value() ) *
+          fragments_consumed );
+
+    // BracketSim legacy compatibility: Razelikh's Defilement shortens "a random
+    // Sigil", and cooldown_t::adjust returns immediately on a cooldown that is
+    // already up - so aiming at Sigil of Flame unconditionally spent most of
+    // its procs on a cooldown that was ready. Shadowlands collected the sigils
+    // that were DOWN and picked among those; this does the same over the five
+    // sigils Midnight ships.
+    if ( dh()->shadowlands_legacy.razelikhs_defilement )
+    {
+      std::vector<cooldown_t*> sigils_down;
+      for ( cooldown_t* cd : { dh()->cooldown.sigil_of_flame, dh()->cooldown.sigil_of_spite,
+                               dh()->cooldown.sigil_of_misery, dh()->cooldown.sigil_of_silence,
+                               dh()->cooldown.sigil_of_chains } )
+      {
+        // ongoing(), not down(). cooldown_t::down() means "has zero charges
+        // left", so on a Sigil that carries a spare charge it is false while
+        // the cooldown is still running - which is exactly the state a
+        // reduction is useful in, and exactly the state that made this
+        // runeforge measure nothing at all.
+        if ( cd && cd->ongoing() )
+          sigils_down.push_back( cd );
+      }
+
+      if ( !sigils_down.empty() )
+      {
+      // Spell 337544 carries Max Aura Level 60, and player_t::find_spell REJECTS a
+      // spell whose max aura level is below the player's - it returns
+      // not_found, whose every effect reads zero. That is why this measured
+      // exactly nothing on a level 90 probe while the flag, the host and the
+      // cooldown were all correct. dbc::find_spell is the same lookup without
+      // the level gate. Only two sites in the whole engine hit this; both are
+      // fixed, and both were fine at level 60 and below.
+        sigils_down[ rng().range( sigils_down.size() ) ]->adjust(
+            -timespan_t::from_seconds(
+                dbc::find_spell( dh(), 337544U )->effectN( 1 ).base_value() ), false );
+      }
+    }
+
     if ( dh()->talent.aldrachi_reaver.broken_spirit->ok() &&
          rng().roll( dh()->talent.aldrachi_reaver.broken_spirit->effectN( 3 ).percent() ) )
     {
       dh()->spawn_soul_fragment( dh()->proc.soul_fragment_from_broken_spirit, soul_fragment::LESSER );
+    }
+
+    // BracketSim legacy compatibility: Soul Furnace (conduit 172) is spent by
+    // the Soul Cleave it empowered. WITHOUT this the buff sits at ten stacks
+    // permanently and every Soul Cleave for the rest of the fight is
+    // amplified - the same defect that made Brutal Projectiles read +103% and
+    // Legacy of the Frost Witch read 99% uptime earlier in this port.
+    if ( dh()->buff.legacy_soul_furnace->at_max_stacks() )
+    {
+      dh()->buff.legacy_soul_furnace->expire();
     }
   }
 };
@@ -8299,6 +8699,14 @@ struct throw_glaive_t : public demon_hunter_attack_t
         if ( dh()->talent.havoc.serrated_glaive->ok() )
         {
           dh()->buff.serrated_glaive->trigger();
+        }
+
+        // BracketSim legacy compatibility: the Serrated Glaive CONDUIT (152)
+        // is a target debuff, not the self-buff the modern talent of the same
+        // name grants, so the two stack and neither replaces the other.
+        if ( dh()->legacy_conduits.has( 152 ) )
+        {
+          td( state->target )->debuffs.legacy_exposed_wound->trigger();
         }
       }
     }
@@ -8394,9 +8802,23 @@ struct throw_glaive_t : public demon_hunter_attack_t
         dh()->template get_data_entry<simple_sample_data_t, simple_data_t>( "throw_glaive", dh()->cd_waste_iter );
   }
 
+  double composite_da_multiplier( const action_state_t* s ) const override
+  {
+    double m = demon_hunter_attack_t::composite_da_multiplier( s );
+
+    // BracketSim legacy compatibility: Fel Bombardment.
+    m *= 1.0 + dh()->buff.legacy_fel_bombardment->check_stack_value();
+
+    return m;
+  }
+
   void execute() override
   {
     demon_hunter_attack_t::execute();
+
+    // BracketSim legacy compatibility: Fel Bombardment is spent by Throw Glaive.
+    if ( dh()->buff.legacy_fel_bombardment->check() )
+      dh()->buff.legacy_fel_bombardment->expire();
 
     if ( hit_any_target && furious_throws )
     {
@@ -8904,14 +9326,21 @@ struct immolation_aura_buff_t : public demon_hunter_buff_t<buff_t>
         ragefire_crit_accumulator( 0 ),
         growing_inferno_ticks( 0 ),
         growing_inferno_max_ticks( 0 ),
-        growing_inferno_multiplier( p->talent.havoc.growing_inferno->effectN( 1 ).percent() )
+        // BracketSim legacy compatibility: the conduit Growing Inferno (153)
+        // stacks with the modern talent of the same name and works without it.
+        growing_inferno_multiplier( p->talent.havoc.growing_inferno->effectN( 1 ).percent() +
+                                    p->legacy_conduits.percent( 153 ) )
     {
       set_cooldown( timespan_t::zero() );
       set_partial_tick( true );
       set_quiet( true );
 
-      if ( p->talent.havoc.growing_inferno->ok() )
-        growing_inferno_max_ticks = static_cast<int>( 10 / p->talent.havoc.growing_inferno->effectN( 1 ).percent() );
+      // The cap is 10 divided by the per-tick step, which is how Shadowlands
+      // wrote it too - it was a manual hotfix there, never in spell data. The
+      // combined step is used so the cap stays at ten times the base value
+      // whichever of the talent and the conduit is present.
+      if ( growing_inferno_multiplier > 0.0 )
+        growing_inferno_max_ticks = static_cast<int>( 10 / growing_inferno_multiplier );
 
       set_tick_callback( [ this, p ]( buff_t*, int, timespan_t ) {
         ragefire_crit_accumulator = 0;
@@ -9564,6 +9993,16 @@ demon_hunter_td_t::demon_hunter_td_t( player_t* target, demon_hunter_t& p )
       break;
   }
 
+  // BracketSim legacy compatibility: Serrated Glaive (conduit 152). Spell
+  // 339229 IS in Midnight's data and still carries its 10 second duration and
+  // its Eye Beam affected-spell set; only the VALUE has to come from the
+  // conduit rank table, because conduit values never lived on the spell.
+  debuffs.legacy_exposed_wound =
+      make_buff( *this, "exposed_wound", p.find_spell( 339229 ) )
+          ->set_default_value( p.legacy_conduits.percent( 152 ) )
+          ->set_refresh_behavior( buff_refresh_behavior::DURATION )
+          ->set_chance( p.legacy_conduits.has( 152 ) ? 1.0 : 0.0 );
+
   // TODO: make this conditional on hero spec
   debuffs.reavers_mark =
       make_buff( *this, "reavers_mark", p.hero_spec.reavers_mark )
@@ -9717,9 +10156,207 @@ void demon_hunter_t::copy_from( player_t* source )
 
 // demon_hunter_t::create_action ============================================
 
+namespace actions
+{
+namespace spells
+{
+// BracketSim legacy compatibility: Shadowlands covenant abilities ==========
+// Damage, cooldown and cost come from the covenant spells themselves, which
+// still resolve in current client data.
+
+// BracketSim legacy compatibility: the conduit Repeat Decree (187) makes
+// Elysian Decree go off a second time, for a SHARE of its damage rather than
+// all of it - the rank table's values are negative (-85 at rank 1 through -64
+// at rank 15) and Shadowlands applied them as 1.0 + percent(), so the echo
+// lands for 15% to 36% of the original.
+//
+// The whole chain still resolves in this build, so nothing here is hard-coded:
+// 307046 effect 2 triggers 339893, whose effect 2 carries both the one second
+// delay and the echo's own spell, 339894.
+struct legacy_repeat_decree_t final : public demon_hunter_spell_t
+{
+  legacy_repeat_decree_t( util::string_view n, demon_hunter_t* p, const spell_data_t* s )
+    : demon_hunter_spell_t( n, p, s )
+  {
+    background = dual = true;
+    aoe = -1;
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 187 );
+  }
+};
+
+struct legacy_elysian_decree_t final : public demon_hunter_spell_t
+{
+  // BracketSim legacy (27 Sep 2026): the cast (306830) only places the sigil - dummy effects and an area trigger -
+  // so the old port dealt NOTHING (60 Havoc/Vengeance Kyrian: 5.4 casts, 0%). The damage is 307046 (378% AP
+  // arcane, every enemy in 8 yd) when the sigil activates, the cast's own duration (2 s) later.
+  action_t* sigil_damage;
+  action_t* repeat_decree;
+  timespan_t repeat_decree_delay;
+
+  legacy_elysian_decree_t( demon_hunter_t* p, std::string_view options_str )
+    : demon_hunter_spell_t( "elysian_decree", p, p->legacy_covenant.elysian_decree, options_str ),
+      sigil_damage( nullptr ),
+      repeat_decree( nullptr ),
+      repeat_decree_delay( timespan_t::zero() )
+  {
+    aoe = -1;
+
+    sigil_damage = p->get_background_action<legacy_repeat_decree_t>( "elysian_decree_sigil", p->find_spell( 307046 ) );
+    // legacy_repeat_decree_t carries Repeat Decree's conduit multiplier; the sigil itself must not.
+    sigil_damage->base_multiplier /= 1.0 + p->legacy_conduits.percent( 187 );
+    add_child( sigil_damage );
+
+    if ( p->legacy_conduits.has( 187 ) )
+    {
+      const spell_data_t* driver = p->find_spell( 307046 )->effectN( 2 ).trigger();
+      const spell_data_t* echo   = driver->effectN( 2 ).trigger();
+      if ( driver->ok() && echo->ok() )
+      {
+        repeat_decree_delay = timespan_t::from_millis( driver->effectN( 2 ).misc_value1() );
+        repeat_decree = p->get_background_action<legacy_repeat_decree_t>(
+            "elysian_decree_repeat_decree", echo );
+        add_child( repeat_decree );
+      }
+    }
+  }
+
+  void execute() override
+  {
+    demon_hunter_spell_t::execute();
+
+    {
+      player_t* t = target;
+      make_event( *sim, data().duration(), [ this, t ]() { sigil_damage->execute_on_target( t ); } );
+    }
+
+    // BracketSim legacy compatibility: Repeat Decree's second sigil.
+    if ( repeat_decree )
+    {
+      player_t* t = target;
+      make_event( *sim, repeat_decree_delay, [ this, t ]() {
+        repeat_decree->execute_on_target( t );
+      } );
+    }
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_KYRIAN,
+                                            cooldown );
+
+    // BracketSim legacy compatibility: Blind Faith shatters extra Lesser Souls
+    // and turns the ones consumed into Versatility.
+    if ( dh()->shadowlands_legacy.blind_faith )
+    {
+      dh()->spawn_soul_fragment( dh()->proc.soul_fragment_from_soul_sigils, soul_fragment::LESSER,
+                                 as<unsigned>( dh()->find_spell( 355893 )->effectN( 1 ).base_value() ) );
+      dh()->buff.legacy_blind_faith->trigger();
+    }
+  }
+};
+
+struct legacy_sinful_brand_t final : public demon_hunter_spell_t
+{
+  legacy_sinful_brand_t( demon_hunter_t* p, std::string_view options_str )
+    : demon_hunter_spell_t( "sinful_brand", p, p->legacy_covenant.sinful_brand, options_str )
+  {
+    // BracketSim legacy compatibility: Agony Gaze sharpens Sinful Brand.
+    if ( p->shadowlands_legacy.agony_gaze )
+      base_multiplier *= 1.0 + p->find_spell( 355886 )->effectN( 1 ).percent();
+
+    // BracketSim legacy compatibility: the conduit Increased Scrutiny (198)
+    // shortens Sinful Brand's cooldown. Effect 1 is a flat cooldown modifier,
+    // so the rank value is MILLISECONDS and already negative in the table
+    // (-5000 at rank 1 through -12000 at rank 15) - hence a plus here.
+    if ( p->legacy_conduits.has( 198 ) )
+      cooldown->duration += timespan_t::from_millis( p->legacy_conduits.value( 198 ) );
+  }
+
+  void execute() override
+  {
+    demon_hunter_spell_t::execute();
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_VENTHYR,
+                                            cooldown );
+  }
+};
+
+struct legacy_fodder_to_the_flame_damage_t final : public demon_hunter_spell_t
+{
+  legacy_fodder_to_the_flame_damage_t( demon_hunter_t* p )
+    : demon_hunter_spell_t( "fodder_to_the_flame_damage", p, p->find_spell( 350631 ) )
+  {
+    background = true;
+    aoe = -1;
+  }
+};
+
+struct legacy_demonic_oath_brand_t final : public demon_hunter_spell_t
+{
+  legacy_demonic_oath_brand_t( demon_hunter_t* p )
+    : demon_hunter_spell_t( "fiery_brand_demonic_oath", p, p->find_spell( 207771 ) )
+  {
+    background = true;
+    // Effect 1 of the runeforge is the extra duration it gave the brand.
+    dot_duration += timespan_t::from_millis( p->find_spell( 355996 )->effectN( 1 ).base_value() );
+  }
+};
+
+struct legacy_fodder_to_the_flame_t final : public demon_hunter_spell_t
+{
+  action_t* damage;
+  action_t* brand;
+
+  legacy_fodder_to_the_flame_t( demon_hunter_t* p, std::string_view options_str )
+    : demon_hunter_spell_t( "fodder_to_the_flame", p, p->legacy_covenant.fodder_to_the_flame, options_str ),
+      damage( new legacy_fodder_to_the_flame_damage_t( p ) ),
+      brand( p->shadowlands_legacy.demonic_oath ? new legacy_demonic_oath_brand_t( p ) : nullptr )
+  {
+    add_child( damage );
+    if ( brand )
+      add_child( brand );
+  }
+
+  void execute() override
+  {
+    demon_hunter_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NECROLORD,
+                                            cooldown );
+
+    // The demon it summoned for you to kill is not modelled: the sim has no
+    // spare body, so the explosion it died in is fired straight away.
+    damage->execute_on_target( target );
+
+    // BracketSim legacy compatibility: Demonic Oath brands what the explosion
+    // catches. Only the brand's own damage over time is applied - the damage
+    // reduction on the rest of the aura is defensive.
+    if ( brand )
+      brand->execute_on_target( target );
+  }
+};
+
+}  // namespace spells
+}  // namespace actions
+
 action_t* demon_hunter_t::create_action( util::string_view name, util::string_view options_str )
 {
   using namespace actions::heals;
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  if ( name == "elysian_decree" && legacy_covenant.elysian_decree->ok() )
+    return new actions::spells::legacy_elysian_decree_t( this, options_str );
+  if ( name == "sinful_brand" && legacy_covenant.sinful_brand->ok() )
+    return new actions::spells::legacy_sinful_brand_t( this, options_str );
+  if ( name == "fodder_to_the_flame" && legacy_covenant.fodder_to_the_flame->ok() )
+    return new actions::spells::legacy_fodder_to_the_flame_t( this, options_str );
 
   if ( name == "soul_barrier" )
     return new soul_barrier_t( this, options_str );
@@ -9891,10 +10528,100 @@ void demon_hunter_t::create_buffs()
 
   using namespace buffs;
 
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite trait buffs.
+  {
+    // Furious Gaze has no trigger reference in its own trait data, so the buff
+    // spell is named directly, exactly as Battle for Azeroth SimC did.
+    const spell_data_t* furious_gaze_buff =
+        azerite.legacy_furious_gaze.spell()->ok() ? find_spell( 273232 ) : spell_data_t::not_found();
+    buff.legacy_furious_gaze = make_buff<stat_buff_t>( this, "legacy_furious_gaze", furious_gaze_buff )
+        ->add_stat( STAT_HASTE_RATING, azerite.legacy_furious_gaze.value( 1 ) )
+        ->set_refresh_behavior( buff_refresh_behavior::PANDEMIC )
+        ->set_trigger_spell( azerite.legacy_furious_gaze );
+
+    // The trigger chain no longer resolves in current client data, so the buff
+    // spell is named directly: 279581 -> 279582 -> 279584.
+    const spell_data_t* revolving_blades_buff =
+        azerite.revolving_blades.spell()->ok() ? find_spell( 279584 ) : spell_data_t::not_found();
+    buff.revolving_blades = make_buff<buff_t>( this, "revolving_blades", revolving_blades_buff )
+        ->set_default_value( revolving_blades_buff->effectN( 1 ).resource( RESOURCE_FURY ) )
+        ->set_chance( azerite.revolving_blades.ok() ? 1.0 : 0.0 );
+
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    buff.legacy_blazing_slaughter =
+        make_buff( this, "legacy_blazing_slaughter", find_spell( 355892 ) )
+            ->set_default_value_from_effect_type( A_MOD_TOTAL_STAT_PERCENTAGE )
+            ->set_pct_buff_type( STAT_PCT_BUFF_AGILITY )
+            ->set_chance( shadowlands_legacy.blazing_slaughter ? 1.0 : 0.0 );
+    buff.legacy_chaos_theory =
+        make_buff( this, "legacy_chaos_theory", find_spell( 337567 ) )
+            ->set_default_value_from_effect( 1 )
+            ->set_cooldown( timespan_t::zero() )
+            ->set_chance( shadowlands_legacy.chaos_theory
+                              ? find_spell( 337551 )->effectN( 1 ).percent()
+                              : 0.0 );
+    // The proc rate was taken off the primary spell in Shadowlands; the 20%
+    // Shadowlands SimC settled on is kept here rather than invented anew.
+    buff.legacy_fel_bombardment =
+        make_buff( this, "legacy_fel_bombardment", find_spell( 337849 ) )
+            ->set_chance( shadowlands_legacy.fel_bombardment ? 0.2 : 0.0 );
+    buff.legacy_spirit_of_the_darkness_flame =
+        make_buff( this, "legacy_spirit_of_the_darkness_flame", find_spell( 337542 ) )
+            ->set_default_value_from_effect( 1 )
+            ->set_chance( shadowlands_legacy.spirit_of_the_darkness_flame ? 1.0 : 0.0 );
+    // BracketSim legacy compatibility: Soul Furnace (conduit 172). Buff spell
+    // 339424 is absent from Midnight, so its 30 second duration and 10 stack
+    // cap are read from the archived 9.2.7 client data - the same source
+    // legacy_conduits.hpp already carries its rank table from. Without them
+    // the buff would sit at one stack forever and never reach the threshold
+    // that is the whole conduit.
+    buff.legacy_soul_furnace =
+        make_buff( this, "legacy_soul_furnace", find_spell( 339424 ) )
+            ->set_duration( timespan_t::from_seconds( 30.0 ) )
+            ->set_max_stack( 10 )
+            ->set_default_value( legacy_conduits.percent( 172 ) )
+            ->set_chance( legacy_conduits.has( 172 ) ? 1.0 : 0.0 );
+    buff.legacy_blind_faith =
+        make_buff( this, "legacy_blind_faith", find_spell( 355894 ) )
+            ->set_default_value( find_spell( 355893 )->effectN( 2 ).percent() )
+            ->set_pct_buff_type( STAT_PCT_BUFF_VERSATILITY )
+            ->set_chance( shadowlands_legacy.blind_faith ? 1.0 : 0.0 );
+
+    const spell_data_t* seething_power_trigger =
+        azerite.seething_power.spell()->effectN( 1 ).trigger();
+    buff.seething_power = make_buff<stat_buff_t>( this, "seething_power",
+                                                  seething_power_trigger->effectN( 1 ).trigger() )
+        ->add_stat( STAT_AGILITY, azerite.seething_power.value( 1 ) )
+        ->set_refresh_behavior( buff_refresh_behavior::DISABLED )
+        ->set_trigger_spell( seething_power_trigger );
+
+    // 278493 -> 278729 (the 1.5s driver) -> 278736 (the stacking buff).
+    const spell_data_t* thirsting_blades_trigger =
+        azerite.thirsting_blades.spell()->ok() ? find_spell( 278729 ) : spell_data_t::not_found();
+    const spell_data_t* thirsting_blades_buff =
+        azerite.thirsting_blades.spell()->ok() ? find_spell( 278736 ) : spell_data_t::not_found();
+    buff.thirsting_blades = make_buff<buff_t>( this, "thirsting_blades", thirsting_blades_buff )
+        ->set_default_value( azerite.thirsting_blades.value( 1 ) )
+        ->set_chance( azerite.thirsting_blades.ok() ? 1.0 : 0.0 );
+    buff.thirsting_blades_driver = make_buff<buff_t>( this, "thirsting_blades_driver",
+                                                      thirsting_blades_trigger )
+        ->set_quiet( true )
+        ->set_chance( azerite.thirsting_blades.ok() ? 1.0 : 0.0 )
+        ->set_tick_time_behavior( buff_tick_time_behavior::UNHASTED )
+        ->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) { buff.thirsting_blades->trigger(); } );
+  }
+
   // General ================================================================
 
   buff.demon_soul           = make_buff( this, "demon_soul", spell.demon_soul );
-  buff.empowered_demon_soul = make_buff( this, "empowered_demon_soul", spell.demon_soul_empowered );
+  // BracketSim legacy compatibility: the conduit Brooding Pool (200) lengthens
+  // the Empowered Demon Soul that Fodder to the Flame hands out. Shadowlands
+  // used apply_affecting_conduit on this buff, which substitutes the rank value
+  // into effect 1 - a flat duration modifier, so the value is MILLISECONDS and
+  // not a percent. legacy_conduits.value() is the raw table entry.
+  buff.empowered_demon_soul = make_buff( this, "empowered_demon_soul", spell.demon_soul_empowered )
+      ->set_duration( spell.demon_soul_empowered->duration() +
+                      timespan_t::from_millis( legacy_conduits.value( 200 ) ) );
   buff.immolation_aura      = make_buff<buffs::immolation_aura_buff_t>( this );
   buff.metamorphosis        = make_buff<buffs::metamorphosis_buff_t>( this );
   buff.soul_fragments       = make_buff( this, "soul_fragments", spec.soul_fragments_buff )
@@ -10434,6 +11161,10 @@ void demon_hunter_t::create_options()
 {
   player_t::create_options();
 
+  add_option( opt_bool( "demonhunter.legacy_shadowlands_enabled",
+                        shadowlands_legacy.legacy_shadowlands_enabled ) );
+  add_option( opt_string( "demonhunter.legacy_covenant", legacy_covenant.chosen ) );
+  add_option( opt_string( "demonhunter.legacy_conduits", legacy_conduits.option ) );
   add_option( opt_float( "demonhunter.target_reach", options.target_reach ) );
   add_option( opt_deprecated( "target_reach", "demonhunter.target_reach" ) );
   add_option( opt_float( "demonhunter.movement_direction_factor", options.movement_direction_factor, 1.0, 2.0 ) );
@@ -10751,6 +11482,79 @@ void demon_hunter_t::init_scaling()
 void demon_hunter_t::init_spells()
 {
   base_t::init_spells();
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+  azerite.legacy_chaotic_transformation = find_azerite_spell( "Chaotic Transformation" );
+  azerite.eyes_of_rage                  = find_azerite_spell( "Eyes of Rage" );
+  azerite.legacy_furious_gaze           = find_azerite_spell( "Furious Gaze" );
+  azerite.revolving_blades              = find_azerite_spell( "Revolving Blades" );
+  azerite.seething_power                = find_azerite_spell( "Seething Power" );
+  azerite.thirsting_blades              = find_azerite_spell( "Thirsting Blades" );
+
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
+  // off the bonus id the original legendary item carried.
+  auto legacy = [ this ]( int bonus_id ) {
+    return shadowlands_legacy.legacy_shadowlands_enabled &&
+           range::any_of( items, [ bonus_id ]( const item_t& item ) {
+             return range::contains( item.parsed.bonus_id, bonus_id );
+           } );
+  };
+
+  // BracketSim legacy compatibility: Unity (bonus 8120), the 9.2 legendary whose
+  // effect is whichever covenant legendary matches the covenant you are in. A
+  // real Unity item carries 8120 and NOT the legendary's own bonus id, so a
+  // power keyed only off its own id misses every Unity wearer. Both routes are
+  // checked here, and Unity opens only the one door its covenant names.
+  auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
+  {
+    return legacy( bonus_id ) ||
+           ( legacy( 8120 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
+  };
+
+  shadowlands_legacy.blazing_slaughter           = legacy_unity( 7698, "night_fae" );
+  shadowlands_legacy.burning_wound               = legacy( 7219 );
+  shadowlands_legacy.chaos_theory                = legacy( 7050 );
+  shadowlands_legacy.collective_anguish          = legacy( 7041 );
+  shadowlands_legacy.darker_nature               = legacy( 7218 );
+  shadowlands_legacy.darkest_hour                = legacy( 7044 );
+  shadowlands_legacy.darkglare_medallion         = legacy( 7043 );
+  shadowlands_legacy.erratic_fel_core            = legacy( 7051 );
+  shadowlands_legacy.fel_bombardment             = legacy( 7052 );
+  shadowlands_legacy.fel_flame_fortification     = legacy( 7047 );
+  shadowlands_legacy.fiery_soul                  = legacy( 7048 );
+  shadowlands_legacy.razelikhs_defilement        = legacy( 7046 );
+  shadowlands_legacy.spirit_of_the_darkness_flame = legacy( 7045 );
+  shadowlands_legacy.agony_gaze                  = legacy_unity( 7681, "venthyr" );
+  shadowlands_legacy.blind_faith                 = legacy_unity( 7699, "kyrian" );
+  shadowlands_legacy.demonic_oath                = legacy_unity( 7700, "necrolord" );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  auto covenant = [ this ]( std::string_view name, unsigned id ) {
+    return ( shadowlands_legacy.legacy_shadowlands_enabled &&
+             util::str_compare_ci( legacy_covenant.chosen, name ) )
+               ? find_spell( id )
+               : spell_data_t::not_found();
+  };
+
+  legacy_covenant.elysian_decree      = covenant( "kyrian", 306830 );
+  legacy_covenant.sinful_brand        = covenant( "venthyr", 317009 );
+  legacy_covenant.fodder_to_the_flame = covenant( "necrolord", 329554 );
+  legacy_covenant.the_hunt            = covenant( "night_fae", 323639 );
+
+  // Turn the id:rank option string into ranks. Without this the option is
+  // stored and then silently ignored: has() returns false for everything and
+  // every conduit on the class quietly does nothing.
+  legacy_conduits.parse();
+
+  // BracketSim legacy compatibility: report the covenant abilities this
+  // actor can cast, so player_t::init_actions() can put them into the
+  // rotation. SimulationCraft's own action lists never press them.
+  if ( legacy_covenant.elysian_decree->ok() )
+    legacy_apl_actions.emplace_back( "elysian_decree" );
+  if ( legacy_covenant.sinful_brand->ok() )
+    legacy_apl_actions.emplace_back( "sinful_brand" );
+  if ( legacy_covenant.fodder_to_the_flame->ok() )
+    legacy_apl_actions.emplace_back( "fodder_to_the_flame" );
 
   // Specialization =========================================================
 
@@ -11223,7 +12027,11 @@ void demon_hunter_t::init_spells()
 
   mastery.a_fire_inside = talent.havoc.a_fire_inside->effectN( 6 ).trigger();
 
-  spec.burning_wound_debuff                      = talent.havoc.burning_wound->effectN( 1 ).trigger();
+  spec.burning_wound_debuff                      =
+      talent.havoc.burning_wound->ok()
+          ? talent.havoc.burning_wound->effectN( 1 ).trigger()
+          : ( shadowlands_legacy.burning_wound ? find_spell( 346279 )->effectN( 1 ).trigger()
+                                               : spell_data_t::not_found() );
   spec.chaos_theory_buff                         = talent_spell_lookup( talent.havoc.chaos_theory, 390195 );
   spec.demon_blades                              = find_spell( 203555, DEMON_HUNTER_HAVOC );
   spec.demon_blades_damage                       = spec.demon_blades->effectN( 1 ).trigger();
@@ -11249,7 +12057,13 @@ void demon_hunter_t::init_spells()
   spec.unbound_chaos_buff                        = talent_spell_lookup( talent.havoc.unbound_chaos, 347462 );
   spec.cycle_of_hatred_buff                      = talent_spell_lookup( talent.havoc.cycle_of_hatred, 1214887 );
   spec.furious_throws_damage                     = talent_spell_lookup( talent.havoc.furious_throws, 393035 );
-  spec.collective_anguish                        = talent_spell_lookup( talent.havoc.collective_anguish, 393831 );
+  // BracketSim legacy compatibility: the Collective Anguish legendary grants
+  // the same summon as the current talent, so the spell has to resolve without
+  // the talent being taken.
+  spec.collective_anguish                        =
+      ( talent.havoc.collective_anguish->ok() || shadowlands_legacy.collective_anguish )
+          ? find_spell( 393831 )
+          : spell_data_t::not_found();
   spec.collective_anguish_damage                 = spec.collective_anguish->effectN( 1 ).trigger();
   spec.essence_break_proc_damage                 = talent_spell_lookup( talent.havoc.essence_break, 1245759 );
   spec.empowered_eye_beam_buff                   = talent_spell_lookup( talent.havoc.eternal_hunt_1, 1271144 );
@@ -11281,24 +12095,40 @@ void demon_hunter_t::init_spells()
 
   switch ( specialization() )
   {
+    // BracketSim legacy compatibility: The Hunt is a spec talent AND the Night
+    // Fae ability. Where no talent grants it, the covenant does - for every
+    // spec, including Vengeance, which has no talent version at all.
     case DEMON_HUNTER_DEVOURER:
-      spec.the_hunt        = talent.devourer.the_hunt;
+      spec.the_hunt        = talent.devourer.the_hunt.ok() ? talent.devourer.the_hunt.spell()
+                                                           : legacy_covenant.the_hunt;
       spec.the_hunt_impact = spec.the_hunt->effectN( 1 ).trigger();
       spec.the_hunt_dot    = spec.the_hunt_impact->effectN( 4 ).trigger();
       break;
     case DEMON_HUNTER_HAVOC:
-      spec.the_hunt        = talent.havoc.the_hunt;
+      spec.the_hunt        = talent.havoc.the_hunt.ok() ? talent.havoc.the_hunt.spell()
+                                                        : legacy_covenant.the_hunt;
       spec.the_hunt_impact = spec.the_hunt->effectN( 1 ).trigger();
       spec.the_hunt_dot    = spec.the_hunt_impact->effectN( 4 ).trigger();
       break;
     case DEMON_HUNTER_VENGEANCE:
-      spec.the_hunt        = spell_data_t::not_found();
-      spec.the_hunt_impact = spell_data_t::not_found();
-      spec.the_hunt_dot    = spell_data_t::not_found();
+      spec.the_hunt        = legacy_covenant.the_hunt;
+      spec.the_hunt_impact = spec.the_hunt->effectN( 1 ).trigger();
+      spec.the_hunt_dot    = spec.the_hunt_impact->effectN( 4 ).trigger();
       break;
     default:
       break;
   }
+
+  // BracketSim legacy compatibility: The Hunt is injected only when the
+  // covenant is its sole source. With the talent taken, the class's own action
+  // list already presses it and a second line would double-cast.
+  //
+  // This sits AFTER the talents are looked up on purpose. Read from the
+  // covenant block far above, both talents are still empty, so the test always
+  // passed and a talented demon hunter would have got two of them.
+  if ( legacy_covenant.the_hunt->ok() && !talent.havoc.the_hunt.ok() &&
+       !talent.devourer.the_hunt.ok() )
+    legacy_apl_actions.emplace_back( "the_hunt" );
 
   // Hero spec background spells
   hero_spec.reavers_mark                   = talent_spell_lookup( talent.aldrachi_reaver.reavers_mark, 442624 );
@@ -11507,7 +12337,11 @@ void demon_hunter_t::init_spells()
   {
     active.demon_blades = new demon_blades_t( this );
   }
-  if ( talent.havoc.relentless_onslaught->ok() )
+  // BracketSim legacy compatibility: the conduit Relentless Onslaught (150)
+  // uses these same actions. They MUST be built when the conduit is socketed
+  // even if the modern talent is not taken, or the trigger below dereferences
+  // a null action.
+  if ( talent.havoc.relentless_onslaught->ok() || legacy_conduits.has( 150 ) )
   {
     auto cs            = get_background_action<chaos_strike_t>( "chaos_strike_onslaught" );
     cs->from_onslaught = true;
@@ -11883,6 +12717,9 @@ void demon_hunter_t::create_cooldowns()
   cooldown.vengeful_retreat  = get_cooldown( "vengeful_retreat" );
   cooldown.metamorphosis     = get_cooldown( "metamorphosis" );
   cooldown.soul_splitter_icd = get_cooldown( "soul_splitter_icd" );
+  // BracketSim legacy compatibility: Darkest Hour.
+  cooldown.legacy_darkest_hour = get_cooldown( "legacy_darkest_hour" );
+  cooldown.legacy_darkest_hour->duration = find_spell( 331497 )->duration();
 
   // Devourer
   cooldown.consume         = get_cooldown( "consume" );
@@ -12062,7 +12899,27 @@ double demon_hunter_t::calculate_expected_max_health() const
 
 void demon_hunter_t::assess_damage( school_e school, result_amount_type dt, action_state_t* s )
 {
+  // BracketSim legacy compatibility: Fel Flame Fortification cuts magic damage
+  // while Immolation Aura is up. Applied before the hit lands, not after.
+  if ( shadowlands_legacy.fel_flame_fortification && buff.immolation_aura->check() &&
+       !dbc::is_school( school, SCHOOL_PHYSICAL ) )
+  {
+    s->result_amount *= 1.0 + find_spell( 217741 )->effectN( 1 ).percent();
+  }
+
   player_t::assess_damage( school, dt, s );
+
+  // BracketSim legacy compatibility: Darkest Hour drops Darkness automatically
+  // once the Demon Hunter is low enough, on its own internal cooldown.
+  if ( shadowlands_legacy.darkest_hour && !cooldown.legacy_darkest_hour->down() &&
+       health_percentage() < find_spell( 337539 )->effectN( 1 ).base_value() )
+  {
+    if ( action_t* darkness = find_action( "darkness" ) )
+    {
+      cooldown.legacy_darkest_hour->start();
+      darkness->cooldown->reset( false );
+    }
+  }
 
   // Benefit tracking
   if ( s->action->may_parry )
@@ -12093,6 +12950,14 @@ void demon_hunter_t::assess_damage( school_e school, result_amount_type dt, acti
 void demon_hunter_t::combat_begin()
 {
   player_t::combat_begin();
+
+  // Legacy Azerite: Thirsting Blades ramps from the pull and is spent by Chaos
+  // Strike, so it starts at full stacks with its driver running.
+  if ( azerite.thirsting_blades.ok() )
+  {
+    buff.thirsting_blades->trigger( buff.thirsting_blades->max_stack() );
+    buff.thirsting_blades_driver->trigger();
+  }
 
   // Start event drivers
   if ( talent.vengeance.spirit_bomb->ok() )
@@ -12236,6 +13101,42 @@ void demon_hunter_t::recalculate_resource_max( resource_e r, gain_t* source )
 }
 
 // demon_hunter_t::reset ====================================================
+
+
+// BracketSim legacy compatibility: Vision of Perfection (Heart of Azeroth major
+// essence). The engine procs it and calls this; each spec fires its signature
+// cooldown early, at the fraction of its duration the essence grants.
+void demon_hunter_t::vision_of_perfection_proc()
+{
+  auto essence = find_azerite_essence( "Vision of Perfection" );
+  if ( !essence.enabled() )
+    return;
+
+  double mult = essence.spell( 1u )->effectN( 1 ).percent() +
+                essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
+
+  buff_t* window = nullptr;
+  switch ( specialization() )
+  {
+    case DEMON_HUNTER_HAVOC:
+      window = buff.metamorphosis;
+      break;
+    case DEMON_HUNTER_VENGEANCE:
+      window = buff.metamorphosis;
+      break;
+    default:
+      break;
+  }
+
+  if ( !window || mult <= 0 )
+    return;
+
+  timespan_t dur = window->buff_duration() * mult;
+  if ( window->check() )
+    window->extend_duration( dur );
+  else
+    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+}
 
 void demon_hunter_t::reset()
 {

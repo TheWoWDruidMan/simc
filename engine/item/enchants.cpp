@@ -151,6 +151,18 @@ void enchant::initialize_item_enchant( item_t& item, std::vector<stat_pair_t>& s
       {
         double value = 0;
 
+        // BracketSim: a weapon-damage enchant is only meaningful on a weapon,
+        // and item_t::weapon() returns nullptr for every other slot. Brutal
+        // Earthstorm Diamond (gem 25899, gem property 168, enchant 2834) is a
+        // META gem - it carries a weapon-damage component and it is socketed
+        // into a HELM. The four writes below then dereference a null weapon and
+        // the process dies with 0xC0000005 having printed nothing at all, which
+        // is what a level 30 twink in an old helm sees today.
+        if ( !item.weapon() )
+        {
+          break;
+        }
+
         // It's possible this enchant type ignores scaling entirely, but as only a single case has been tested so far
         // (adamantite sharpening stone, item id 23529, enchant id 2713) further verification is required
         if ( enchant.id_scaling == 0 || enchant.id_scaling == -1 )

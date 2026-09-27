@@ -728,6 +728,12 @@ struct fiend_melee_t : public priest_pet_melee_t
     // Mindbender inherits haste from the player
     timespan_t hasted_time = base_execute_time * player->cache.spell_cast_speed();
 
+    // BracketSim legacy compatibility: Rabid Shadows (conduit 114) makes the
+    // fiend swing faster. It divides rather than multiplies, because the value
+    // is attack speed and this is the time between swings.
+    if ( p().o().legacy_conduits.has( 114 ) )
+      hasted_time /= 1.0 + p().o().legacy_conduits.percent( 114 );
+
     return hasted_time;
   }
 
@@ -1201,13 +1207,161 @@ void priest_t::idol_of_yshaarj_check_and_expire()
   }
 }
 
+// BracketSim legacy compatibility: Pallid Command (runeforge bonus id 7729,
+// spell 356390). On a Necrolord priest the Unity wrist becomes this. Casting
+// Unholy Nova summons a Rattling Mage for 20s; every ally that damages a target
+// carrying Unholy Transfusion gives it a stack of Rigor Mortis (357165), worth
+// 2% damage each up to 50 stacks. The mage casts Unholy Bolt (356431) on repeat.
+struct legacy_rattling_mage_t final : public priest_pet_t
+{
+  legacy_rattling_mage_t( priest_t* owner ) : priest_pet_t( owner->sim, *owner, "rattling_mage", true )
+  {
+  }
+
+  void demise() override
+  {
+    priest_pet_t::demise();
+    o().buffs.legacy_rigor_mortis->expire();
+  }
+
+  void init_action_list() override
+  {
+    priest_pet_t::init_action_list();
+    get_action_priority_list( "default" )->add_action( "unholy_bolt" );
+  }
+
+  action_t* create_action( util::string_view name, util::string_view options_str ) override;
+};
+
+struct legacy_unholy_bolt_t final : public priest_pet_spell_t
+{
+  legacy_unholy_bolt_t( legacy_rattling_mage_t& p, util::string_view options )
+    : priest_pet_spell_t( "unholy_bolt", p, p.o().find_spell( 356431 ) )
+  {
+    parse_options( options );
+  }
+
+  double composite_da_multiplier( const action_state_t* s ) const override
+  {
+    double m = priest_pet_spell_t::composite_da_multiplier( s );
+    m *= 1.0 + p().o().buffs.legacy_rigor_mortis->check_stack_value();
+    return m;
+  }
+
+  void init() override
+  {
+    priest_pet_spell_t::init();
+    merge_pet_stats( p().o(), p(), *this );
+  }
+};
+
+action_t* legacy_rattling_mage_t::create_action( util::string_view name, util::string_view options_str )
+{
+  if ( name == "unholy_bolt" )
+    return new legacy_unholy_bolt_t( *this, options_str );
+
+  return priest_pet_t::create_action( name, options_str );
+}
+
+// BracketSim legacy compatibility: Kevin's Oozeling, the row 11 trait of the
+// Necrolord soulbind Plague Deviser Marileth. Unholy Nova summons it for 20s;
+// it casts Kevin's Wrath on repeat, and that attack leaves a debuff making the
+// target take 6% more damage from you.
+//
+// None of its three spells (352500 summon, 352520 Kevin's Wrath, 352528 the
+// debuff) survive in Midnight's DBC export, and Shadowlands SimulationCraft
+// never implemented this trait at all, so there is no prior art and no spell
+// data to read. Everything below is measured out of a live combat log:
+//
+//   spell power coefficient  0.1196   (12 hits, range 0.1191-0.1196)
+//   cast interval            1.62s    (median of 11 intervals)
+//   pet lifetime             20s      (from the trait's own tooltip)
+//   debuff                   +6% damage taken from you, refreshed per attack
+struct legacy_kevins_oozeling_t final : public priest_pet_t
+{
+  legacy_kevins_oozeling_t( priest_t* owner ) : priest_pet_t( owner->sim, *owner, "kevins_oozeling", true )
+  {
+  }
+
+  void demise() override
+  {
+    priest_pet_t::demise();
+    for ( auto t : o().sim->target_non_sleeping_list )
+    {
+      auto td = o().find_target_data( t );
+      if ( td && td->buffs.legacy_kevins_wrath )
+        td->buffs.legacy_kevins_wrath->expire();
+    }
+  }
+
+  void init_action_list() override
+  {
+    priest_pet_t::init_action_list();
+    get_action_priority_list( "default" )->add_action( "kevins_wrath" );
+  }
+
+  action_t* create_action( util::string_view name, util::string_view options_str ) override;
+};
+
+struct legacy_kevins_wrath_t final : public priest_pet_spell_t
+{
+  legacy_kevins_wrath_t( legacy_kevins_oozeling_t& p, util::string_view options )
+    : priest_pet_spell_t( "kevins_wrath", p, spell_data_t::nil() )
+  {
+    parse_options( options );
+
+    // Hand built, because the spell is not in current data. The numbers are the
+    // measured ones in the comment above the pet.
+    background         = false;
+    may_crit           = true;
+    school             = SCHOOL_NATURE;
+    spell_power_mod.direct = 0.1196;
+    base_execute_time  = 1.62_s;
+    // The measured cadence is already the hasted one, so it must not be hasted
+    // a second time on top.
+    cooldown->duration = timespan_t::zero();
+  }
+
+  timespan_t execute_time() const override
+  {
+    return base_execute_time;
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    priest_pet_spell_t::impact( s );
+
+    auto td = p().o().find_target_data( s->target );
+    if ( td && td->buffs.legacy_kevins_wrath )
+      td->buffs.legacy_kevins_wrath->trigger();
+  }
+
+  void init() override
+  {
+    priest_pet_spell_t::init();
+    merge_pet_stats( p().o(), p(), *this );
+  }
+};
+
+action_t* legacy_kevins_oozeling_t::create_action( util::string_view name, util::string_view options_str )
+{
+  if ( name == "kevins_wrath" )
+    return new legacy_kevins_wrath_t( *this, options_str );
+
+  return priest_pet_t::create_action( name, options_str );
+}
+
 priest_t::priest_pets_t::priest_pets_t( priest_t& p )
   : shadowfiend( "shadowfiend", &p, []( priest_t* priest ) { return new fiend::shadowfiend_pet_t( priest ); } ),
     mindbender( "mindbender", &p, []( priest_t* priest ) { return new fiend::mindbender_pet_t( priest ); } ),
     voidwraith( "voidwraith", &p, []( priest_t* priest ) { return new fiend::voidwraith_pet_t( priest ); } ),
     void_tendril( "void_tendril", &p, []( priest_t* priest ) { return new void_tendril_t( priest ); } ),
     void_lasher( "void_lasher", &p, []( priest_t* priest ) { return new void_lasher_t( priest ); } ),
-    thing_from_beyond( "thing_from_beyond", &p, []( priest_t* priest ) { return new thing_from_beyond_t( priest ); } )
+    thing_from_beyond( "thing_from_beyond", &p, []( priest_t* priest ) { return new thing_from_beyond_t( priest ); } ),
+    legacy_rattling_mage( "rattling_mage", &p,
+                          []( priest_t* priest ) { return new legacy_rattling_mage_t( priest ); } ),
+    legacy_kevins_oozeling( "kevins_oozeling", &p,
+                            []( priest_t* priest ) { return new legacy_kevins_oozeling_t( priest ); } )
 {
 }
 
@@ -1236,6 +1390,17 @@ void priest_t::priest_pets_t::set_pet_defaults( priest_t& p )
 
   auto voidwraith_spell = p.find_spell( 451235 );
   voidwraith.set_default_duration( voidwraith_spell->duration() );
+
+  // BracketSim legacy compatibility: Pallid Command's mage lives for the
+  // summoning spell's 20s.
+  legacy_rattling_mage.set_default_duration( p.find_spell( 356418 )->duration() );
+
+  // The summon spell is not in current data, so the lifetime comes from the
+  // trait's own tooltip - and it is CLASS DEPENDENT: 60s for a mage, 8s for a
+  // druid, 20s for a priest. Measured per class in legacy_soulbind_effects.cpp,
+  // where it holds twelve for twelve as exactly twice Lead by Example.
+  legacy_kevins_oozeling.set_default_duration(
+      timespan_t::from_seconds( legacy_soulbind::class_values( &p ).kevins_oozeling ) );
 }
 
 }  // namespace priestspace

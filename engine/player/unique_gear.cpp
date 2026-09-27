@@ -7,6 +7,7 @@
 
 #include "dbc/racial_spells.hpp"
 #include "player/scaling_metric_data.hpp"
+#include "player/pet_spawner.hpp"
 #include "sc_enums.hpp"
 #include "sim/expressions.hpp"
 #include "unique_gear_dragonflight.hpp"
@@ -34,6 +35,7 @@ namespace { // UNNAMED NAMESPACE
 namespace enchants
 {
   /* Legacy Enchants */
+  void crusader( special_effect_t& );
   void executioner( special_effect_t& );
   void hurricane_spell( special_effect_t& );
   void meta_gem_effect( special_effect_t& );
@@ -68,6 +70,7 @@ namespace profession
 namespace item
 {
   /* Misc */
+  void chains_of_ice_runic_power( special_effect_t& );
   void heartpierce( special_effect_t& );
   void darkmoon_card_greatness( special_effect_t& );
   void vial_of_shadows( special_effect_t& );
@@ -76,6 +79,28 @@ namespace item
   void felmouth_frenzy( special_effect_t& );
   void matrix_restabilizer( special_effect_t& );
   void blazefury_medallion( special_effect_t& );
+  void molten_ironfoe( special_effect_t& );
+  void chillpike( special_effect_t& );
+  void deaths_verdict( special_effect_t& );
+  void jackhammer( special_effect_t& );
+  void heartrazor( special_effect_t& );
+  void untamed_blade( special_effect_t& );
+  void blackout_truncheon( special_effect_t& );
+  void despair( special_effect_t& );
+  void world_breaker( special_effect_t& );
+  void variable_pulse_lightning_capacitor( special_effect_t& );
+  void eskhandars_right_claw( special_effect_t& );
+  void thunderfury( special_effect_t& );
+  void bonereavers_edge( special_effect_t& );
+  void sulfuras( special_effect_t& );
+  void love_struck( special_effect_t& );
+  void tiny_abomination_in_a_jar( special_effect_t& );
+  void shadowmourne( special_effect_t& );
+  void nibelung( special_effect_t& );
+  void dislodged_foreign_object( special_effect_t& );
+  void souldrinker( special_effect_t& );
+  void gurthalak( special_effect_t& );
+  void dragonwrath( special_effect_t& );
 
   /* Mists of Pandaria 5.2 */
   void rune_of_reorigination( special_effect_t& );
@@ -142,6 +167,77 @@ namespace generic
 {
   void skyfury( special_effect_t& );
   void enable_all_item_effects( special_effect_t& );
+}
+
+/*
+ * CHANCE ON HIT, ROLLED ON EVERY LANDED MELEE HIT - which is what this file has
+ * claimed since 10 September, and what the engine was not doing.
+ *
+ * `effect.weapon_proc = true` reads as "this weapon's proc". What it does inside
+ * dbc_proc_callback_t is stricter than that:
+ *
+ *     weapon = effect.item->weapon();
+ *     ...
+ *     if ( !state->action->weapon || state->action->weapon != weapon ) return;
+ *
+ * A melee ABILITY carries no `action->weapon` in this build, so the first clause
+ * threw every one of them away. Traced on a level 30 Arms warrior wearing
+ * Shadowmourne: 139 auto attacks and 210 ability casts (slam 66, overpower 64,
+ * mortal strike 57, execute 23), and EVERY proc driver on the character rolled
+ * exactly 139 times, all of them on auto_attack_mh. Not one ability rolled
+ * anything, for eight days, while the comment above chance_on_hit_from_ppm
+ * explained at length why they should.
+ *
+ * WHAT THE LOGS SAY, and they are not ambiguous. From the author's own combat logs
+ * (audits/2026-09-18-what-rolls-a-chance-on-hit.py), counting procs with NO auto
+ * attack in the 60ms before them - which an auto attack cannot have caused:
+ *
+ *     Bonereaver's Edge      94 ability-only procs   against  65 auto-only
+ *     Shadowmourne          480 ability-only procs   against 482 auto-only
+ *
+ * And the plainest evidence of all: Shadowmourne produced 1,224 procs against
+ * 1,213 white swings on one character. More procs than auto attacks is not
+ * something one roll per auto attack can ever produce.
+ *
+ * THE HAND RULE IS KEPT; ONLY THE ABILITY CLAUSE IS RELAXED. An auto attack
+ * still rolls only for the hand that swung it, so a proc in the off hand cannot
+ * fire off a main-hand swing. An ability has no hand, is one attack, and rolls
+ * once. That is the game's behaviour, and it is the whole of the difference.
+ */
+struct chance_on_hit_cb_t : public dbc_proc_callback_t
+{
+  const weapon_t* hand;
+
+  chance_on_hit_cb_t( const special_effect_t& effect )
+    : dbc_proc_callback_t( effect.item, effect ),
+      hand( effect.item ? effect.item->weapon() : nullptr )
+  {
+  }
+
+  void trigger( const proc_data_t& data, player_t* target, action_state_t* state,
+                proc_trigger_type_e type ) override
+  {
+    if ( state && state->action && state->action->weapon && hand &&
+         state->action->weapon != hand )
+    {
+      return;
+    }
+
+    dbc_proc_callback_t::trigger( data, target, state, type );
+  }
+};
+
+/*
+ * Build the callback for a legacy chance-on-hit weapon or enchant.
+ *
+ * `weapon_proc` is forced FALSE here on purpose: the hand check now lives in
+ * chance_on_hit_cb_t above, and leaving the flag set would re-apply the strict
+ * gate and throw every ability away again.
+ */
+static dbc_proc_callback_t* chance_on_hit( special_effect_t& effect )
+{
+  effect.weapon_proc = false;
+  return new chance_on_hit_cb_t( effect );
 }
 
 /**
@@ -629,6 +725,62 @@ void enchants::executioner( special_effect_t& effect )
   new dbc_proc_callback_t( effect.item, effect );
 }
 
+// BracketSim legacy compatibility: Enchant Weapon - Crusader, enchant 1900.
+//
+// the author, 12 September 2026: "make sure crusader works, if not code it into the
+// engine". It did not work. Measured on a level 30 Fury warrior before this,
+// 200 iterations: 246.2 dps with the enchant and 245.9 without, and no
+// holy_strength anywhere in the buff list.
+//
+// The data is all present and the wiring was not. The enchant's ench_type is
+// ITEM_ENCHANTMENT_COMBAT_SPELL and its ench_prop is 20007, Holy Strength -
+// "Increases Strength by $s1 for 15 sec" - and the generic chance-on-hit path
+// hands that spell id to initialize_special_effect. But 20007 is the BUFF, not
+// a driver: it carries no proc chance and no RPPM, so the generic initializer
+// produced an effect that could never fire.
+//
+// Holy Strength is worth having at these brackets specifically because its
+// max_scaling_level is 25. A level 30 warrior carries about 74 strength and the
+// buff grants roughly 37, so this is not a rounding error.
+//
+// THE RATE IS CARRIED OVER, NOT MEASURED - the same standing caveat as the five
+// chance-on-hit weapons (STATE.md open item 10). Crusader was 1 PPM for its
+// whole life and nothing in this build's data carries a rate, so 1 PPM is what
+// it gets, through the engine's own real-PPM code exactly as enchants::
+// executioner does.
+void enchants::crusader( special_effect_t& effect )
+{
+  const spell_data_t* spell = effect.item->player->find_spell( effect.spell_id );
+  auto buff = static_cast<stat_buff_t*>( buff_t::find( effect.item->player, tokenized_name( spell ) ) );
+
+  if ( !buff )
+  {
+    buff = make_buff<stat_buff_t>( effect.item->player, tokenized_name( spell ), spell );
+    buff->set_activated( false );
+  }
+
+  effect.name_str     = tokenized_name( spell );
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  // Old-style PPM, not real PPM. `ppm_` positive is the per-hit conversion
+  // `ppm * weapon_speed / 60`, which is exactly how a Classic PPM enchant
+  // worked: every landed melee hit rolls, so an ability that strikes more often
+  // procs it more often. Real PPM (a negative `ppm_` here) would flatten that,
+  // and flattening it is the thing the author already corrected this port on once -
+  // "chance on hit mechanics are near 100% for fury warriors, due to the
+  // whirlwind interaction".
+  //
+  // Measured after this was wired up, level 30 Fury, 500 iterations: 4.6 fresh
+  // applications and 46 refreshes in a 300 second fight, 91.6% uptime, 245.8 ->
+  // 323.3 dps. That uptime is high because Fury lands a great many hits, and it
+  // is the behaviour he described rather than a bug.
+  effect.ppm_         = 1.0;
+  /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
+  effect.custom_buff  = buff;
+
+  chance_on_hit( effect );
+}
+
 void enchants::meta_gem_effect( special_effect_t& effect )
 {
   effect.player->parse_passive_item_effect( effect.driver () );
@@ -857,6 +1009,1910 @@ void profession::draenor_philosophers_stone( special_effect_t& effect )
 }
 
 // Items ====================================================================
+
+// BracketSim legacy compatibility ==========================================
+//
+// Modern item data still exposes these effects, but upstream SimC no longer
+// initializes ItemEffect entries with the CHANCE_ON_HIT trigger type and the
+// custom Tiny Abomination implementation was removed after Cataclysm. Keep
+// the live spell scaling while restoring the historically verified mechanics.
+
+// CHANCE ON HIT IS NOT REAL PPM.
+//
+// Every item in this group has ItemEffect type 2, ITEM_SPELLTRIGGER_CHANCE_ON_HIT:
+// the game rolls once for EVERY hit that lands. SimulationCraft's `ppm_` is the
+// other thing entirely - a real-PPM proc, normalised so that a fixed number of
+// procs arrive per MINUTE however often you swing. The two agree on a character
+// doing nothing but auto-attacking, and diverge completely on anything that
+// lands more than one hit per cast.
+//
+// the author, 10 September 2026: "chance on hit mechanics are near 100% for fury
+// warriors, due to the whirlwind interaction, same for monks rushing jade wind
+// and spinning crane kick". That is the whole difference: under `ppm_` a
+// Whirlwind into eight targets is worth exactly as much as one into one.
+//
+// Proven, not assumed. In the author's own level 30 combat log (a test character, a death
+// knight in Naxxramas) Shadowmourne handed over TWO Soul Fragments in the same
+// millisecond off one Blood Boil that struck two targets, and 25 fragments
+// across 22 separate instants. `ppm_` rolls once against elapsed time and has no
+// way to produce two stacks at one timestamp, so the PPM model is ruled out by
+// the log rather than by argument. Evidence:
+//   bracketsim-local/audits/2026-09-10-shadowmourne-ramp.py
+//
+// THE MODEL IS SHARED; THE RATES ARE NOW CITED. SimulationCraft's own real-PPM
+// code turns a PPM into a per-attempt chance with `ppm * weapon_speed / 60`, so
+// applying that same conversion here keeps the auto-attack rate these items
+// already had - the case the old model got right - while letting every extra hit
+// roll, which is the case it got wrong.
+//
+// Nothing in this build's data carries a chance or a PPM for a chance-on-hit
+// item: the ItemEffect row is id/spell/item/index/type and a cooldown, and no
+// more. The rates below used to be the port's own assumptions for that reason.
+// They are no longer: wowsims research a PPM per item, and
+// `read-wowsims-procs.mjs` records each one with the file and line it came from
+// in `fixtures/wowsims-proc-rates.json`. Every call below now cites that file.
+//
+// the author, 18 September 2026: *"for jackhammer we have the answer for chance on hit
+// mechanics from wowsims, which was implemented yesterday onto other similiar
+// weapons"*.
+//
+// Cross-checking the coded values against it found one that was WRONG rather
+// than merely uncited: Thunderfury was carrying the same 1.0 every other weapon
+// had been given, and wowsims give it 6.0 - six times the rate. See
+// item::thunderfury.
+//
+// An item wowsims do not cover keeps its assumption and says so.
+//
+// A retail log can still overrule them - they simulate Classic and this project
+// simulates retail - but only when the log measures the rate directly. Splitting
+// a warrior's damage events into main hand and off hand is NOT direct: it read
+// Bonereaver's Edge at 2.76 PPM in one hand and 2.03 in the other, and the real
+// answer is wowsims' 2.0. See item::bonereavers_edge.
+static double chance_on_hit_from_ppm( double ppm, double weapon_speed_seconds )
+{
+  return ppm * weapon_speed_seconds / 60.0;
+}
+
+// One buff per name, and one callback per driver.
+//
+// These initializers run from initialize_special_effect_2, and the Jackhammer
+// was reaching it twice: the report listed "jackhammer_haste/jackhammer_haste"
+// under CONSTANT buffs on a Fury warrior - two ten second haste buffs stacked
+// into permanent uptime by two independent proc callbacks. Whatever puts the
+// driver in front of the initializer twice, creating the buff a second time is
+// this function's own doing, so it is this function that refuses.
+//
+// buff_t::find returns the existing buff if the player already has one under
+// this name, and a non-null return also means the callback has already been
+// built, so both are skipped together.
+static bool already_built( special_effect_t& effect )
+{
+  if ( buff_t* existing = buff_t::find( effect.player, effect.name_str ) )
+  {
+    effect.custom_buff = existing;
+    return true;
+  }
+  return false;
+}
+
+// BracketSim: Death's Verdict and Death's Choice - the Trial of the Crusader
+// melee trinkets, items 47115 and 47131 and their ten man twins.
+//
+// Naming the trigger spell was enough to make the proc exist, and not enough to
+// make it right. Buff 67703 carries "Stat: Agi", so the generic builder handed a
+// fury warrior AGILITY - measured, on a level 60 carrier: `stat=Agi` for both a
+// warrior and a rogue. The tooltip is explicit about what the game does: "Your
+// highest stat is always chosen".
+//
+// So the stat is the player's, not the spell's. Everything else stays with the
+// data - the 35% chance, the 45 second internal cooldown and the proc flags all
+// come from the driver, and the amount is the buff's own effect scaled to the
+// item's level.
+// BracketSim: Chillpike, item 13148 - and the chance-on-hit rate question.
+//
+// the author, 17 September 2026: *"the problem with chance on hit is on some specs it
+// can proc an absurd amount per minute compared to others so I don't know the
+// best approach to this, look into 'wowsims'"*.
+//
+// THE MODEL IS ALREADY AGREED. wowsims/classic `PPMManager`
+// (sim/core/attack.go) sets `procChance = weaponSpeed * ppm / 60` and rolls it
+// on every landed hit. `action_t::ppm_proc_chance` here calls
+// `weapon->proc_chance_on_swing( PPM )`, which is that same conversion. So a
+// spec that lands more hits does proc more, deliberately, in both engines.
+//
+// What wowsims adds, and worth copying if a proc ever chains here, is
+// `SpellFlagSuppressWeaponProcs` on the proc's own damage.
+//
+// THE RATE IS CITED, NOT ASSUMED, which is the part this project has never had
+// for these weapons: wowsims/classic sim/common/item_effects.go:781 gives
+// Chillpike **1.0 PPM**. Setting `ppm_` rather than a precomputed chance means
+// the rate follows the weapon's real speed instead of one baked in per item -
+// an improvement on the older handlers above, which hard-code a speed.
+//
+// Spell 19260 is both the driver and the damage, so it is its own trigger.
+// BracketSim: Molten Ironfoe, item 231398.
+//
+// The driver, 469933, carries everything except a pointer to what it does: real
+// PPM 15 with a haste multiplier, a two second internal cooldown, and white and
+// yellow melee and ranged proc flags. The DAMAGE is in the driver's own two
+// Dummy effects, and its description spells that out - "unleash a Molten Strike
+// dealing ${$<rolemult>*($s1+$s2)} Fire damage" - so effect 1 plus effect 2,
+// each scaled to the item, is the number.
+//
+// ONE SIMPLIFICATION, RECORDED. `$<rolemult>` is a role multiplier selected by a
+// long list of specialisation auras in the spell's variable string. It is not
+// applied here, so a spec the multiplier would favour is under-counted rather
+// than over-counted. Nothing in the spell data says what the multiplier IS, only
+// which auras select it, and inventing a number is exactly what AGENTS.md rule 1
+// forbids.
+void item::molten_ironfoe( special_effect_t& effect )
+{
+  struct molten_strike_t : public generic_proc_t
+  {
+    molten_strike_t( const special_effect_t& e ) : generic_proc_t( e, "molten_strike", e.driver() )
+    {
+      base_dd_min = base_dd_max = e.driver()->effectN( 1 ).average( e.item )
+                                + e.driver()->effectN( 2 ).average( e.item );
+      school = SCHOOL_FIRE;
+    }
+  };
+
+  if ( effect.player->find_action( "molten_strike" ) )
+    return;
+
+  effect.execute_action = create_proc_action<molten_strike_t>( "molten_strike", effect );
+  new dbc_proc_callback_t( effect.item, effect );
+}
+
+void item::chillpike( special_effect_t& effect )
+{
+  effect.name_str     = "frost_blast";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  effect.ppm_         = 1.0;
+  effect.proc_chance_ = 0;
+  /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
+
+  if ( effect.player->find_action( effect.name_str ) )
+    return;
+
+  effect.execute_action = create_proc_action<generic_proc_t>( effect.name_str, effect, effect.driver() );
+  chance_on_hit( effect );
+}
+
+void item::deaths_verdict( special_effect_t& effect )
+{
+  // The driver does not point at its buff, so say which one it is: 67703 for the
+  // normal trinkets, 67772 for the heroic ones.
+  if ( effect.trigger_spell_id == 0 )
+    effect.trigger_spell_id = effect.spell_id == 67771 ? 67772 : 67703;
+
+  effect.name_str = "paragon";
+  if ( already_built( effect ) )
+    return;
+
+  const spell_data_t* trigger = effect.trigger();
+  auto buff = make_buff<stat_buff_t>( effect.player, effect.name_str, trigger, effect.item );
+  buff->set_stat( effect.player->convert_hybrid_stat( STAT_STR_AGI ),
+                  trigger->effectN( 1 ).average( effect.item ) );
+  effect.custom_buff = buff;
+
+  new dbc_proc_callback_t( effect.item, effect );
+}
+
+void item::jackhammer( special_effect_t& effect )
+{
+  effect.name_str    = "jackhammer_haste";
+  effect.proc_flags_ = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  // The Jackhammer, item 9423, is a 3.6 second two-hander. 1.0 PPM at that speed
+  // is one proc per 16.7 swings, so 6% per hit.
+  //
+  // RATE: wowsims/classic sim/common/item_effects.go:2358,
+  // `CreateWeaponProcAura(TheJackhammer, "The Jackhammer", 1.0, ...)`. The value
+  // this port had assumed turned out to be the researched one.
+  effect.proc_chance_ = chance_on_hit_from_ppm( 1.0, 3.6 );
+  effect.ppm_        = 0;
+  /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
+
+  if ( already_built( effect ) )
+    return;
+
+  auto buff = make_buff<stat_buff_t>( effect.player, effect.name_str, effect.driver(), effect.item );
+  buff->set_chance( 1.0 );
+  effect.custom_buff = buff;
+
+  chance_on_hit( effect );
+}
+
+// BracketSim: Heartrazor (29962) and The Untamed Blade (19334), 23 September 2026.
+//
+// the author asked why Heartrazor never won level 30 Assassination's main hand. It was
+// simulated - as a stat stick. Its driver 36041 IS the buff (Mod Attack Power,
+// 10 sec, proc flags white and yellow melee, proc chance "101%", the marker that
+// the rate lives elsewhere): the Jackhammer shape above, so the generic builder
+// found no trigger and built nothing, and the item register filed it "not damage"
+// because its tooltip reads "Increases attack power" without "your". The
+// Untamed Blade's driver 23719 (Untamed Fury, +Strength, 8 sec) is the same.
+//
+// RATES, cited as Jackhammer's is: wowsims/tbc sim/common/melee_items.go,
+// `NewPPMManager(1.0, procMask)` for Heartrazor on its own hand's hits;
+// wowsims/classic sim/common/item_effects.go, `CreateWeaponProcAura(
+// TheUntamedBlade, "The Untamed Blade", 1.0, ...)` - the original rate (their
+// 0.55 is Season of Discovery's, not this game's). The AMOUNTS are this client's
+// own scaled values, read by stat_buff_t from the driver, like every other stat.
+//
+// A second copy (a dual-wielded Heartrazor) shares the buff but gets its own
+// roll, as each hand's proc did.
+static void weapon_stat_proc( special_effect_t& effect, const std::string& name, double ppm,
+                              double fallback_speed )
+{
+  effect.name_str     = name;
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  const weapon_t* w   = effect.item ? effect.item->weapon() : nullptr;
+  const double speed  = ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds()
+                                                                     : fallback_speed;
+  effect.proc_chance_ = chance_on_hit_from_ppm( ppm, speed );
+  effect.ppm_         = 0;
+
+  if ( !already_built( effect ) )
+  {
+    auto buff = make_buff<stat_buff_t>( effect.player, effect.name_str, effect.driver(), effect.item );
+    buff->set_chance( 1.0 );
+    effect.custom_buff = buff;
+  }
+
+  chance_on_hit( effect );
+}
+
+void item::heartrazor( special_effect_t& effect )
+{
+  weapon_stat_proc( effect, "heartrazor", 1.0, 1.8 );
+}
+
+void item::untamed_blade( special_effect_t& effect )
+{
+  weapon_stat_proc( effect, "untamed_fury", 1.0, 3.4 );
+}
+
+// BracketSim: Blackout Truncheon (27901) and Despair (28573), 23 September 2026 -
+// the two chance-on-hit weapons the item register already listed as damage-
+// relevant and not implemented. RATES: wowsims/tbc sim/common/melee_items.go -
+// Blackout Truncheon `procChance = 1.5 * 0.8 / 60.0` on its own hand's hits
+// (0.8 PPM at its 1.5 speed), Blinding Speed 33489 for 10 sec; Despair
+// `procChance = 0.5 * 3.5 / 60.0` on any landed melee hit (0.5 PPM at 3.5),
+// Impale 34580. Amounts are this client's own scaled values, from the drivers.
+void item::blackout_truncheon( special_effect_t& effect )
+{
+  weapon_stat_proc( effect, "blinding_speed", 0.8, 1.5 );
+}
+
+void item::despair( special_effect_t& effect )
+{
+  effect.name_str     = "impale";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  const weapon_t* w   = effect.item ? effect.item->weapon() : nullptr;
+  effect.proc_chance_ = chance_on_hit_from_ppm( 0.5, ( w && w->swing_time > timespan_t::zero() )
+                                                        ? w->swing_time.total_seconds() : 3.5 );
+  effect.ppm_         = 0;
+
+  if ( effect.player->find_action( effect.name_str ) )
+    return;
+
+  effect.execute_action = create_proc_action<generic_proc_t>( effect.name_str, effect, effect.driver() );
+  chance_on_hit( effect );
+}
+
+// BracketSim: World Breaker (30090), 23 September 2026. Driver 36111: "Increases
+// the critical strike of your next attack made within 4 seconds by 900" - a bonus
+// the NEXT melee attack spends. RATE AND LOGIC: wowsims/tbc
+// sim/common/melee_items.go - `procChance = 3.7 / 60.0` rolled on every landed
+// melee hit (a flat chance, not scaled by weapon speed), and every landed melee
+// hit first drops the bonus, then may grant a fresh one. This callback runs on
+// every landed melee hit and does exactly that; the bonus it grants is read from
+// the driver by stat_buff_t.
+struct world_breaker_cb_t : public dbc_proc_callback_t
+{
+  double chance;
+
+  world_breaker_cb_t( const special_effect_t& e, double c ) : dbc_proc_callback_t( e.item, e ), chance( c )
+  {
+  }
+
+  void execute( const spell_data_t*, player_t*, action_state_t* ) override
+  {
+    proc_buff->expire();
+    if ( rng().roll( chance ) )
+      proc_buff->trigger();
+  }
+};
+
+void item::world_breaker( special_effect_t& effect )
+{
+  effect.name_str     = "world_breaker";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  effect.proc_chance_ = 1.0;  // the callback sees every landed hit; the 3.7/60 roll is inside it
+  effect.ppm_         = 0;
+  effect.weapon_proc  = false;
+
+  if ( !already_built( effect ) )
+  {
+    auto buff = make_buff<stat_buff_t>( effect.player, effect.name_str, effect.driver(), effect.item );
+    buff->set_chance( 1.0 );
+    effect.custom_buff = buff;
+  }
+
+  new world_breaker_cb_t( effect, 3.7 / 60.0 );
+}
+
+// BracketSim: Variable Pulse Lightning Capacitor (68925 normal, 69110 heroic,
+// 171640), 23 September 2026. Drivers 96887 / 97119: a damaging spell or periodic
+// CRIT, at most once per 2.5 sec (the driver's own internal cooldown), grants an
+// Electrical Charge (96890, up to 10); then a 50% chance fires Lightning Bolt
+// (96891) for the per-charge damage times the charges, which resets them.
+//
+// MECHANIC AND RATE: wowsims/cata sim/common/cata/damage_procs.go - OnSpellHitDealt
+// and OnPeriodicDamageDealt, OutcomeCrit, ICD 2.5 s, `procChance := 0.5` from
+// their video research ("p=.48"). the author, 18 September: "copy theirs for proc
+// logic crits etc as that's never changed".
+// AMOUNT: this client's own. Lightning Bolt 96891 carries no damage in this
+// build (its School Damage effect reads 0), and the driver's effect #1 is the
+// scaled per-charge value - 1,560 at the spell query's item level for 96887 -
+// so that is what each charge is worth, at the trinket's own item level.
+struct vplc_bolt_t : public generic_proc_t
+{
+  double per_charge;
+
+  vplc_bolt_t( const special_effect_t& e )
+    : generic_proc_t( e, "variable_pulse_lightning_bolt", e.player->find_spell( 96891 ) ),
+      per_charge( e.driver()->effectN( 1 ).average( e.item ) )
+  {
+    school = SCHOOL_NATURE;
+  }
+};
+
+struct vplc_cb_t : public dbc_proc_callback_t
+{
+  buff_t* charges;
+  vplc_bolt_t* bolt;
+
+  vplc_cb_t( const special_effect_t& e, buff_t* c, vplc_bolt_t* b ) : dbc_proc_callback_t( e.item, e ), charges( c ), bolt( b )
+  {
+  }
+
+  void execute( const spell_data_t*, player_t* target, action_state_t* s ) override
+  {
+    charges->trigger();
+    if ( rng().roll( 0.5 ) )
+    {
+      bolt->base_dd_min = bolt->base_dd_max = bolt->per_charge * charges->check();
+      bolt->execute_on_target( target ? target : ( s && s->target ? s->target : listener->target ) );
+      charges->expire();
+    }
+  }
+};
+
+void item::variable_pulse_lightning_capacitor( special_effect_t& effect )
+{
+  effect.name_str     = "variable_pulse_lightning_capacitor";
+  effect.proc_flags_  = PF_MAGIC_SPELL | PF_PERIODIC;
+  effect.proc_flags2_ = PF2_CRIT;
+  effect.proc_chance_ = 1.0;
+  effect.ppm_         = 0;
+
+  auto charges = buff_t::find( effect.player, "electrical_charge" );
+  if ( !charges )
+    charges = make_buff( effect.player, "electrical_charge", effect.player->find_spell( 96890 ) )
+                  ->set_max_stack( 10 )
+                  ->set_duration( timespan_t::zero() );
+
+  auto bolt = debug_cast<vplc_bolt_t*>( create_proc_action<vplc_bolt_t>( "variable_pulse_lightning_bolt", effect ) );
+  new vplc_cb_t( effect, charges, bolt );
+}
+
+// Dragonwrath, Tarecgosa's Rest, item 71086 - the Firelands caster legendary.
+//
+// the author, 12 September 2026: "can you also code into the engine wrath of
+// terragosa from the firelands legendary staff thx". He has it on a level 30
+// shaman, enchanted with Torrent of Elements, and until now the staff simmed as
+// a plain two-hander: its stats counted and its legendary did nothing at all.
+//
+// The item carries two effects and only one of them matters here:
+//
+//   item_effect 20075  spell 101056  type 1 (on equip)  Wrath of Tarecgosa
+//   item_effect 20076  spell 101641  type 0 (on use)    Tarecgosa's Visage
+//
+// The second is the cosmetic transform. The first is the legendary, and the
+// engine's own description of it is exact:
+//
+//   "When you deal damage, you have a chance to gain the Wrath of Tarecgosa,
+//    duplicating the harmful spell."
+//
+// WHAT THE DATA GIVES, AND WHAT IT DOES NOT.
+//
+// The spell row carries the proc FLAGS - Generic Hostile Spell, Magic Hostile
+// Spell, Periodic - an internal cooldown of 0.01 seconds, and the attribute
+// "Only Proc From Class Abilities". So WHAT can proc it is data rather than a
+// guess: a class spell that deals damage, including a periodic tick, and not an
+// auto-attack.
+//
+// It does NOT carry a rate. `Proc Chance: 100%` in the spell query is the
+// absence of a chance rather than a certainty, there is no real-PPM row, and the
+// ItemEffect row is id/spell/item/index/type and a cooldown and no more - the
+// same hole the chance-on-hit weapons have, documented above
+// `chance_on_hit_from_ppm`.
+//
+// **THE RATE IS MEASURED**, from the author's own log rather than assumed. It shipped
+// at an assumed 10.5% because no log on the machine carried a single Tarecgosa
+// event; he then went and made one - "combatlog done for my 35 lock with the
+// legendary staff, go see it" - and `audits/2026-09-12-tarecgosa-in-log.py`
+// reads it:
+//
+//   18 procs / 211 eligible hits = 8.53%   (95% Wilson interval 5.46% to 13.08%)
+//
+// So 0.0853 it is. Two honest caveats travel with that number. It is ONE dummy
+// session, and the interval is wide enough to contain the old guess. And it is
+// one character: the driver carries no per-spec data, so whether an Affliction
+// warlock and an Elemental shaman roll the same chance is not something this
+// log can answer. More logs narrow it; the option exists so they can, without a
+// rebuild:
+//
+//   bracketsim_dragonwrath_chance=0.0853
+//
+// Setting it to 0 turns the legendary off and sims the staff as a plain weapon,
+// which is what the sim did before this existed.
+//
+// THE 100% COPY IS PROVEN, separately and much more strongly than the rate.
+// Every one of the eighteen procs in that log deals exactly what one of the
+// player's own hits dealt in the second and a half around it - Corruption 162
+// against a copy of 162, Unstable Affliction 2162 against 2162, Malefic Grasp
+// 1142 against 1142 - and they follow periodic ticks as well as casts, which is
+// what the driver's Periodic proc flag says. Eighteen of eighteen.
+//
+// WHAT "DUPLICATING" MEANS HERE. The copy repeats the DAMAGE that just landed:
+// the triggering hit's own result, after its own crit and its own multipliers,
+// dealt again to the same target as a separate event. `snapshot_flags = 0` and
+// the multiplier overrides are what keep it from being scaled a second time -
+// the amount arrives already computed. That is right for a direct spell and for
+// each periodic tick, and it is an approximation for a cast whose value is not
+// in the hit it just dealt: a cast that applies a fresh damage-over-time
+// duplicates that cast's direct damage, not the dot it lays down.
+//
+// The copy cannot proc itself. The driver's attributes do say "Can Proc From
+// Procs", but a duplication that duplicates duplicates is an infinite series and
+// was never what the item did; `callbacks = false` stops it at one.
+namespace dragonwrath
+{
+struct wrath_of_tarecgosa_t final : public spell_t
+{
+  wrath_of_tarecgosa_t( player_t* p )
+    : spell_t( "wrath_of_tarecgosa", p )
+  {
+    callbacks  = false;          // a copy never copies itself
+    background = proc = true;
+    special    = true;
+    may_crit   = may_glance = may_miss = false;
+    may_dodge  = may_parry = may_block = false;
+  }
+
+  void init() override
+  {
+    spell_t::init();
+    // The damage is handed over already computed. Nothing may scale it again.
+    snapshot_flags = update_flags = 0;
+  }
+};
+
+struct dragonwrath_cb_t final : public dbc_proc_callback_t
+{
+  wrath_of_tarecgosa_t* copy;
+
+  dragonwrath_cb_t( const special_effect_t& effect, wrath_of_tarecgosa_t* c )
+    : dbc_proc_callback_t( effect.item, effect ), copy( c )
+  {}
+
+  void execute( const spell_data_t*, player_t* target, action_state_t* state ) override
+  {
+    if ( !state || state->result_amount <= 0 )
+      return;
+
+    // "Only Proc From Class Abilities", attribute 415 on the driver: the staff
+    // does not copy an auto-attack, a trinket, an enchant proc, or itself.
+    action_t* a = state->action;
+    if ( !a || a->background || a->type == ACTION_ATTACK )
+      return;
+
+    player_t* hit = target ? target : state->target;
+    copy->school      = a->get_school();
+    copy->base_dd_min = copy->base_dd_max = state->result_amount;
+    if ( copy->target != hit )
+      copy->target_cache.is_valid = false;
+    copy->target = hit;
+    copy->execute();
+  }
+};
+}  // namespace dragonwrath
+
+void item::dragonwrath( special_effect_t& effect )
+{
+  using namespace dragonwrath;
+
+  effect.name_str = "wrath_of_tarecgosa";
+  // Read from the driver rather than stated here: spell 101056's own proc flags
+  // are Generic Hostile Spell, Magic Hostile Spell and Periodic.
+  effect.proc_flags_  = effect.driver()->proc_flags();
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  effect.ppm_         = 0;
+  effect.rppm_scale_  = RPPM_NONE;
+  effect.proc_chance_ = effect.player->bracketsim.dragonwrath_chance;
+  effect.cooldown_    = timespan_t::zero();
+
+  if ( effect.proc_chance_ <= 0 )
+    return;
+
+  // One callback per player. There is no buff to use as the marker the way
+  // `already_built` does, so the copy action is the marker: if it exists, this
+  // initializer has already run and a second callback would double the rate.
+  if ( effect.player->find_action( "wrath_of_tarecgosa" ) )
+    return;
+
+  new dragonwrath_cb_t( effect, new wrath_of_tarecgosa_t( effect.player ) );
+}
+
+
+// Eskhandar's Right Claw, item 18203.
+//
+//   22640  Eskhandar's Rage, ItemEffect type 2 (chance on hit), a five second
+//          Haste buff, flagged "Scales with Casting Item's Level"
+//
+// Same shape as the Jackhammer and it was simply never registered, so the item
+// equipped, its tooltip read correctly, and nothing happened. Asked for by the author
+// on 10 September 2026.
+//
+// RATE: wowsims/classic sim/common/item_effects.go:946,
+// `CreateWeaponProcAura(EskhandarsRightClaw, "Eskhandar's Right Claw", 1.0, ...)`,
+// converted at this weapon's own 2.6 second speed. It was the Jackhammer's
+// assumption carried across until 18 September 2026; wowsims agree with it.
+void item::eskhandars_right_claw( special_effect_t& effect )
+{
+  effect.name_str     = "eskhandars_rage";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  effect.proc_chance_ = chance_on_hit_from_ppm( 1.0, 2.6 );
+  effect.ppm_         = 0;
+  /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
+
+  if ( already_built( effect ) )
+    return;
+
+  auto buff = make_buff<stat_buff_t>( effect.player, effect.name_str, effect.driver(), effect.item );
+  buff->set_chance( 1.0 );
+  effect.custom_buff = buff;
+
+  chance_on_hit( effect );
+}
+
+// Shadowmourne, item 49623.
+//
+// Chance on hit to gain a Soul Fragment. Ten of them release into Chaos Bane.
+//
+//   71903  driver, ItemEffect CHANCE_ON_HIT
+//   71905  Soul Fragment, +12 Strength each, stacking to 10, one minute
+//   73422  Chaos Bane, +107 Strength for ten seconds
+//
+// Both buff spells survive in the Midnight client as EMPTY SHELLS: the effect
+// rows are there with the right type (Apply Aura: Mod Stat) but base value
+// ZERO, in this build and in every archive on this machine. A stat_buff_t built
+// from that spell grants nothing at all, which is why the item measured exactly
+// zero before this.
+//
+// The amounts below therefore come from the spell pages, which is the source
+// this project uses for a value the client no longer carries:
+//   https://www.wowhead.com/spell=71905/soul-fragment   "granting 12 strength each"
+//   https://www.wowhead.com/spell=73422/chaos-bane      "granting 107 strength for 10 sec"
+// Both are flagged "Scales with item level" in game; these are the values at
+// the level the spell renders at, and they are NOT rescaled here. Anything that
+// wants item-level scaling has to measure it first.
+namespace shadowmourne
+{
+/*
+ * THE CLIENT DOES CARRY THESE VALUES, and it scales them by level.
+ *
+ * The note above says both buff spells are "empty shells" with base value zero.
+ * That is half true and the half that was missed matters: the BASE value is
+ * zero, but each effect has a scaling coefficient and a SCALED value, which
+ * `spell_query` prints and `effectN().average()` resolves for the actual
+ * character:
+ *
+ *     71905 Soul Fragment   Base 0 | Scaled  12.19049  (coefficient 0.093) Str
+ *     73422 Chaos Bane      Base 0 | Scaled 113.3846   (coefficient 0.865) Str
+ *     71904 Chaos Bane dmg  Base 0 | Scaled 751.79 - 830.93 (coeff 6.192) Shadow
+ *
+ * Hard-coding 12 and 107 froze this item at one character level, which is
+ * exactly the fault that made Nibelung's Val'kyr wrong at every bracket below
+ * 80: a flat number is fine where it was measured and wrong everywhere else.
+ * These are now read from the spell, so a level-30 Shadowmourne is worth what a
+ * level-30 Shadowmourne is worth.
+ *
+ * The constants stay as a FALLBACK only, for the case where the client really
+ * has dropped the row.
+ */
+static constexpr double SOUL_FRAGMENT_STRENGTH = 12.0;
+static constexpr double CHAOS_BANE_STRENGTH    = 107.0;
+static constexpr int    FRAGMENTS_TO_RELEASE   = 10;
+
+/*
+ * CHAOS BANE ALSO EXPLODES, and this port never implemented it.
+ *
+ *   71904  "Deals $s1 Shadow damage, split between all enemy targets within
+ *           $a1 yards of the impact crater."  Radius 15 yards.
+ *
+ * the author, 19 September 2026: *"Shadowmourne chaos bane explosion is so minor in
+ * damage it would never change any gear in anyway, so I wouldn't even say that
+ * invalidates anything"* - and he is almost certainly right about the gear. It
+ * is implemented anyway because "too small to matter" is a claim, and an
+ * unimplemented effect cannot be measured to check it.
+ *
+ * wowsims roll `sim.Roll(1900, 2100) / numTargets` with `OutcomeMagicHit`
+ * (`sim/common/wotlk/shadowmourne.go`), commented "probably has a very low crit
+ * rate". Those are Wrath-era level-80 numbers; the client's own scaled range is
+ * used here instead, for the same reason as the strength values above. The
+ * SHAPE is theirs: a roll inside a range, split across targets, no crit.
+ */
+struct chaos_bane_damage_t final : public spell_t
+{
+  chaos_bane_damage_t( player_t* p, const spell_data_t* s, const item_t* it )
+    : spell_t( "chaos_bane", p, s )
+  {
+    background = true;
+    may_crit   = false;     // wowsims: "probably has a very low crit rate"
+    may_miss   = false;
+    school     = SCHOOL_SHADOW;
+    aoe        = -1;        // everything inside the fifteen yard crater
+    // "split between all enemy targets" - one pool divided, not a full hit each.
+    split_aoe_damage = true;
+    /*
+     * SCALED BY THE ITEM, NOT THE PLAYER.
+     *
+     * the author's tooltip for a level-30 character holding an item level 47
+     * Shadowmourne reads "dealing 58 Shadow damage split between all enemies
+     * within 15 yards and granting 15 Strength for 10 sec", and his combat log
+     * shows the crater landing for 56. Scaling by PLAYER level gave 28.68 -
+     * almost exactly half - so this effect follows the weapon's item level, as
+     * the original comment in this file said all along ("flagged Scales with
+     * item level in game").
+     */
+    if ( s->ok() )
+    {
+      /*
+       * `min()`/`max()` both returned the average for this effect's scaling
+       * class, so the spell's own spread (`delta=0.1`, a range of 751.79-830.93
+       * at full scale) was being thrown away and every crater landed for exactly
+       * the same number. Build the range from the average and the delta instead.
+       */
+      /*
+       * AND A MEASURED CORRECTION, anchored on the author's own tooltip.
+       *
+       * The two STRENGTH values come out of the client exactly right once scaled
+       * by item level - 1 per fragment and 15 for Chaos Bane at item level 47,
+       * matching his tooltip to the digit. This damage effect does not: the same
+       * machinery gives a mean of 45.8 where the tooltip says 58. Its scaling
+       * class is "Replace Secondary (-9)", which is not the class the strength
+       * effects use, so the discrepancy sits in that one path.
+       *
+       * His combat log's single crater landed for 56, which is inside the
+       * spell's own +/-5% spread around 58 (55.1 - 60.9) - so 58 is the mean and
+       * 56 was one roll, and the two sources agree.
+       *
+       * 58 / 45.8 = 1.2664. This is the same kind of measured correction as
+       * TENTACLE_TICK_DAMAGE above, and it carries the same warning: it is
+       * anchored at ITEM LEVEL 47 on a LEVEL 30 character, and a second tooltip
+       * at another item level would either confirm it or replace it with a real
+       * scaling term. The effect is 0.087% of a blood death knight's damage, so
+       * being anchored at one point costs very little either way.
+       */
+      static constexpr double CRATER_CALIBRATION = 1.2664;
+      const double avg = ( it ? s->effectN( 1 ).average( it ) : s->effectN( 1 ).average( p ) )
+        * CRATER_CALIBRATION;
+      const double d   = ( it ? s->effectN( 1 ).delta( it ) : s->effectN( 1 ).delta( p ) )
+        * CRATER_CALIBRATION;
+      base_dd_min = d > 0 ? avg - d / 2 : avg;
+      base_dd_max = d > 0 ? avg + d / 2 : avg;
+    }
+    spell_power_mod.direct = 0.0;
+    attack_power_mod.direct = 0.0;
+  }
+};
+
+// Derives from chance_on_hit_cb_t rather than from dbc_proc_callback_t, so it
+// inherits the hand rule AND the ability rolls. Before this it was one of the
+// eight drivers that only ever rolled on auto attacks - and Shadowmourne is the
+// item that proves abilities roll, with 1,224 procs against 1,213 white swings
+// in the author's Naxxramas log.
+struct shadowmourne_cb_t final : public chance_on_hit_cb_t
+{
+  buff_t* fragments;
+  buff_t* chaos_bane;
+  action_t* burst;
+
+  shadowmourne_cb_t( const special_effect_t& effect, buff_t* f, buff_t* c, action_t* b )
+    : chance_on_hit_cb_t( effect ), fragments( f ), chaos_bane( c ), burst( b )
+  {}
+
+  void execute( const spell_data_t*, player_t*, action_state_t* state ) override
+  {
+    /*
+     * NO FRAGMENTS WHILE CHAOS BANE IS UP. wowsims return early from the hit
+     * handler when the Chaos Bane aura is active (`if chaosBaneAura.IsActive()
+     * { return }`), so the ten seconds of the buff are not also spent rebuilding
+     * the next stack. This port used to keep collecting through it, which
+     * reaches the next release about ten seconds early every cycle.
+     */
+    if ( chaos_bane->check() )
+      return;
+
+    fragments->trigger();
+
+    // The tenth fragment is consumed along with the other nine, so the stack
+    // empties rather than sitting at maximum.
+    if ( fragments->check() >= FRAGMENTS_TO_RELEASE )
+    {
+      fragments->expire();
+      chaos_bane->trigger();
+      // ... and the release leaves a crater.
+      if ( burst && state && state->target )
+        burst->execute_on_target( state->target );
+    }
+  }
+};
+}  // namespace shadowmourne
+
+void item::shadowmourne( special_effect_t& effect )
+{
+  using namespace shadowmourne;
+
+  effect.name_str     = "shadowmourne";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  // Chance on hit, not real PPM - see the note above chance_on_hit_from_ppm.
+  // This is the item the log proves it on: two Soul Fragments in one
+  // millisecond off a two-target Blood Boil, which real PPM cannot do. It also
+  // matters more here than anywhere else, because the fragments STACK: hitting
+  // more things does not just proc more often, it reaches the tenth fragment
+  // and releases Chaos Bane sooner.
+  //
+  /*
+   * THE RATE IS MEASURED, and the old 2.0 had no source at all.
+   *
+   * the author's Naxxramas combat log, a test character, a level 30 Blood death knight
+   * wearing Shadowmourne (audits/2026-09-18-chance-on-hit-rate-from-combatlog.py
+   * and 2026-09-18-what-rolls-a-chance-on-hit.py):
+   *
+   *     1,224 Soul Fragments
+   *     1,213 white swings
+   *     1,215 physical ability hits (Heart Strike, Death Strike, Marrowrend)
+   *       430 Blood Boil hits (shadow school, melee range)
+   *     1,821 Death and Decay ticks - a ground effect, not a melee attack
+   *
+   * Procs EXCEED white swings, which is by itself proof that abilities roll it
+   * and the reason chance_on_hit_cb_t exists.
+   *
+   * The rate depends on which of those count as opportunities:
+   *     white + weapon strikes            1,224 / 2,428 = 0.504 per hit
+   *     white + weapon strikes + Blood Boil  1,224 / 2,858 = 0.428 per hit
+   *
+   * The lower of the two is taken. If Blood Boil turns out not to roll it, this
+   * under-values Shadowmourne rather than over-values an item that is already
+   * winning a weapon slot at bracket 30.
+   *
+   * 0.42 per hit on a 3.6 second two-hander is 7.0 PPM.
+   *
+   * WOWSIMS DISAGREE, and are not followed here. `sim/common/wotlk/shadowmourne.go`
+   * uses 12 PPM, citing Elitist Jerks testing ("~12 ppm, ~75% for 3.7 speed")
+   * and a 2,000-swing dummy test at ~80%. Both are Wrath-era measurements at
+   * level 80 on the unsquished item. This log is the live game at the bracket
+   * being simulated, so it wins - but the gap is large enough to be worth
+   * re-measuring if a second character ever wears one.
+   */
+  effect.proc_chance_ = chance_on_hit_from_ppm( 7.0, 3.6 );
+  effect.ppm_         = 0;
+  /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
+
+  /* Read the per-level value; fall back to the page value only if the row is
+   * genuinely gone. `average()` returns 0 for a missing or zeroed effect, which
+   * is how "the client dropped it" is told apart from "the client scales it". */
+  const spell_data_t* frag_spell = effect.player->find_spell( 71905 );
+  const spell_data_t* bane_spell = effect.player->find_spell( 73422 );
+  /*
+   * SCALED BY THE ITEM. the author's tooltip, level-30 character, item level 47
+   * Shadowmourne: "granting you 1 Strength ... Chaos Bane, dealing 58 Shadow
+   * damage ... and granting 15 Strength for 10 sec". Player-level scaling gave
+   * 1 and 11; the fragment matched and Chaos Bane did not, which is the tell
+   * that these read the weapon's item level - exactly what the original comment
+   * in this file said and what hard-coding then threw away.
+   */
+  const double frag_str = frag_spell->ok() && effect.item && frag_spell->effectN( 1 ).average( effect.item ) > 0
+    ? frag_spell->effectN( 1 ).average( effect.item ) : SOUL_FRAGMENT_STRENGTH;
+  const double bane_str = bane_spell->ok() && effect.item && bane_spell->effectN( 1 ).average( effect.item ) > 0
+    ? bane_spell->effectN( 1 ).average( effect.item ) : CHAOS_BANE_STRENGTH;
+
+  auto* fragments = make_buff<stat_buff_t>( effect.player, "soul_fragment", frag_spell );
+  fragments->add_stat( STAT_STRENGTH, frag_str );
+  fragments->set_max_stack( FRAGMENTS_TO_RELEASE );
+  fragments->set_chance( 1.0 );
+
+  auto* chaos_bane = make_buff<stat_buff_t>( effect.player, "chaos_bane", bane_spell );
+  chaos_bane->add_stat( STAT_STRENGTH, bane_str );
+  chaos_bane->set_chance( 1.0 );
+
+  auto* burst = new chaos_bane_damage_t( effect.player, effect.player->find_spell( 71904 ), effect.item );
+
+  // chance_on_hit_cb_t's own constructor does not run chance_on_hit(), so the
+  // flag is cleared here for the same reason: leaving it set re-applies the
+  // strict gate inside dbc_proc_callback_t and drops every ability again.
+  effect.weapon_proc = false;
+  new shadowmourne_cb_t( effect, fragments, chaos_bane, burst );
+}
+
+// Nibelung, item 49992 (normal) and 50648 (heroic).
+//
+//   71845 / 71846  driver: harmful spells, 2% chance, 250ms cooldown
+//   71844 / 71843  Summon Val'kyr, thirty seconds
+//   71842          the Val'kyr's Smite, 619 Holy damage, 1.5s cooldown, cannot miss
+//
+// The item's own tooltip is the source for the proc:
+//   https://www.wowhead.com/item=49992/nibelung
+//   "Your harmful spells have a chance to cause you to summon a Val'kyr to
+//    fight by your side for 30 sec. (Proc chance: 2%, 250ms cooldown)"
+//
+// Spell 71842 is not in this client's data at all - the Val'kyr is an NPC
+// ability and Blizzard dropped it - so the damage is taken from its spell page
+// and stated here rather than read from a spell that no longer exists:
+//   https://www.wowhead.com/spell=71842/smite  "dealing 619 Holy damage"
+//
+// WOWSIMS WROTE A WHOLE FILE FOR THIS ONE, and its structure is worth copying.
+// `sim/common/wotlk/nibelung.go` agrees with this port on the 2% chance, the
+// 250ms internal cooldown, the 30 second Val'kyr and the pet inheriting NOTHING
+// from its owner. It disagrees on three things, and the author, 18 September 2026:
+// *"damage we keep ours, but copy theirs for proc logic crits etc as that's
+// never changed"*.
+//
+//   DAMAGE      theirs is a Wrath-era 1591-1785 (1804-2022 heroic); ours is what
+//               Wowhead reports for spell 71842 TODAY, 619. The squish is the
+//               difference and every other item here is squished, so ours stays.
+//
+//   IT CRITS    `spell.CalcDamage(..., spell.OutcomeMagicCrit)`. This port had
+//               `may_crit = false` because the spell page says the Smite cannot
+//               MISS - and cannot miss is not cannot crit. That conflation was
+//               costing Nibelung its whole crit rate, on an item already worth
+//               23.8% of a level 60 Affliction warlock's damage.
+//
+//   CAST RATE   theirs is a 1950ms GCD, commented "about 16 instant-casts per
+//               30s with some time left-over". This port used the spell's own
+//               1.5s cooldown, which gives 20 casts - 25% more Smites than the
+//               game produces. Theirs is measured against the real thing.
+//
+namespace nibelung
+{
+/*
+ * MEASURED FROM TWO REAL LEVEL-30 COMBAT LOGS, 19 September 2026.
+ *
+ * Every number below used to come from Wowhead's page for spell 71842 (a flat
+ * 619, no range) and from wowsims' cast cadence (1950ms). The spell is not in
+ * this client's data, so neither could be checked - until the author produced logs.
+ *
+ *   A. Warcraft Logs, level 30 SHADOW PRIEST, Bael'Gar, 363.5s, 32 Smites
+ *      damage 951 - 1058, mean 1015.3, ZERO crits in 32
+ *      median gap between Smites 1.62s
+ *
+ *   B. Local combat log, level 30 BALANCE DRUID, target dummy, 15 Smites
+ *      damage 1446 - 1617, mean 1529.1, ZERO crits in 15
+ *
+ * Backing our own multipliers out of each gives the base independently:
+ *
+ *      priest: 1015.3 / (1.101768 vers * 1.0609 target)           = 868.6
+ *      druid:  1529.1 / (1.08468 vers * 1.52 guardian * 1.0609)   = 874.2
+ *
+ * They agree to 0.6%, from different specs, different content and different
+ * multipliers - so 871 is measured, not asserted. That agreement also PROVES
+ * the 1.52 guardian multiplier is real: the druid really does hit 1.5x harder,
+ * exactly as this engine already modelled, so it is not a leak to remove.
+ *
+ * The observed spread is +/-5.6% around the mean in both logs, so the Smite has
+ * a damage RANGE, which a single flat number cannot produce.
+ *
+ * ZERO CRITS IN 47 OBSERVATIONS. At the priest's 14.2% crit that is p = 0.0008.
+ * `may_crit = true` was wrong; the earlier reasoning (wowsims roll it through
+ * OutcomeMagicCrit) is beaten by measurement.
+ */
+/*
+ * THESE ARE LEVEL-30 VALUES AND NOTHING ELSE.
+ *
+ * Both of the author's logs are level-30 characters:
+ *
+ *   Warcraft Logs, level 30 shadow priest, 32 Smites: 951-1058, mean 1015.3
+ *   local log,     level 30 balance druid, 15 Smites: 1446-1617, mean 1529.1
+ *
+ * Backing our own multipliers out of each gives 868.6 and 874.2 - agreement to
+ * 0.6% from two different classes - so 823-920 is a MEASURED level-30 range.
+ *
+ * IT IS NOT SCALED TO OTHER BRACKETS, and it must not be guessed into one.
+ * Spell 71842 is not in this client, so the engine cannot scale it, and I tried
+ * to bridge that by multiplying the level-30 measurement by
+ * `dbc.spell_scaling()` for the owner's class - a table belonging to a different
+ * spell entirely. That is inventing a curve and calling it data. the author stopped it:
+ * *"Where are you getting these values from, what are you smoking...... I can
+ * easily get this for you ingame"*. He is right on both counts, and it did not
+ * even work: the multiplier resolved to 1.0 and every bracket read 952.9.
+ *
+ * THE AUTHOR'S DECISION, 20 September 2026: *"we will keep the level 30 Nibelung values
+ * for all brackets since it doesn't scale"*. So the flat constant is now the
+ * INTENDED behaviour at every bracket, not a gap waiting to be filled.
+ *
+ * The one piece of evidence that points the other way is kept here rather than
+ * dropped, because it is the reason the question came up at all: Wowhead's flag
+ * list for spell 71842 includes "Spell damage depends on caster level", and npc
+ * 38392's ability is listed as *Smite, Rank 12*. That is a rank from the high
+ * seventies, which would make 619 an at-level-80 number. Against that, the author plays
+ * this content and says it does not scale, and the measurement that exists - two
+ * level-30 logs agreeing to 0.6% - is the only thing anyone has actually taken.
+ *
+ * If a Nibelung log from a higher-level character ever turns up, comparing one
+ * Smite against 823-920 settles it in a minute. Until then this is a decision,
+ * not an oversight.
+ */
+static constexpr double SMITE_MIN      = 823.0;
+static constexpr double SMITE_MAX      = 920.0;
+// 1.62s: the MEDIAN gap between Smites across 32 casts in the Warcraft Logs
+// report. The old 1950ms came from wowsims' comment about "sixteen casts in
+// thirty seconds"; the real Val'kyr manages about eighteen.
+static constexpr timespan_t SMITE_CD   = timespan_t::from_millis( 1620 );
+static constexpr timespan_t VALKYR_TIME = timespan_t::from_seconds( 30 );
+
+struct valkyr_smite_t final : public spell_t
+{
+  valkyr_smite_t( pet_t* p ) : spell_t( "smite", p )
+  {
+    school               = SCHOOL_HOLY;
+    base_dd_min          = SMITE_MIN;
+    base_dd_max          = SMITE_MAX;
+    cooldown->duration   = SMITE_CD;
+    base_execute_time    = 0_ms;
+    // Cannot MISS - that is what the spell page says, and it is all it says.
+    may_miss = false;
+    // And it does not crit: 47 logged Smites across two characters, no crits.
+    may_crit = false;
+    // It inherits no spell power; the damage is flat plus the owner's
+    // versatility and guardian multipliers, which is what the logs show.
+    spell_power_mod.direct = 0.0;
+    background = false;
+  }
+};
+
+struct valkyr_pet_t final : public pet_t
+{
+  valkyr_pet_t( player_t* owner ) : pet_t( owner->sim, owner, "valkyr_battle_maiden", true, true )
+  {
+    npc_id = 38392;
+  }
+
+  action_t* create_action( util::string_view name, util::string_view options ) override
+  {
+    if ( name == "smite" )
+      return new valkyr_smite_t( this );
+    return pet_t::create_action( name, options );
+  }
+
+  void init_action_list() override
+  {
+    pet_t::init_action_list();
+    if ( action_list_str.empty() )
+      get_action_priority_list( "default" )->add_action( "smite" );
+  }
+
+  resource_e primary_resource() const override
+  { return RESOURCE_MANA; }
+};
+
+struct nibelung_cb_t final : public dbc_proc_callback_t
+{
+  spawner::pet_spawner_t<valkyr_pet_t> spawner;
+
+  nibelung_cb_t( const special_effect_t& effect )
+    : dbc_proc_callback_t( effect.item, effect ),
+      spawner( "valkyr_battle_maiden", effect.player,
+               []( player_t* owner ) { return new valkyr_pet_t( owner ); } )
+  {
+    spawner.set_default_duration( VALKYR_TIME );
+  }
+
+  void execute( const spell_data_t*, player_t*, action_state_t* ) override
+  { spawner.spawn(); }
+};
+}  // namespace nibelung
+
+void item::nibelung( special_effect_t& effect )
+{
+  using namespace nibelung;
+
+  effect.name_str      = "nibelung";
+  /*
+   * HARMFUL SPELL CASTS, NOT HITS AND NOT TICKS.
+   *
+   * This read `PF_MAGIC_SPELL | PF_PERIODIC` with `PF2_ALL_HIT`, so every DoT
+   * tick rolled for a proc. On a level 60 Affliction warlock that is not a
+   * detail - traced over 300 seconds, the 2,091 proc attempts were:
+   *
+   *     Haunt 307, Corruption 270, Agony 268, Unstable Affliction 257,
+   *     Malefic Grasp 117, ... and Shadow Bolt only 102
+   *
+   * Ticks outnumbered casts about ten to one, and Nibelung came out worth 23.8%
+   * of the character's damage on an item level 47 staff.
+   *
+   * wowsims register it as `Callback: core.CallbackOnCastComplete` with
+   * `Harmful: true` (sim/common/wotlk/nibelung.go), which is a CAST trigger, and
+   * the item's own tooltip agrees: "Your harmful SPELLS have a chance to cause
+   * you to summon a Val'kyr". the author, 18 September 2026: *"copy theirs for proc
+   * logic crits etc as that's never changed"*.
+   */
+  effect.proc_flags_   = PF_MAGIC_SPELL;
+  effect.proc_flags2_  = PF2_ALL_CAST;
+  effect.proc_chance_  = 0.02;
+  effect.cooldown_     = timespan_t::from_millis( 250 );
+
+  new nibelung_cb_t( effect );
+}
+
+// ===========================================================================
+// DISLODGED FOREIGN OBJECT, items 50348 (heroic) and 50353 (normal).
+//
+//   71602 / 71645  driver, 10% on harmful spells, 45s internal cooldown
+//   71601 / 71644  Surge of Power - TWENTY SECONDS, ticks the below every 2s
+//   71600 / 71643  Surging Power - the per-stack spell power
+//
+// The registration used to be `register_special_effect( 71602, "71600Trigger" )`,
+// which triggers the per-stack aura DIRECTLY and never touches 71601. Two things
+// go wrong at once, and they compound:
+//
+//   - 71600's own duration in this client is `Aura (infinite)`, because the real
+//     duration lives on 71601. So each stack, once gained, NEVER EXPIRES.
+//   - only ONE stack is gained per proc, instead of one every 2 seconds for 20
+//     seconds.
+//
+// Traced on a level-30 shadow priest over 300s: six procs, six stacks, spell
+// power climbing 261 -> 268 -> 275 -> 282 -> 289 -> 296 -> 303 and staying
+// there. Worth +21 average spell power where the real item is worth about +15.
+//
+// the author asked three times why this trinket kept winning its slot. It was measured
+// twice and reported as a DEAD proc both times, because a buff that never
+// expires reports no uptime and so never appears in the buff summary the audit
+// was reading. He rejected that on logic alone - *"if the proc was never firing
+// then how did it come back as BIS... logically it would come back worse"* - and
+// he was right.
+//
+// The description is explicit about the real shape:
+//   "Increases spell power by $71600s1 and an additional $71600s1 every
+//    $71601t1 sec. Lasts $71601d."
+//
+// So: one stack on proc, another every 2 seconds, the whole thing lasting 20
+// seconds and then dropping in one go. Ten stacks at its peak.
+struct dfo_cb_t final : public dbc_proc_callback_t
+{
+  buff_t* stacks;
+
+  dfo_cb_t( const special_effect_t& effect, buff_t* b )
+    : dbc_proc_callback_t( effect.item, effect ), stacks( b ) {}
+
+  void execute( const spell_data_t*, player_t*, action_state_t* ) override
+  {
+    // A fresh proc restarts the window at one stack rather than adding to
+    // whatever is left of the old one - the game reapplies 71601, and 71601 is
+    // what carries the duration.
+    stacks->expire();
+    stacks->trigger();
+  }
+};
+
+/*
+ * The other half of the same shape: a window whose stacks are earned by ATTACKING
+ * rather than by a timer.
+ *
+ *   45355 driver  --Proc Trigger-->  45040 Battle Trance (20s)
+ *                                      --Proc Trigger ON ATTACK-->  45041 Combat Insight
+ *
+ * "your melee or ranged attacks will each grant $45041s1 attack power, stacking
+ * up to 10 times. Expires after $45040d." So the window is a state, and every
+ * swing inside it is a stack. This callback is the swing half; the driver half
+ * above opens the window.
+ */
+struct window_stack_cb_t final : public dbc_proc_callback_t
+{
+  buff_t* stacks;
+
+  window_stack_cb_t( const special_effect_t& effect, buff_t* b )
+    : dbc_proc_callback_t( effect.player, effect ), stacks( b ) {}
+
+  void execute( const spell_data_t*, player_t*, action_state_t* ) override
+  {
+    // Only inside the window. Outside it a swing grants nothing at all, which is
+    // the whole difference between this and a permanently stacking buff.
+    if ( stacks->check() )
+      stacks->bump( 1 );
+  }
+};
+
+void item::dislodged_foreign_object( special_effect_t& effect )
+{
+  auto player = effect.player;
+
+  /*
+   * THE CHAIN IS driver -> WINDOW -> PER-STACK, not driver -> per-stack.
+   *
+   *   71645 driver           "Proc Trigger Spell: Surge of Power"  -> 71644
+   *   71644 Surge of Power   20s, "Periodic Trigger Spell ... every 2s" -> 71643
+   *   71643 Surging Power    the spell power itself
+   *
+   * So `effect.trigger()` is the WINDOW. Reading it as the per-stack aura (and
+   * then looking for the window at id+1, which lands back on the driver) built
+   * the buff from a spell that carries no stat at all: it ticked 60 times over
+   * 300s and moved spell power by exactly nothing.
+   */
+  const spell_data_t* window = effect.trigger();
+  const spell_data_t* per_stack = window->effectN( 1 ).trigger();
+  if ( !per_stack->ok() )
+    per_stack = player->find_spell( window->id() - 1 );
+
+  const timespan_t total = window->ok() && window->duration() > 0_ms
+    ? window->duration() : timespan_t::from_seconds( 20 );
+  const timespan_t tick = window->ok() && window->effectN( 1 ).period() > 0_ms
+    ? window->effectN( 1 ).period() : timespan_t::from_seconds( 2 );
+
+  /*
+   * TWO WAYS TO EARN A STACK INSIDE THE WINDOW.
+   *
+   * Dislodged Foreign Object's window carries a PERIODIC trigger - a stack every
+   * two seconds, on a timer. Blackened Naaru Sliver's carries an ordinary proc
+   * trigger instead: "your melee or ranged attacks will EACH grant $45041s1
+   * attack power, stacking up to 10 times. Expires after $45040d."
+   *
+   * Both were registered the naive way, `"<per-stack id>Trigger"`, which skips
+   * the window entirely - and since both per-stack auras are `Aura (infinite)`
+   * in this client, both stacked permanently. They are one bug with two shapes.
+   */
+  const bool byTimer = window->ok() && window->effectN( 1 ).period() > 0_ms;
+
+  /*
+   * The STAT and its AMOUNT must come from the framework, not from reading
+   * effectN( 1 ) here. The per-stack aura is A_MOD_DAMAGE_DONE with a school
+   * mask, not a plain stat aura, and only `initialize_stat_buff()` translates
+   * that shape into spell power. Building the buff by hand and calling
+   * `add_stat( STAT_SPELL_POWER, effectN( 1 ).average( item ) )` reads a
+   * different quantity entirely and gave ~1 spell power per stack instead of ~7.
+   *
+   * So set what this handler actually knows - the duration and the stack cap,
+   * both of which live on the WINDOW spell that the old registration skipped -
+   * and let `create_buff()` do the rest.
+   */
+  effect.duration_  = total;
+  // A timer window holds as many stacks as it has ticks. An attack-driven one
+  // states its cap on the per-stack aura (or its description); ten is what both
+  // of these items say, and it is the value the client carries.
+  effect.max_stacks = byTimer ? std::max( 1, as<int>( total / tick ) )
+    : std::max( 1, per_stack->max_stacks() > 0 ? as<int>( per_stack->max_stacks() ) : 10 );
+  // Build the buff from the PER-STACK aura, which is where the stat lives; the
+  // window only supplies the duration and, for a timer, the tick rate.
+  effect.trigger_spell_id = per_stack->id();
+
+  // `create_buff()` dispatches on the effect's buff type and does not promise a
+  // stat buff - debug_cast'ing its result segfaulted. This one does.
+  stat_buff_t* buff = effect.initialize_stat_buff();
+  if ( !buff )
+  {
+    effect.type = SPECIAL_EFFECT_NONE;   // better nothing than a wrong number
+    return;
+  }
+  buff->set_refresh_behavior( buff_refresh_behavior::DURATION );
+  if ( byTimer )
+  {
+    // Stacks arrive on a timer, one every $71601t1 seconds, for as long as the
+    // window lasts - and then the whole lot drops together.
+    //
+    // NO tick callback: buff.cpp runs the callback INSTEAD of bumping when one
+    // is set, and also fires it once on application, so supplying one both
+    // double-counted the first tick and had to re-implement the bump.
+    buff->set_period( tick )->set_tick_behavior( buff_tick_behavior::CLIP );
+  }
+  else
+  {
+    // Nothing ticks; the swings do the work. Make sure an inherited period does
+    // not quietly add stacks the character never earned.
+    buff->set_period( 0_ms )->set_tick_behavior( buff_tick_behavior::NONE );
+  }
+
+  effect.name_str = "dislodged_foreign_object";
+  if ( byTimer )
+  {
+    effect.proc_flags_  = PF_MAGIC_SPELL;
+    effect.proc_flags2_ = PF2_ALL_CAST;
+  }
+  // Chance and internal cooldown come from the driver and were already right.
+  new dfo_cb_t( effect, buff );
+
+  if ( !byTimer )
+  {
+    /*
+     * The swing half. A second callback, on the character rather than the item,
+     * that adds a stack for every melee or ranged hit while the window is open.
+     * Its own proc chance is 1: the window is the gate, not another roll.
+     */
+    auto swings = new special_effect_t( effect.player );
+    swings->name_str     = effect.name_str + "_stack";
+    swings->type         = SPECIAL_EFFECT_EQUIP;
+    swings->source       = SPECIAL_EFFECT_SOURCE_ITEM;
+    swings->spell_id     = window->id();
+    swings->proc_flags_  = PF_MELEE | PF_MELEE_ABILITY | PF_RANGED | PF_RANGED_ABILITY;
+    swings->proc_flags2_ = PF2_ALL_HIT;
+    swings->proc_chance_ = 1.0;
+    swings->cooldown_    = 0_ms;
+    effect.player->special_effects.push_back( swings );
+    new window_stack_cb_t( *swings, buff );
+  }
+}
+
+// ===========================================================================
+// SOULDRINKER, the Dragon Soul one-hander, items 78488 / 77193 / 78479.
+//
+// Deals damage equal to a share of the WEARER'S OWN MAXIMUM HEALTH - not spell
+// power, not weapon damage - and heals for twice that. Shares from wowsims/cata,
+// sim/common/cata/other_effects.go:
+//
+//   78488  Looking For Raid   1.3% of max health
+//   77193  Normal             1.5%
+//   78479  Heroic             1.7%
+//
+// The three drivers this client carries - 107895, 109832, 109829 - are hollow:
+// "Item - Dragon Soul - Proc - Str Tank Sword" (107895) reads 0.000000 for every
+// coefficient. That is why the weapon has been a stat stick, and why the share
+// is stated here rather than read from the data.
+//
+// THE SHARE IS READ FROM THE ITEM ID, NOT THE DRIVER. Our three drivers do not
+// map cleanly onto wowsims' three (108022 / 109831 / 109828), and getting that
+// mapping wrong would silently give the LFR sword the Heroic share. The item id
+// is unambiguous and is what the player is actually holding.
+//
+// Because the damage comes from the wearer's max health, this scales correctly
+// at every bracket with no conversion - which is exactly what Gurthalak's flat
+// tick damage below does NOT do.
+//
+// The heal is deliberately not modelled: it changes no damage number, and this
+// project does not simulate a healing profile.
+void item::souldrinker( special_effect_t& effect )
+{
+  effect.name_str     = "drain_life";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  // 15% per landed hit, flat - NOT a real PPM and NOT a PPM needing conversion.
+  // wowsims model it as a flat chance and chance_on_hit_cb_t rolls per landed
+  // hit, so the two agree directly. Converting it would repeat the mistake that
+  // put Shadowmourne's rate out on 18 September 2026.
+  effect.proc_chance_ = 0.15;
+  effect.ppm_         = 0;
+  /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
+
+  if ( already_built( effect ) )
+    return;
+
+  /*
+   * MEASURED FROM A COMBAT LOG, 19 September 2026, and it corrects what was here.
+   *
+   * THERE IS NO DIFFICULTY SPLIT ANY MORE. wowsims' Cataclysm data has 1.3/1.5/
+   * 1.7% for LFR/Normal/Heroic, and this code used it. the author's monk was wearing a
+   * HEROIC Souldrinker in one hand and an LFR one in the other, and both fired
+   * for the same number:
+   *
+   *     spell 109828 (LFR)     17 hits   296 / 297   crit 593
+   *     spell 109831 (Heroic)  12 hits   296 / 297   crit 593
+   *
+   * If the shares still differed, the LFR weapon would have hit for 226. No
+   * value near 226 appears anywhere in the log.
+   *
+   * 296.5 damage on 14,232 max health is 2.083%. The heal is 616/617, exactly
+   * twice the damage, which confirms the other half of the tooltip.
+   */
+  const double share = 0.02083;
+
+  struct drain_life_t final : public spell_t
+  {
+    double share;
+    drain_life_t( const special_effect_t& e, double s )
+      : spell_t( "drain_life", e.player, e.driver() ), share( s )
+    {
+      background = may_crit = true;
+      // SHADOW school, so it ignores armour - which is most of its value.
+      school = SCHOOL_SHADOW;
+      // The driver is hollow, so nothing may be inherited from it.
+      base_dd_min = base_dd_max = 0.0;
+      spell_power_mod.direct = 0.0;
+      attack_power_mod.direct = 0.0;
+    }
+
+    // Read at execute time, not at construction: resources.max is not populated
+    // until the actor is initialised.
+    double base_da_min( const action_state_t* ) const override
+    { return player->resources.max[ RESOURCE_HEALTH ] * share; }
+
+    double base_da_max( const action_state_t* s ) const override
+    { return base_da_min( s ); }
+  };
+
+  effect.execute_action = new drain_life_t( effect, share );
+
+  chance_on_hit( effect );
+}
+
+// ===========================================================================
+// GURTHALAK, VOICE OF THE DEEPS, items 78487 / 77191 / 78478.
+//
+// 2% on landed melee to summon a Tentacle of the Old Ones for 12 seconds, and
+// SEVERAL can be up at once. pet_spawner_t already handles that - it is what
+// Nibelung's Val'kyr uses above - so the hard part needs nothing new.
+//
+// THE SUMMON IS MODELLED. THE DAMAGE IS DELIBERATELY ZERO. Read this before
+// changing TENTACLE_TICK_DAMAGE:
+//
+// SimulationCraft's own Cataclysm-era implementation (simc-cataclysm,
+// engine/sc_unique_gear.cpp, register_gurthalak) is the best source there is for
+// this item, and it records the tick damage as FLAT, with no coefficient at all:
+//
+//     uint32_t tick_damage = heroic ? 12591 : lfr ? 9881 : 11155;
+//     tick_power_mod = 0;  base_td = tick_damage;
+//     num_ticks = sim -> roll( 0.5 ) ? 9 : 8;   // 3 Mind Flays, 8-9 ticks
+//     // "While this spell ID is the one used by all of the tentacles,
+//     //  It doesn't have a coeff and each version has static damage"
+//
+// Those numbers are in PRE-SQUISH units, from a level 85 game. Dropping 11,155
+// per tick into a level 35-80 bracket would make Gurthalak trivially best in
+// slot at every one of them and quietly corrupt the whole gear ranking. There is
+// no sourced conversion factor, and inventing one to fill the gap is precisely
+// the failure this project keeps writing down.
+//
+// The engine cannot rescue it either: spell 52586, the tentacle's own Mind Flay,
+// is hollow in this client - _sp_coeff 0, _ap_coeff 0, _scaling_type 0
+// (disabled), _base_value 18 - so there is nothing to read.
+//
+// So the mechanic ships and the damage does not. Gurthalak already ranks as a
+// stat stick, so nothing regresses; the sword is understated by exactly its
+// proc, and the spawn COUNT is verifiable from a report today. When a log gives
+// a real per-tick figure at a known bracket, set TENTACLE_TICK_DAMAGE and
+// nothing else in this block has to change.
+namespace gurthalak
+{
+static constexpr timespan_t TENTACLE_TIME = timespan_t::from_seconds( 12 );
+static constexpr timespan_t TICK_TIME     = timespan_t::from_seconds( 1 );
+// 8 or 9 ticks at even odds in the Cata implementation; the dot is given the
+// longer of the two and the pet's 12s life covers it.
+static constexpr timespan_t CHANNEL_TIME  = timespan_t::from_seconds( 9 );
+// SEE THE NOTE ABOVE. Cata-era flat values were 9881 LFR / 11155 Normal /
+// 12591 Heroic, pre-squish, and are NOT safe to use unconverted.
+// MEASURED, 19 September 2026, from the author's own combat log across FOUR stat
+// states on one level 35 warrior with heroic Gurthalak (78478, item level 49):
+//
+//     attack power 183 -> 267    246 -> 274    288 -> 275    314 -> 275
+//
+// FLAT. Attack power moved 72% and the tick moved 3%; at the same max health
+// with AP 288 and AP 314 the damage was an identical 275. Spell power never
+// varied at all. No stat in the log moves with it.
+//
+// An earlier staged patch proposed 0.9583 x attack power from a SINGLE data
+// point. That fit reproduced the one point exactly and was wrong - at level 80
+// it would have inflated the tentacle roughly tenfold and made the sword
+// falsely best in slot. A one-point fit is not a measurement.
+//
+// STILL UNKNOWN: whether 275 is flat across LEVELS. Every measurement is at 35,
+// and the author has the sword on one character. Flat errs LOW, which can never
+// invent a best in slot.
+// THE ENGINE ADDS A FIXED 1.1615, SO THE CONSTANT IS PRE-DIVIDED.
+//
+// Setting this to the logged 275 produced 319.41 a tick. Overriding the tick,
+// persistent, direct and pet-level multipliers all failed to move it: the factor
+// is applied to base_td before any of them. Rather than keep digging, it was
+// MEASURED - and it is a constant, not a stat:
+//
+//     level 35 -> 319.4125    level 50 -> 319.4125    level 70 -> 319.4125
+//
+// Identical at every level unbuffed, so 275/1.1615 is a safe correction rather
+// than a fit to one configuration - which is the distinction that made the
+// earlier '0.9583 x attack power' proposal wrong.
+//
+// UNTESTED: raid buffs scale it further (1.2692 with optimal_raid=1). the author's log
+// was solo and unbuffed, so whether the real tentacle benefits from raid buffs is
+// unknown; the engine's default behaviour is left alone.
+static constexpr double TENTACLE_TICK_DAMAGE = 236.7628;  // -> 275 a tick, matching the log
+
+struct lash_of_the_deep_t final : public spell_t
+{
+  lash_of_the_deep_t( pet_t* p ) : spell_t( "lash_of_the_deep", p )
+  {
+    school            = SCHOOL_SHADOW;
+    base_execute_time = 0_ms;
+    trigger_gcd       = 0_ms;
+    // THE COOLDOWN IS WHAT STOPS THE SIM HANGING, and it is not optional. With
+    // zero cast time, zero GCD and no cooldown, the pet re-executes this at the
+    // same timestamp forever and the simulator reports "Simulation stuck" before
+    // iteration 0 completes. Nibelung's Val'kyr avoids it the same way, with a
+    // cooldown on its Smite; leaving it out here cost one build to find.
+    //
+    // The duration is the channel itself, so one tentacle channels once and the
+    // 12 second life covers it - which is also the Cataclysm implementation's
+    // "3 Mind Flays of 3 ticks each", 8-9 ticks in one go.
+    cooldown->duration = CHANNEL_TIME;
+    // Cannot miss, can crit on its ticks, and is NOT hasted - all three from the
+    // Cataclysm implementation.
+    may_miss          = false;
+    may_crit          = false;
+    tick_may_crit     = true;
+    hasted_ticks      = false;
+    base_td           = TENTACLE_TICK_DAMAGE;
+    base_tick_time    = TICK_TIME;
+    dot_duration      = CHANNEL_TIME;
+    // Flat damage: the tentacle inherits no scaling, matching the source.
+    spell_power_mod.tick  = 0.0;
+    attack_power_mod.tick = 0.0;
+  }
+
+  /*
+   * FLAT MEANS FLAT, including the owner's damage multipliers.
+   *
+   * Zeroing the power coefficients was not enough. With base_td at the measured
+   * 275, the engine still produced 319.41 a tick UNBUFFED on the author's exact
+   * configuration - a level 35 warrior with the heroic sword at item level 49 -
+   * because the pet inherits the owner's composite damage multipliers.
+   *
+   * His combat log says otherwise: base 275, actual 276. A multiplier of 1.0036,
+   * not 1.16. The tentacle is a fixed add with a fixed channel and it does not
+   * scale with the character, which is exactly what SimulationCraft's own
+   * Cataclysm implementation modelled (tick_power_mod = 0, base_td = flat).
+   *
+   * Returning 1.0 here makes the engine agree with the log instead of being 16%
+   * over it, and 16% of a proc that fires on 2% of hits is the difference
+   * between a stat stick and a falsely attractive weapon.
+   */
+  /*
+   * A DOT SNAPSHOTS ITS MULTIPLIER WHEN IT IS APPLIED, so overriding the tick
+   * multiplier alone changed nothing - the damage was still 319.41 against a
+   * logged 275. Both are pinned here.
+   */
+  double composite_ta_multiplier( const action_state_t* ) const override
+  { return 1.0; }
+
+  double composite_persistent_multiplier( const action_state_t* ) const override
+  { return 1.0; }
+
+  double composite_da_multiplier( const action_state_t* ) const override
+  { return 1.0; }
+};
+
+struct tentacle_pet_t final : public pet_t
+{
+  tentacle_pet_t( player_t* owner )
+    : pet_t( owner->sim, owner, "tentacle_of_the_old_ones", true, true )
+  {
+    // 58078, not 57734 - the combat log names the real creature.
+    npc_id = 58078;
+  }
+
+  action_t* create_action( util::string_view name, util::string_view options ) override
+  {
+    if ( name == "lash_of_the_deep" )
+      return new lash_of_the_deep_t( this );
+    return pet_t::create_action( name, options );
+  }
+
+  void init_action_list() override
+  {
+    pet_t::init_action_list();
+    if ( action_list_str.empty() )
+      get_action_priority_list( "default" )->add_action( "lash_of_the_deep" );
+  }
+
+  resource_e primary_resource() const override
+  { return RESOURCE_MANA; }
+
+  /*
+   * The tentacle is a FIXED ADD with a FIXED channel. the author's combat log is
+   * unambiguous: base 275, actual 276, a multiplier of 1.0036 - while the engine
+   * was applying 1.1615 through the pet's inherited damage multipliers.
+   */
+  double composite_player_multiplier( school_e ) const override
+  { return 1.0; }
+};
+
+struct gurthalak_cb_t final : public chance_on_hit_cb_t
+{
+  spawner::pet_spawner_t<tentacle_pet_t> spawner;
+  // THE SPAWN COUNTER EXISTS BECAUSE THE DAMAGE IS ZERO. A pet that deals no
+  // damage is omitted from the report entirely, so without this the only proof
+  // the proc works at all is a debug log - which is no use to anyone checking it
+  // later. The counter makes the rate readable in an ordinary report, and the
+  // rate is the half of this item that IS sourced.
+  proc_t* spawn_proc;
+
+  gurthalak_cb_t( const special_effect_t& effect )
+    : chance_on_hit_cb_t( effect ),
+      spawner( "tentacle_of_the_old_ones", effect.player,
+               []( player_t* owner ) { return new tentacle_pet_t( owner ); } ),
+      spawn_proc( effect.player->get_proc( "Gurthalak: Tentacle of the Old Ones" ) )
+  {
+    spawner.set_default_duration( TENTACLE_TIME );
+  }
+
+  void execute( const spell_data_t*, player_t*, action_state_t* ) override
+  {
+    spawner.spawn();
+    spawn_proc->occur();
+  }
+};
+}  // namespace gurthalak
+
+void item::gurthalak( special_effect_t& effect )
+{
+  using namespace gurthalak;
+
+  effect.name_str     = "gurthalak";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  // 2% per landed hit, from wowsims/cata sim/common/cata/gurthalak.go. The
+  // Cataclysm SimC read it from the driver's own proc_chance(); ours is hollow,
+  // so it is stated.
+  effect.proc_chance_ = 0.02;
+  effect.ppm_         = 0;
+  /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
+  //
+  // NOT MODELLED: Bloodthirst (23881) and Heroic Leap (6544) proc Gurthalak from
+  // EITHER hand, while every other ability only procs it from the hand the sword
+  // is in. chance_on_hit_cb_t enforces the hand rule uniformly. The exception is
+  // two lines, matters only to a Fury warrior, and has not been measured at
+  // these brackets - so it is left out on purpose rather than by oversight.
+  effect.disable_action();
+
+  new gurthalak_cb_t( effect );
+}
+
+// Thunderfury, Blessed Blade of the Windseeker, item 19019.
+//
+//   21992  driver, ItemEffect type 2 (chance on hit). Everything it needs
+//          survives in this build's data:
+//            effect 1  Nature resistance debuff, chain targets 5
+//            effect 2  School Damage, nature, the coefficient the hit scales on
+//            effect 3  Trigger Spell 27648, the attack-speed cyclone
+//
+// Asked for by the author on 10 September 2026 alongside Eskhandar's Right Claw. It
+// was never registered, so the sword equipped, its tooltip read correctly, and
+// the proc did nothing at all.
+//
+// Only the DAMAGE is modelled. The Nature resistance debuff has nothing to bite
+// on in a damage sim - the target has no resistance to strip - and the cyclone
+// slows the TARGET's attack speed, which is a tanking mechanic this sim does not
+// price. Both are deliberately left out rather than guessed at.
+void item::thunderfury( special_effect_t& effect )
+{
+  effect.name_str     = "thunderfury";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  // SIX PPM, NOT ONE - and this one was actually wrong, not merely uncited.
+  //
+  // Every chance-on-hit weapon in this file was given the same 1.0 basis because
+  // nothing in the client data carries a rate. wowsims researched them per item,
+  // and Thunderfury is the one where that assumption missed badly:
+  //
+  //   wowsims/classic sim/common/item_effects.go:2406-2410
+  //     core.NewItemEffect(Thunderfury, func(agent core.Agent) {
+  //       procMask := character.GetProcMaskForItem(Thunderfury)
+  //       ppmm := character.AutoAttacks.NewPPMManager(6.0, procMask)
+  //
+  // At 2.6 seconds that is 26% per hit rather than 4.3% - the sword procs six
+  // times as often as this port has been simulating it since 10 September 2026,
+  // which matches its reputation in game far better than 1.0 did.
+  effect.proc_chance_ = chance_on_hit_from_ppm( 6.0, 2.6 );
+  effect.ppm_         = 0;
+  /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
+
+  if ( already_built( effect ) )
+    return;
+
+  struct thunderfury_t final : public spell_t
+  {
+    thunderfury_t( const special_effect_t& e )
+      : spell_t( "thunderfury", e.player, e.driver() )
+    {
+      background = may_crit = true;
+      // The lightning jumps, and effect 1 is where the game records how far.
+      aoe = as<int>( e.driver()->effectN( 1 ).chain_target() );
+      // Effect 2 is the damage; effect 1 is the resistance debuff, so the
+      // amount has to be taken from the right one.
+      base_dd_min = base_dd_max = e.driver()->effectN( 2 ).average( e.item );
+      // The item's own level drives it - the spell is flagged "Scales with
+      // Casting Item's Level" - and average( item ) is what reads that.
+    }
+  };
+
+  effect.execute_action = new thunderfury_t( effect );
+
+  chance_on_hit( effect );
+}
+
+// BracketSim: Sulfuras, Hand of Ragnaros, item 17182 - which was simply never
+// registered, so the hammer equipped, read correctly, and did nothing.
+//
+// This is a REGISTRATION, not a reconstruction. The client still carries both of
+// its effects in full:
+//
+//   17182 -> spell 21162  Fireball    type 2 (chance on hit)
+//   17182 -> spell 21142  Immolation  type 1 (passive)
+//
+// Only the Fireball is wired up. Immolation is a damage SHIELD - "deals 13.9
+// Fire damage to anyone who strikes you with a melee attack" - which needs the
+// boss to be swinging at you. A patchwerk actor is not a tank taking hits, so
+// modelling it would credit damage that only someone actually tanking would see.
+//
+// RATE: wowsims/classic sim/common/item_effects.go, "Hand of Ragnaros Trigger",
+// `PPM: 1, // Estimated based on data from WoW Armaments Discord`. Their own
+// comment calls it an estimate, so it travels as one - but an estimate from
+// people who measured the hammer beats this project having no figure at all.
+//
+// `ppm_` rather than a precomputed chance, so the rate follows the hammer's real
+// speed instead of one baked in here. Sulfuras is a 3.7 second two-hander, which
+// at 1 PPM is about 6% per landed hit.
+void item::sulfuras( special_effect_t& effect )
+{
+  effect.name_str     = "fireball_hand_of_ragnaros";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  effect.ppm_         = 1.0;
+  effect.proc_chance_ = 0;
+  /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
+
+  if ( effect.player->find_action( effect.name_str ) )
+    return;
+
+  // 21162 is both halves at once - 757-926 fire on impact plus 41.7 every two
+  // seconds for ten - and both scale with the hammer's item level.
+  effect.execute_action = create_proc_action<generic_proc_t>( effect.name_str, effect, effect.driver() );
+  chance_on_hit( effect );
+}
+
+// BracketSim (26 Sep 2026): Masquerade Gown, item 28578 - "Love Struck".
+//
+// A RECONSTRUCTION: the client no longer carries spell 34584 (the driver) or 34585 (the buff), so
+// nothing here can be read from data. Values from the item's Wowhead tooltip, confirmed by the author
+// 26 Sep 2026 from the spell page: Versatility +145 for 15 sec, 10% chance on spell cast, 50 sec
+// cooldown. (The buff's own page shows 355 "at level 90"; the item tooltip's 145 is the figure used.)
+// "On spell cast" = a spell, harmful or helpful - never a melee or ranged attack.
+void item::love_struck( special_effect_t& effect )
+{
+  effect.name_str     = "love_struck";
+  effect.type         = SPECIAL_EFFECT_EQUIP;
+  effect.proc_flags_  = PF_MAGIC_SPELL | PF_NONE_HARMFUL | PF_MAGIC_HEAL;
+  effect.proc_flags2_ = PF2_ALL_CAST;
+  effect.proc_chance_ = 0.10;
+  effect.ppm_         = 0;
+  effect.cooldown_    = timespan_t::from_seconds( 50 );
+
+  auto buff = buff_t::find( effect.player, "love_struck" );
+  if ( !buff )
+  {
+    auto sb = make_buff<stat_buff_t>( effect.player, "love_struck", spell_data_t::nil() );
+    sb->add_stat( STAT_VERSATILITY_RATING, 145 );
+    sb->set_duration( timespan_t::from_seconds( 15 ) );
+    sb->set_max_stack( 1 );
+    buff = sb;
+  }
+  effect.custom_buff = buff;
+
+  new dbc_proc_callback_t( effect.player, effect );
+}
+
+void item::bonereavers_edge( special_effect_t& effect )
+{
+  effect.name_str     = "bonereavers_edge";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  // Chance on hit, not real PPM - see the note above chance_on_hit_from_ppm.
+  // the author, 10 September 2026: "chance on hit works the same for all weps...
+  // Once you get one logic it ports to all chance on hit." It does: this is the
+  // same ItemEffect type 2 as the Jackhammer, and there is nothing
+  // item-specific about the model, only the weapon's speed.
+  //
+  /*
+   * TWO PPM, AND IT WAS BRIEFLY THREE. The retraction is the useful part.
+   *
+   * RATE: wowsims/classic sim/common/item_effects.go:735,
+   * `CreateWeaponProcSpell(BonereaversEdge, "Bonereaver's Edge", 2.0, ...)`.
+   *
+   * On 18 September this was raised to 3.0 on a measurement from the author's own
+   * retail logs: Kleaveland, a Fury warrior carrying Bonereaver's Edge in the
+   * MAIN hand, read 3,948 procs over 23,835 main-hand hits = 2.76 PPM across 13
+   * fights. The Jackhammer in his off hand was the control and reproduced its
+   * own 1.0.
+   *
+   * Two single-target ICC fights on a DIFFERENT character then contradicted it.
+   * Heavymetl, Bonereaver's Edge in the OFF hand:
+   *
+   *     Queen Lana'thel   31 procs /  273 OH hits = 11.4%  -> 1.89 PPM
+   *     Sindragosa        27 procs /  203 OH hits = 13.3%  -> 2.22 PPM
+   *     together          58 procs /  476 OH hits = 12.2%  -> 2.03 PPM
+   *
+   * That is 2.0 on the nose, from a second character, on single target, and it
+   * agrees with wowsims exactly.
+   *
+   * THE FAULT IS THE METHOD, NOT EITHER WEAPON. Warcraft Logs does not say
+   * which hand a hit came from, so both numbers rest on splitting damage events
+   * by ability id, and the bias runs in OPPOSITE directions for the two hands:
+   * over-counting off-hand hits reads a main-hand weapon high and an off-hand
+   * weapon low. Bonereaver's read high in the main hand and low in the off
+   * hand; the Jackhammer read 6% low in the off hand. That is the signature of
+   * an attribution error, and it means a rate must not be changed on this
+   * method alone.
+   *
+   * So the cited number stands and the measurement is kept as evidence rather
+   * than as an answer: test-results/chance-on-hit-rates.json.
+   */
+    /*
+   * THE RATE IS MEASURED, and it came DOWN.
+   *
+   * Two warriors in the author's own logs, pooled
+   * (audits/2026-09-18-chance-on-hit-rate-from-combatlog.py):
+   *
+   *     985 procs, 3,407 white swings, 15,030 physical ability hits
+   *     985 / 18,437 = 0.0534 per landed melee hit
+   *
+   * The two read 0.0519 and 0.0515 independently, which is the agreement that
+   * makes this trustworthy: different characters, different ability mixes, same
+   * per-hit rate. Both are warriors, so almost all of their damage is physical
+   * and the denominator needs no judgement call - unlike Shadowmourne's.
+   *
+   * 0.0534 per hit on a 3.6 second two-hander is 0.89 PPM.
+   *
+   * WHY THIS IS LOWER THAN THE 2.76-3.0 THIS PROJECT READ ON 17 SEPTEMBER, and
+   * it is not a contradiction. That figure divided procs by AUTO ATTACKS only,
+   * inferred per hand from Warcraft Logs, which does not record which hand a
+   * swing came from. This divides by every landed melee hit, which is what the
+   * engine now rolls on. Same procs, different denominator, and only one of the
+   * two denominators matches the model.
+   */
+  effect.proc_chance_ = chance_on_hit_from_ppm( 0.89, 3.6 );
+  effect.ppm_         = 0;
+  /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
+
+  if ( already_built( effect ) )
+    return;
+
+  auto buff = make_buff<stat_buff_t>( effect.player, effect.name_str, effect.driver(), effect.item );
+  buff->set_chance( 1.0 );
+  effect.custom_buff = buff;
+
+  chance_on_hit( effect );
+}
+
+struct manifest_anger_t final : public attack_t
+{
+  attack_t* source_auto_attack;
+
+  manifest_anger_t( player_t* p )
+    : attack_t( "manifest_anger", p, p->find_spell( 71433 ) ), source_auto_attack( nullptr )
+  {
+    background = true;
+    callbacks = true;
+    may_crit = true;
+
+    // Apply the 50% value to the complete auto attack, including current
+    // low-level auto-attack tuning and flat weapon modifiers. The driver spell
+    // normally encodes this as a weapon multiplier, which would omit those
+    // modifiers in the modern engine.
+    weapon_multiplier = 1.0;
+  }
+
+  double composite_da_multiplier( const action_state_t* state ) const override
+  {
+    return 0.5 * ( source_auto_attack ? source_auto_attack->composite_da_multiplier( state )
+                                      : attack_t::composite_da_multiplier( state ) );
+  }
+
+  double bonus_da( const action_state_t* state ) const override
+  {
+    return source_auto_attack ? source_auto_attack->bonus_da( state ) : attack_t::bonus_da( state );
+  }
+
+  double composite_target_multiplier( player_t* target ) const override
+  {
+    return source_auto_attack ? source_auto_attack->composite_target_multiplier( target )
+                              : attack_t::composite_target_multiplier( target );
+  }
+
+  double composite_crit_chance() const override
+  {
+    return source_auto_attack ? source_auto_attack->composite_crit_chance()
+                              : attack_t::composite_crit_chance();
+  }
+};
+
+struct tiny_abomination_cb_t final : public dbc_proc_callback_t
+{
+  buff_t* motes;
+  manifest_anger_t* manifest_anger;
+  attack_t* first_mote_attack;
+  weapon_t* first_mote_weapon;
+
+  tiny_abomination_cb_t( const special_effect_t& effect, buff_t* b )
+    : dbc_proc_callback_t( effect.item, effect ),
+      motes( b ),
+      manifest_anger( new manifest_anger_t( effect.player ) ),
+      first_mote_attack( nullptr ),
+      first_mote_weapon( nullptr )
+  {
+  }
+
+  void reset() override
+  {
+    dbc_proc_callback_t::reset();
+    first_mote_attack = nullptr;
+    first_mote_weapon = nullptr;
+  }
+
+  void trigger( const proc_data_t& source_data, player_t* target, action_state_t* state,
+                proc_trigger_type_e type ) override
+  {
+    if ( !state || !state->action || !state->action->weapon ||
+         state->action->internal_id == manifest_anger->internal_id )
+    {
+      return;
+    }
+
+    dbc_proc_callback_t::trigger( source_data, target, state, type );
+  }
+
+  void execute( const spell_data_t*, player_t* target, action_state_t* state ) override
+  {
+    if ( !state || !state->action || !state->action->weapon || !motes->trigger() )
+      return;
+
+    if ( motes->check() == 1 )
+    {
+      first_mote_weapon = state->action->weapon;
+      first_mote_attack = first_mote_weapon->slot == SLOT_OFF_HAND ? listener->off_hand_attack
+                                                                   : listener->main_hand_attack;
+    }
+
+    if ( motes->check() < motes->max_stack() )
+      return;
+
+    manifest_anger->source_auto_attack = first_mote_attack;
+    manifest_anger->weapon = first_mote_weapon ? first_mote_weapon : state->action->weapon;
+    first_mote_attack = nullptr;
+    first_mote_weapon = nullptr;
+    motes->expire();
+    manifest_anger->execute_on_target( target );
+  }
+};
+
+void item::tiny_abomination_in_a_jar( special_effect_t& effect )
+{
+  effect.name_str     = "tiny_abomination_in_a_jar";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  effect.proc_chance_ = 0.5;
+
+  const unsigned mote_count = effect.spell_id == 71545 ? 7U : 8U;
+  auto motes = make_buff( effect.player, "mote_of_anger", effect.player->find_spell( 71432 ) );
+  motes->set_max_stack( mote_count );
+  motes->set_chance( 1.0 );
+  effect.custom_buff = motes;
+
+  new tiny_abomination_cb_t( effect, motes );
+}
 
 // Blazefury Medallion
 // 243988 Driver
@@ -1975,44 +4031,102 @@ void item::cleave( special_effect_t& effect )
   new cleave_callback_t( effect );
 }
 
+// Spell 62459 is attached to several legacy Death Knight PvP gloves. Its DBC
+// proc flags are broad (all hostile melee/spell impacts), while the spell-class
+// mask that narrows it to Chains of Ice is not interpreted by the generic item
+// proc builder. Generic initialization therefore fires 62458 from every attack,
+// DoT and even other item procs, fabricating thousands of Runic Power.
+//
+// The live tooltip is explicit: "Your Chains of Ice ability now generates an
+// additional 1 Runic Power." Keep the effect, but enforce that exact trigger
+// and amount here instead of treating the raw proc row as a generic on-hit.
+namespace chains_of_ice_runic_power
+{
+static constexpr unsigned CHAINS_OF_ICE_SPELL_ID = 45524;
+static constexpr double BONUS_RUNIC_POWER = 1.0;
+
+struct callback_t final : public dbc_proc_callback_t
+{
+  player_t* player;
+  gain_t* gain;
+
+  callback_t( const special_effect_t& effect )
+    : dbc_proc_callback_t( effect.item, effect ),
+      player( effect.player ),
+      gain( effect.player->get_gain( "chains_of_ice_runic_power" ) )
+  {}
+
+  void trigger( const proc_data_t& source_data, player_t* target, action_state_t* state,
+                proc_trigger_type_e type ) override
+  {
+    if ( !state || !state->action || state->action->data().id() != CHAINS_OF_ICE_SPELL_ID )
+      return;
+
+    dbc_proc_callback_t::trigger( source_data, target, state, type );
+  }
+
+  void execute( const spell_data_t*, player_t*, action_state_t* ) override
+  {
+    player->resource_gain( RESOURCE_RUNIC_POWER, BONUS_RUNIC_POWER, gain );
+  }
+};
+}  // namespace chains_of_ice_runic_power
+
+void item::chains_of_ice_runic_power( special_effect_t& effect )
+{
+  effect.name_str = "chains_of_ice_runic_power";
+  effect.proc_chance_ = 1.0;
+  new chains_of_ice_runic_power::callback_t( effect );
+}
+
 void item::heartpierce( special_effect_t& effect )
 {
   struct invigorate_proc_t : public spell_t
   {
-    gain_t* g;
-
     invigorate_proc_t( player_t* player, const spell_data_t* d ) :
-      spell_t( "invigoration", player, d ),
-      g( player -> get_gain( "invigoration" ) )
+      spell_t( "invigoration", player, d )
     {
       may_miss = may_crit = harmful = may_dodge = may_parry = callbacks = false;
       tick_may_crit = hasted_ticks = false;
       dual = quiet = background = true;
       target = player;
     }
+  };
 
-    void tick( dot_t* d ) override
+  // Heartpierce is one PPM from attacks made with either equipped weapon. The
+  // generic modern callback also receives weaponless melee child actions; if
+  // those are allowed through, Outlaw rolls the PPM once for virtually every
+  // damage event and can keep Invigoration permanently refreshed.
+  struct heartpierce_callback_t final : public dbc_proc_callback_t
+  {
+    heartpierce_callback_t( const special_effect_t& e )
+      : dbc_proc_callback_t( e.item, e )
+    {}
+
+    void trigger( const proc_data_t& source_data, player_t* target, action_state_t* state,
+                  proc_trigger_type_e type ) override
     {
-      spell_t::tick( d );
+      if ( !state || !state->action || !state->action->weapon )
+        return;
 
-      player -> resource_gain( player -> primary_resource(),
-                               data().effectN( 1 ).resource( player -> primary_resource() ),
-                               g,
-                               this );
+      dbc_proc_callback_t::trigger( source_data, target, state, type );
     }
   };
 
+  // The heroic dagger has a 12-second Invigoration spell; normal lasts 10.
+  // The old implementation always selected the normal spell even for heroic.
+  const bool heroic = effect.spell_id == 71892;
   unsigned spell_id = 0;
   switch ( effect.item -> player -> primary_resource() )
   {
     case RESOURCE_MANA:
-      spell_id = 71881;
+      spell_id = heroic ? 71888 : 71881;
       break;
     case RESOURCE_ENERGY:
-      spell_id = 71882;
+      spell_id = heroic ? 71887 : 71882;
       break;
     case RESOURCE_RAGE:
-      spell_id = 71883;
+      spell_id = heroic ? 71886 : 71883;
       break;
     default:
       break;
@@ -2027,7 +4141,7 @@ void item::heartpierce( special_effect_t& effect )
   effect.ppm_ = 1.0;
   effect.execute_action = new invigorate_proc_t( effect.item -> player, effect.item -> player -> find_spell( spell_id ) );
 
-  new dbc_proc_callback_t( effect.item -> player, effect );
+  new heartpierce_callback_t( effect );
 }
 
 struct felmouth_frenzy_driver_t : public spell_t
@@ -3456,8 +5570,27 @@ void unique_gear::initialize_special_effect( special_effect_t& effect, unsigned 
 {
   player_t* p = effect.player;
 
-  // Perform max level checking on the driver before anything
-  const spell_data_t* spell = p->find_spell( spell_id );
+  // Perform max level checking on the driver before anything.
+  //
+  // BracketSim: this guard could never fire. player_t::find_spell() ALREADY
+  // applies the max_aura_level rule (player.cpp) and returns not_found() for a
+  // driver the player has outlevelled - and not_found() reports
+  // max_aura_level() == 0, so the test below was always false. The effect then
+  // went on to initialize against a driver that does not exist.
+  //
+  // For a generic proc that is harmless: the "no spell data for the driver"
+  // check further down disables it. A CUSTOM effect never reaches that check -
+  // it is registered above and deferred - so it initialized and then failed
+  // looking up its own action, which is where "could not find spell data for
+  // Action 'ice_bomb'" came from. Three of the eight items in
+  // fixtures/engine-cannot-simulate.json died exactly that way, and their
+  // drivers' max_aura_level values (Ice Bomb 49, Chilling Nova 49) match the
+  // measured break points precisely.
+  //
+  // So look the driver up WITHOUT the level filter, which is what this guard
+  // always meant to do. An outlevelled proc is then correctly disabled, and the
+  // item simulates as the stat stick it is in game.
+  const spell_data_t* spell = dbc::find_spell( p, spell_id );
   if ( spell->max_aura_level() > 0 && as<unsigned>( p->level() ) > spell->max_aura_level() )
   {
     if ( p->sim->debug )
@@ -4384,14 +6517,37 @@ namespace unique_gear
     for ( size_t i = 1; i <= data().effect_count(); i++ )
     {
       const spelleffect_data_t& eff = data().effectN( i );
+
+      // BracketSim: this action is not always carried by an item.
+      // special_effect_t::initialize_resource_action() passes
+      //
+      //     source == SPECIAL_EFFECT_SOURCE_ITEM ? item : nullptr
+      //
+      // so an ENCHANT or GEM whose proc restores a resource arrives here with a
+      // null item, and spelleffect_data_t::average( const item_t* ) guards that
+      // with an assert - which is compiled out of a release build, leaving
+      // `item->player` to dereference null. Insightful Earthstorm Diamond (gem
+      // 25901) and Insightful Earthsiege Diamond (gem 41401) both restore mana
+      // on spellcast, and both killed the process with 0xC0000005 before any
+      // output was written.
+      //
+      // Falling back to the player-scaled value is not a compromise: average(
+      // item ) itself returns average( item->player ) for any spell without the
+      // "Scales with Casting Item's Level" attribute, and with no item there is
+      // no item level to scale from. Mana Restore (32848) scales off the
+      // Food/Gems attribute table, which is a player-level lookup either way.
+      const auto amount = [ & ]( const spelleffect_data_t& e ) {
+        return item ? e.average( item ) : e.average( player );
+      };
+
       if ( eff.type() == E_ENERGIZE )
       {
-        gain_da = eff.average( item );
+        gain_da = amount( eff );
         gain_resource = eff.resource_gain_type();
       }
       else if ( eff.type() == E_APPLY_AURA && eff.subtype() == A_PERIODIC_ENERGIZE )
       {
-        gain_ta = eff.average( item );
+        gain_ta = amount( eff );
         gain_resource = eff.resource_gain_type();
       }
     }
@@ -4567,6 +6723,43 @@ void unique_gear::DISABLED_EFFECT( special_effect_t& effect )
   effect.type = SPECIAL_EFFECT_NONE;
 }
 
+// BracketSim legacy compatibility: procs whose real trigger this sim cannot
+// represent, and which therefore fire CONSTANTLY if left alone.
+//
+// the author, 10 September 2026: "yoghurtboy level 30 the dropimizer said a trinket
+// from magtheridon is better which is NOT true."
+//
+// Eye of Magtheridon, item 28789, ItemEffect 34749 "Recurring Power". The
+// game's own description is:
+//
+//   "Grants increased spell power for 10 sec when one of your spells is
+//    RESISTED."
+//
+// but the DBC row carries none of that condition. What it carries is:
+//
+//   Proc Chance : 100%
+//   Proc Flags  : Magic Hostile Spell
+//
+// because "is resisted" was scripted, not encoded. So the generic on-equip
+// handler does exactly what the data says and procs it on EVERY hostile spell,
+// at 100%, stacking to ten. Measured on the author's level 30 Discipline priest:
+// recurring_power sat at 99.59% uptime, refreshed 250 times in a 300 second
+// fight, and made an item level 38 trinket beat his item level 45 pair by 12%.
+//
+// It cannot fire in reality. Spell resistance as a damage-reduction mechanic is
+// gone from the modern game, and SimulationCraft models no "resisted" result at
+// all - there is miss, dodge, parry, block and crit, and nothing this proc could
+// key on. A proc whose trigger is unrepresentable belongs at zero, not at 100%.
+// Modelling it as always-on is the fabricated number; modelling it as never is
+// the honest one.
+//
+// Registered rather than deleted so the item still equips and still gives its
+// stats, and so the reason travels with the code.
+void unique_gear::UNREPRESENTABLE_TRIGGER( special_effect_t& effect )
+{
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
 /**
  * Master list of special effects in Simulationcraft.
  *
@@ -4645,6 +6838,133 @@ void unique_gear::register_special_effects()
   register_special_effect( 57345,  item::darkmoon_card_greatness        );
   register_special_effect( 71519,  item::deathbringers_will             );
   register_special_effect( 71562,  item::deathbringers_will             );
+  // Eye of Magtheridon: its "when one of your spells is resisted" condition
+  // is not in the data, so the row reads as 100% on every hostile spell.
+  register_special_effect( 34749,  UNREPRESENTABLE_TRIGGER               );
+  register_special_effect( 62459,  item::chains_of_ice_runic_power       );
+  // BRACKETSIM: effects whose driver carries the whole proc and no pointer to
+  // the buff or action it applies.
+  //
+  // Matrix Restabilizer is the clean case. Driver 97138 has the rate (20%), the
+  // internal cooldown (105s) and the proc flags (white and yellow melee and
+  // ranged). What it does not have is a trigger spell, so
+  // `special_effect_t::trigger()` falls back to the driver, the driver has no
+  // stat effects, and the engine reports "No constructible buff or action" and
+  // builds nothing. The item then simulates as a plain stat stick.
+  //
+  // The buff id is not guessed. Blizzard's own description of each driver names
+  // it - "granting $97139s1 critical strike" - and every id below was read out
+  // of the driver's description text, checked to be a real spell, and checked to
+  // carry either a stat aura or a damage effect before it was written here.
+  // `plan-effect-triggers.mjs` in bracketsim-local does that and prints these
+  // lines; `test-results/effect-trigger-plan.json` is its working.
+  //
+  // Nothing about the RATE is invented: the driver keeps its own chance, icd and
+  // flags. This only tells the generic builder what to build.
+  register_special_effect( 67702,   item::deaths_verdict ); /* Death's Verdict - Paragon */
+  register_special_effect( 67771,   item::deaths_verdict ); /* Death's Verdict (heroic) */
+  register_special_effect( 67712,   "67714Trigger"   ); /* Reign of the Unliving - Pillar of Flame */
+  register_special_effect( 67758,   "67760Trigger"   ); /* Reign of the Unliving (heroic) */
+  /* Dislodged Foreign Object. Was "71600Trigger"/"71643Trigger", which triggers
+   * the per-stack aura directly - and that aura is infinite in this client,
+   * because the real 20s duration lives on 71601/71644. One permanent stack per
+   * proc instead of ten stacks for twenty seconds. See item::dislodged_foreign_object. */
+  register_special_effect( 71602,   item::dislodged_foreign_object   );
+  register_special_effect( 71645,   item::dislodged_foreign_object   );
+  register_special_effect( 309563,  "309567Trigger"  ); /* Black Bruise - Necrotic Touch */
+  register_special_effect( 97138,   "97139Trigger"   ); /* Matrix Restabilizer */
+  /* Blackened Naaru Sliver. Was "45041Trigger", which skips Battle Trance (45040,
+   * the 20s window) and points straight at Combat Insight (45041), whose duration
+   * in this client is `Aura (infinite)` - so its stacks never came off. Same bug
+   * as Dislodged Foreign Object, with the stacks earned by swinging rather than
+   * by a timer. See item::dislodged_foreign_object, which handles both. */
+  register_special_effect( 45355,   item::dislodged_foreign_object   );
+  register_special_effect( 364917,  "17499Trigger"   ); /* Malown's Slam */
+  register_special_effect( 258885,  "258888Trigger"  ); /* Gahz'rilla Fang */
+  register_special_effect( 107786,  "107787Trigger"  ); /* No'Kaled, the Elements of Death */
+  register_special_effect( 109866,  "109867Trigger"  ); /* No'Kaled, the Elements of Death */
+  register_special_effect( 109873,  "109868Trigger"  ); /* No'Kaled, the Elements of Death */
+  register_special_effect( 222015,  "222027Trigger"  ); /* Goblet of Nightmarish Ichor */
+  register_special_effect( 344221,  "344227Trigger"  ); /* Consumptive Infusion */
+  register_special_effect( 457489,  "457533Trigger"  ); /* Wings of Shattered Sorrow */
+  register_special_effect( 1220488, "1219104Trigger" ); /* Darkfuse Medichopper */
+  // Second batch, same rule and the same working. Eight more drivers from the
+  // first list were left out because they are ALREADY registered elsewhere -
+  // 34749 is deliberately UNREPRESENTABLE_TRIGGER above, and the Pantheon
+  // trinkets have real handlers that decline for their own reasons - and
+  // registering a second time would fight an existing decision rather than fix
+  // anything.
+  register_special_effect( 37447,   "37445Trigger"   ); /* Serpent-Coil Braid */
+  register_special_effect( 45042,   "45044Trigger"   ); /* Shifting Naaru Sliver - Power Circle */
+  register_special_effect( 71835,   "71834Trigger"   ); /* Zod's Repeating Longbow */
+  register_special_effect( 71836,   "71834Trigger"   ); /* Zod's Repeating Longbow (heroic) */
+  register_special_effect( 215936,  "215938Trigger"  ); /* Orb of Torment */
+  register_special_effect( 234110,  "234111Trigger"  ); /* Cloak of Sweltering Flame */
+  register_special_effect( 253807,  "253808Trigger"  ); /* Vest of the Void's Embrace */
+  register_special_effect( 384113,  "384117Trigger"  ); /* Stormslash */
+  // Third batch. Three more trigger links, and one rate.
+  //
+  // CHILLPIKE, and the chance-on-hit rate question. the author asked how a chance on
+  // hit should be modelled when a spec that lands more hits procs far more
+  // often, and pointed at wowsims. They answer it the same way this engine
+  // already does: `PPMManager` in wowsims/classic sim/core/attack.go computes
+  // `procChance = weaponSpeed * ppm / 60` and rolls it on every landed hit, and
+  // `action_t::ppm_proc_chance` here calls `weapon->proc_chance_on_swing( PPM )`,
+  // which is the identical conversion. So the rate per hit falls as the weapon
+  // gets faster, and a spec landing more hits does proc more - deliberately.
+  //
+  // What wowsims adds is that a chance-on-hit proc's own damage carries
+  // `SpellFlagSuppressWeaponProcs`, so procs cannot chain off each other.
+  //
+  // The RATE is theirs and is cited rather than invented, which is the part this
+  // project has never had for these weapons: wowsims/classic
+  // sim/common/item_effects.go:781 gives Chillpike 1.0 PPM. Spell 19260 is both
+  // the driver and the damage, so no trigger is named.
+  register_special_effect( 19260,   item::chillpike  ); /* Chillpike - Frost Blast, 1.0 PPM (wowsims) */
+  // Fourth batch, 23 September: drivers the item register had filed "not damage"
+  // on tooltip wording ("Increases attack power by", no "your"). See the handlers.
+  register_special_effect( 36041,   item::heartrazor ); /* Heartrazor - 1.0 PPM (wowsims tbc) */
+  register_special_effect( 23719,   item::untamed_blade ); /* The Untamed Blade - Untamed Fury, 1.0 PPM (wowsims classic) */
+  register_special_effect( 36111,   item::world_breaker ); /* World Breaker - 3.7/60 per hit, spent by the next attack (wowsims tbc) */
+  register_special_effect( 33489,   item::blackout_truncheon ); /* Blackout Truncheon - Blinding Speed, 0.8 PPM (wowsims tbc) */
+  register_special_effect( 34580,   item::despair ); /* Despair - Impale, 0.5 PPM (wowsims tbc) */
+  register_special_effect( 96887,   item::variable_pulse_lightning_capacitor ); /* VPLC - wowsims cata */
+  register_special_effect( 97119,   item::variable_pulse_lightning_capacitor ); /* VPLC (heroic) - wowsims cata */
+  register_special_effect( 469933,  item::molten_ironfoe ); /* Molten Ironfoe - Molten Strike */
+  register_special_effect( 259006,  "259014Trigger"  ); /* Venomstrike - Venom Shot */
+  register_special_effect( 29633,   "29644Trigger"   ); /* Galgann's Fireblaster - Fire Blast */
+  register_special_effect( 470629,  "470630Trigger"  ); /* Magma-Shot Boomstick */
+  register_special_effect( 13533,  item::jackhammer                      );
+  register_special_effect( 22640,  item::eskhandars_right_claw           );
+  register_special_effect( 21992,  item::thunderfury                     );
+  register_special_effect( 71903,  item::shadowmourne                    );
+  register_special_effect( 71845,  item::nibelung                        );
+  register_special_effect( 101056, item::dragonwrath                     ); /* Dragonwrath, Tarecgosa's Rest */
+  register_special_effect( 71846,  item::nibelung                        );
+  // Souldrinker, all three Dragon Soul difficulties. The drivers are hollow in
+  // this client; the share of max health is keyed off the ITEM id instead.
+  register_special_effect( 107895, item::souldrinker                     );  // Normal  77193
+  register_special_effect( 109832, item::souldrinker                     );  // Heroic  78479
+  register_special_effect( 109829, item::souldrinker                     );  // LFR     78488
+  /*
+   * The drivers the GAME casts, seen by name in the author's combat log on 19
+   * September 2026. They are wowsims' ids, not the ones this client's
+   * item_effect.inc carries, and both sets are registered because registering a
+   * driver that never fires costs nothing and missing one costs the effect.
+   */
+  register_special_effect( 108022, item::souldrinker                     );  // cast in game, Normal
+  register_special_effect( 109831, item::souldrinker                     );  // cast in game, Heroic
+  register_special_effect( 109828, item::souldrinker                     );  // cast in game, LFR
+  // Gurthalak: the summon is modelled, the tentacle's damage is zero until a log
+  // gives a post-squish figure. See the note above namespace gurthalak.
+  register_special_effect( 107810, item::gurthalak                       );  // 77191
+  register_special_effect( 109841, item::gurthalak                       );  // 78478
+  register_special_effect( 109839, item::gurthalak                       );  // 78487
+  register_special_effect( 21153,  item::bonereavers_edge                );
+  register_special_effect( 21162,  item::sulfuras                        ); /* Sulfuras, Hand of Ragnaros */
+  register_special_effect( 34584,  item::love_struck                     ); /* Masquerade Gown (no client data) */
+  register_special_effect( 71406,  item::tiny_abomination_in_a_jar       );
+  register_special_effect( 71545,  item::tiny_abomination_in_a_jar       );
   register_special_effect( 71892,  item::heartpierce                    );
   register_special_effect( 71880,  item::heartpierce                    );
   register_special_effect( 72413,  "10%"                                ); /* ICC Melee Ring */
@@ -4753,6 +7073,7 @@ void unique_gear::register_special_effects()
 
   /* Wrath of the Lich King */
   register_special_effect(  59620, "1PPM"                               ); /* Berserking */
+  register_special_effect(  20007, enchants::crusader                   );
   register_special_effect(  42976, enchants::executioner                );
 
   /* Cataclysm */

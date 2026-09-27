@@ -1,5 +1,10 @@
 #pragma once
 #include "simulationcraft.hpp"
+// BracketSim legacy compatibility: Shadowlands conduits. Values live in
+// legacy_conduits.hpp because Midnight ships neither the ConduitRank table nor
+// most conduit spells, and the client's own conduit tooltips are stale - a live
+// in-game test proved the archived 9.2.7 numbers are what the game runs.
+#include "player/legacy_conduits.hpp"
 
 #include "player/pet_spawner.hpp"
 #include "sc_warlock_pets.hpp"
@@ -55,6 +60,9 @@ struct warlock_td_t : public actor_target_data_t
     propagate_const<buff_t*> doom;
 
     // Destruction
+    // BracketSim legacy compatibility: the conduit Combusting Engine (212).
+    // Synthetic - it has no spell of its own, in this build or in Shadowlands.
+    propagate_const<buff_t*> legacy_combusting_engine;
     propagate_const<buff_t*> lake_of_fire;
     propagate_const<buff_t*> shadowburn;
     propagate_const<buff_t*> havoc;
@@ -845,6 +853,12 @@ public:
   // Buffs
   struct buffs_t
   {
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries that
+    // ride a covenant ability.
+    buff_t* legacy_decaying_soul_satchel;
+    buff_t* legacy_shard_of_annihilation;
+    buff_t* legacy_decimating_bolt;  // 325299: +100% to the next 3 bolts (BracketSim legacy)
+
     // Shared Buffs
     propagate_const<buff_t*> grimoire_of_sacrifice; // Buff which grants damage proc
     propagate_const<buff_t*> soulburn;
@@ -853,6 +867,15 @@ public:
     // Affliction Buffs
     propagate_const<buff_t*> nightfall;
     propagate_const<buff_t*> darkglare_presence;
+    propagate_const<buff_t*> legacy_chaos_shards;
+    propagate_const<buff_t*> legacy_bursting_flare;
+    propagate_const<buff_t*> legacy_chaotic_inferno;
+    propagate_const<buff_t*> legacy_crashing_chaos;
+    propagate_const<buff_t*> legacy_explosive_potential;
+    propagate_const<buff_t*> legacy_shadows_bite;
+    propagate_const<buff_t*> legacy_supreme_commander;
+    // BracketSim legacy compatibility: the conduit Tyrant's Soul (206).
+    propagate_const<buff_t*> legacy_tyrants_soul;
     propagate_const<buff_t*> shard_instability;
     propagate_const<buff_t*> cascading_calamity;
     propagate_const<buff_t*> seed_of_corruption_is_out_dnt;
@@ -904,7 +927,118 @@ public:
     // Soul Harvester Buffs
     propagate_const<buff_t*> succulent_soul;
     propagate_const<buff_t*> manifested_demonic_soul;
+
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+    // Cascading Calamity and Flashpoint already exist as modern Warlock buffs,
+    // so the Azerite versions carry a legacy_ prefix and both can be up at once.
+    buff_t* legacy_cascading_calamity;
+    buff_t* wracking_brilliance;
+    buff_t* inevitable_demise;
+    buff_t* rolling_havoc;
+    buff_t* legacy_flashpoint;
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    propagate_const<buff_t*> legacy_madness_of_the_azjaqir;
+    propagate_const<buff_t*> legacy_malefic_wrath;
+    propagate_const<buff_t*> legacy_balespiders_burning_core;
+    // Relic of Demonic Synergy grants the buff to whichever of the two did NOT
+    // proc it, so there are two holders and they are tracked separately. The
+    // pet one lives on the warlock because a pet that has not been summoned yet
+    // has no buff to raise, and every demon reads it from here.
+    propagate_const<buff_t*> legacy_demonic_synergy;
+    propagate_const<buff_t*> legacy_demonic_synergy_pet;
   } buffs;
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. Named
+  // legacy_azerite because player_t already owns an "azerite" member.
+  struct legacy_azerite_t
+  {
+    // Affliction
+    azerite_power_t cascading_calamity;
+    azerite_power_t dreadful_calling;
+    azerite_power_t inevitable_demise;
+    azerite_power_t sudden_onset;
+    azerite_power_t wracking_brilliance;
+    azerite_power_t pandemic_invocation;
+
+    // Demonology
+    azerite_power_t demonic_meteor;
+    azerite_power_t shadows_bite;
+    azerite_power_t supreme_commander;
+    azerite_power_t umbral_blaze;
+    azerite_power_t explosive_potential;
+    azerite_power_t baleful_invocation;
+
+    // Destruction
+    azerite_power_t bursting_flare;
+    azerite_power_t chaotic_inferno;
+    azerite_power_t crashing_chaos;
+    azerite_power_t rolling_havoc;
+    azerite_power_t flashpoint;
+    azerite_power_t chaos_shards;
+  } legacy_azerite;
+
+  // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
+  // has no runeforge DBC, so each one is switched on by the bonus id its
+  // original legendary item carried and is inert on any other character.
+  // BracketSim legacy compatibility: Shadowlands covenant abilities. Midnight
+  // has no covenant DBC, but every covenant spell still resolves, so they are
+  // looked up by id and gated on the chosen covenant.
+  // BracketSim legacy compatibility: Shadowlands conduits, as id:rank pairs.
+  legacy_conduit::set_t legacy_conduits;
+
+  struct legacy_covenant_t
+  {
+    std::string chosen = "none";
+    const spell_data_t* scouring_tithe = spell_data_t::not_found();
+    const spell_data_t* impending_catastrophe = spell_data_t::not_found();
+    const spell_data_t* impending_catastrophe_impact = spell_data_t::not_found();
+    const spell_data_t* impending_catastrophe_dot = spell_data_t::not_found();
+    const spell_data_t* decimating_bolt = spell_data_t::not_found();
+    const spell_data_t* decimating_bolt_damage = spell_data_t::not_found();
+    const spell_data_t* soul_rot = spell_data_t::not_found();
+  } legacy_covenant;
+
+  struct shadowlands_legacy_t
+  {
+    bool legacy_shadowlands_enabled = true;
+    // These three ride a covenant ability, so they only do anything when the
+    // matching covenant is chosen as well.
+    bool contained_perpetual_explosion = false;
+    bool sacrolashs_dark_strike = false;
+    bool decaying_soul_satchel = false;
+    bool shard_of_annihilation = false;
+
+    bool embers_of_the_diabolic_raiment = false;
+    bool forces_of_the_horned_nightmare = false;
+    bool cinders_of_the_azjaqir = false;
+    bool madness_of_the_azjaqir = false;
+    bool malefic_wrath = false;
+    bool perpetual_agony_of_azjaqir = false;
+    bool wilfreds_sigil_of_superior_summoning = false;
+    bool balespiders_burning_core = false;
+    bool grim_inquisitors_dread_calling = false;
+    bool relic_of_demonic_synergy = false;
+  } shadowlands_legacy;
+
+  /*
+   * Grim Inquisitor's Dread Calling, runeforge 7034, spell 337141.
+   *
+   * "Each Soul Shard spent on Hand of Gul'dan increases the damage of your next
+   * Call Dreadstalkers by 4%." Effect 1 is a dummy carrying that 4, and buff
+   * 337142 is what the Dreadstalkers themselves wear.
+   *
+   * Two numbers, because they are two different things: what has been banked
+   * since the last Call Dreadstalkers, and what the Dreadstalkers currently out
+   * were summoned with. A single accumulator would hand the dogs already on the
+   * field every shard spent after they arrived.
+   */
+  double legacy_dread_calling_banked = 0.0;
+  double legacy_dread_calling_summoned = 0.0;
+
+  // Legacy Azerite combat state and background actions.
+  bool legacy_wracking_brilliance = false;
+  action_t* legacy_pandemic_invocation = nullptr;
+  action_t* legacy_umbral_blaze = nullptr;
 
   // Gains - Many are automatically handled
   struct gains_t
@@ -935,6 +1069,10 @@ public:
     gain_t* wither_crits;
 
     // Soul Harvester
+    gain_t* legacy_pandemic_invocation;
+    gain_t* legacy_chaos_shards;
+    gain_t* legacy_demonic_meteor;
+    gain_t* legacy_baleful_invocation;
     gain_t* feast_of_souls;
     gain_t* shadow_of_death;
   } gains;
@@ -1137,6 +1275,8 @@ public:
   warlock_t( sim_t* sim, util::string_view name, race_e r );
 
   // Character Definition
+  // BracketSim legacy compatibility: Vision of Perfection.
+  void vision_of_perfection_proc() override;
   void init_spells() override;
   void init_base_stats() override;
   void create_buffs() override;
@@ -1180,6 +1320,13 @@ public:
   void init_finished() override;
   void invalidate_cache( cache_e c ) override;
   double composite_mastery() const override;
+  // BracketSim legacy compatibility: the conduit Tyrant's Soul (206) is a
+  // PET damage multiplier, and this port had no override for that at all.
+  double composite_player_pet_damage_multiplier( const action_state_t* s, bool guardian ) const override;
+  // BracketSim legacy compatibility: Relic of Demonic Synergy (7027), the half
+  // the warlock wears. Nothing in this module reads a "Modify Damage Done%"
+  // buff on its own, so it is read here.
+  double composite_player_multiplier( school_e ) const override;
   std::unique_ptr<expr_t> create_expression( util::string_view name_str ) override;
   std::unique_ptr<expr_t> create_action_expression( action_t& action, util::string_view name_str ) override;
   std::string default_potion() const override { return warlock_apl::potion( this ); }

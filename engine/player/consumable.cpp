@@ -68,115 +68,128 @@ const dbc_item_data_t* find_consumable( const dbc_t& dbc, std::string_view name_
   return nullptr;
 }
 
-enum class elixir
+// ==========================================================================
+// Elixirs (DBC-backed)
+// ==========================================================================
+//
+// Upstream models exactly two elixirs, both from Mists, in a hardcoded table:
+// mantid (256 bonus armor) and mad_hozen (85 crit).  Every other elixir in the
+// game was unsimulatable, which at these brackets means the entire Cataclysm
+// alchemy line - Ghost Elixir, Elixir of the Naga, Elixir of the Master - that
+// a level 30 twink drinks instead of a flask.
+//
+// This is the flask implementation with ITEM_SUBCLASS_ELIXIR in place of
+// ITEM_SUBCLASS_FLASK.  Any elixir item whose effect resolves to a stat buff
+// now works, and scales with the character's level the way a flask does.
+
+struct elixir_base_t : public dbc_consumable_base_t
 {
-  GUARDIAN,
-  BATTLE
-};
+  bool guardian;
 
-struct elixir_data_t
-{
-  util::string_view name;
-  elixir type;
-  stat_e st;
-  int stat_amount;
-};
-
-static constexpr std::array<elixir_data_t, 2> elixir_data { {
-  // mop
-  { "mantid", elixir::GUARDIAN, STAT_BONUS_ARMOR, 256 },
-  { "mad_hozen", elixir::BATTLE, STAT_CRIT_RATING, 85 },
-} };
-
-struct elixir_t : public action_t
-{
-  gain_t* gain;
-  const elixir_data_t* data;
-  stat_buff_t* buff;
-
-  elixir_t( player_t* p, util::string_view options_str )
-    : action_t( ACTION_USE, "elixir", p ), gain( p->get_gain( "elixir" ) ), data( nullptr ), buff( nullptr )
+  elixir_base_t( player_t* p, std::string_view name, std::string_view options_str = "" )
+    : dbc_consumable_base_t( p, name ), guardian( false )
   {
-    std::string type_str;
-
-    add_option( opt_string( "type", type_str ) );
     parse_options( options_str );
-
-    trigger_gcd = timespan_t::zero();
-    harmful = false;
-
-    for ( auto& elixir : elixir_data )
-    {
-      if ( elixir.name == type_str )
-      {
-        data = &elixir;
-        break;
-      }
-    }
-    if ( !data )
-    {
-      sim->error( "{} attempting to use unsupported elixir '{}'.", *player, type_str );
-      background = true;
-    }
-    else
-    {
-      double amount = data->stat_amount;
-      buff = make_buff<stat_buff_t>( player, fmt::format( "{}_elixir", data->name ) )->add_stat( data->st, amount );
-      buff->set_duration( timespan_t::from_minutes( 60 ) );
-      if ( data->type == elixir::BATTLE )
-      {
-        player->consumables.battle_elixir = buff;
-      }
-      else if ( data->type == elixir::GUARDIAN )
-      {
-        player->consumables.guardian_elixir = buff;
-      }
-    }
+    type = ITEM_SUBCLASS_ELIXIR;
   }
 
-  void execute() override
+  // Elixirs are the flask slot by another name, so the sim-wide switch that
+  // turns flasks off turns these off with them.
+  //
+  // An empty name is DISABLED, not an error. Flasks and food have a class
+  // module default to fall back on and elixirs have none, so a profile that
+  // never mentions an elixir arrived here with nothing to look up and the
+  // lookup failure ended the whole simulation with "Unable to find consumable".
+  bool disabled_consumable() const override
   {
-    player_t& p = *player;
+    return dbc_consumable_base_t::disabled_consumable() || !sim->allow_flasks
+        || consumable_name.empty();
+  }
 
-    assert( buff );
-
-    buff->trigger();
-
-    if ( data->st == STAT_STAMINA )
+  std::string consumable_default() const override
+  {
+    if ( !player->elixir_str.empty() )
     {
-      // Cap Health for stamina elixir if used outside of combat
-      if ( !p.in_combat )
-      {
-        p.resource_gain( RESOURCE_HEALTH, p.resources.max[ RESOURCE_HEALTH ] - p.resources.current[ RESOURCE_HEALTH ] );
-      }
+      return player->elixir_str;
     }
 
-    sim->print_log( "{} uses elixir {}.", p.name(), data->name );
+    return {};
   }
-  bool ready() override
+
+  // Elixirs carry the same reverse mapping flasks do: the effect's trigger
+  // spell points back at the spell that creates the item, which the dbc-backed
+  // special effect system otherwise reads as the triggering spell.
+  special_effect_t* create_special_effect() override
   {
-    if ( !player->sim->allow_flasks )
+    auto e = dbc_consumable_base_t::create_special_effect();
+    e->trigger_spell_id = driver()->id();
+    return e;
+  }
+
+  // Battle or Guardian is written only in the description text - there is no
+  // flag for it in item or spell data, and the two share an item subclass.
+  // Reading the text is exact where it is present; the stat fallback is for
+  // the handful of elixirs with no description row.
+  bool is_guardian() const
+  {
+    const char* desc = player->dbc->spell_text( driver()->id() ).desc();
+    if ( desc )
+    {
+      if ( util::str_in_str_ci( desc, "Guardian Elixir" ) )
+        return true;
+      if ( util::str_in_str_ci( desc, "Battle Elixir" ) )
+        return false;
+    }
+
+    auto buff = dynamic_cast<stat_buff_t*>( consumable_buff );
+    if ( !buff )
       return false;
 
+    // Nothing but armour, health and avoidance means nothing that moves
+    // damage, which is what a guardian elixir is.
+    return range::all_of( buff->stats, []( const stat_buff_t::buff_stat_t& s ) {
+      return s.stat == STAT_ARMOR || s.stat == STAT_BONUS_ARMOR || s.stat == STAT_STAMINA ||
+             s.stat == STAT_MAX_HEALTH || s.stat == STAT_DODGE_RATING || s.stat == STAT_PARRY_RATING;
+    } );
+  }
+
+  void init() override
+  {
+    dbc_consumable_base_t::init();
+
+    if ( background )
+      return;
+
+    if ( auto buff = dynamic_cast<stat_buff_t*>( consumable_buff ) )
+    {
+      guardian = is_guardian();
+      if ( guardian )
+        player->consumables.guardian_elixir = buff;
+      else
+        player->consumables.battle_elixir = buff;
+    }
+  }
+
+  bool ready() override
+  {
+    // A flask and an elixir do not stack.  The flask is applied first on
+    // arise, so a profile naming both keeps the flask.
     if ( player->consumables.flask && player->consumables.flask->check() )
       return false;
 
-    assert( data );
-
-    if ( data->type == elixir::BATTLE && player->consumables.battle_elixir &&
-         player->consumables.battle_elixir->check() )
-    {
+    if ( guardian && player->consumables.guardian_elixir && player->consumables.guardian_elixir->check() )
       return false;
-    }
 
-    if ( data->type == elixir::GUARDIAN && player->consumables.guardian_elixir &&
-         player->consumables.guardian_elixir->check() )
-    {
+    if ( !guardian && player->consumables.battle_elixir && player->consumables.battle_elixir->check() )
       return false;
-    }
 
-    return action_t::ready();
+    return dbc_consumable_base_t::ready();
   }
+};
+
+struct elixir_t : public elixir_base_t
+{
+  elixir_t( player_t* p, std::string_view options_str = "" ) : elixir_base_t( p, "elixir", options_str ) {}
 };
 
 // ==========================================================================
@@ -1038,7 +1051,14 @@ action_t* create_action( player_t* p, std::string_view name, std::string_view op
   if ( name == "potion" )
     return new potion_t( p, options_str );
   if ( name == "elixir" )
-    return new elixir_t( p, options_str );
+  {
+    // An APL line that names an elixir keeps working; one without options is
+    // the pre-created action the elixir= option drives, the same shape flasks
+    // and food use.
+    if ( !options_str.empty() )
+      return new elixir_t( p, options_str );
+    return p->consumables.elixir_action;
+  }
   if ( name == "health_stone" )
     return new health_stone_t( p, options_str );
   if ( name == "mana_potion" )
@@ -1059,5 +1079,6 @@ void create_consumeable_actions( player_t* p )
   p->consumables.food_action = new food_t( p );
   p->consumables.flask_action = new flask_t( p );
   p->consumables.augmentation_action = new augmentation_t( p );
+  p->consumables.elixir_action = new elixir_t( p );
 }
 }  // namespace consumable

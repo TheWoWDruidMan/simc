@@ -323,6 +323,49 @@ void paladin_t::trigger_expurgation(player_t* target, double effectiveness = 1.0
 
 // Blade of Justice =========================================================
 
+// Legacy Azerite: Expurgation ==============================================
+// Named legacy_expurgation because the modern talent already owns the plain
+// name; the two are meant to run side by side. See simc-tests/PORTING_RULES.md.
+
+// BracketSim legacy compatibility: the Expurgation CONDUIT (164). Distinct
+// from both the modern talent (spells.expurgation) and the azerite trait
+// (legacy_expurgation_t) already in this file: it burns for a share of the
+// Blade of Justice crit that applied it, so its damage is set at trigger time.
+struct legacy_conduit_expurgation_t : public paladin_spell_t
+{
+  legacy_conduit_expurgation_t( paladin_t* p )
+    : paladin_spell_t( "legacy_conduit_expurgation", p, p->find_spell( 344067 ) )
+  {
+    background    = true;
+    hasted_ticks  = false;
+    tick_may_crit = false;
+  }
+};
+
+struct legacy_expurgation_t : public paladin_spell_t
+{
+  legacy_expurgation_t( paladin_t* p ) : paladin_spell_t( "legacy_expurgation", p, p->find_spell( 273481 ) )
+  {
+    background     = true;
+    base_td        = p->legacy_azerite.expurgation.value();
+    hasted_ticks   = false;
+    tick_may_crit  = true;
+  }
+};
+
+// Legacy Azerite: Light's Decree ===========================================
+
+struct legacy_lights_decree_t : public paladin_spell_t
+{
+  legacy_lights_decree_t( paladin_t* p ) : paladin_spell_t( "lights_decree", p, p->find_spell( 286232 ) )
+  {
+    aoe        = -1;
+    background = may_crit = true;
+    // Amount is set per execute from the Holy Power spent.
+    base_dd_min = base_dd_max = 0.0;
+  }
+};
+
 struct blade_of_justice_t : public paladin_melee_attack_t
 {
   struct light_within_t :public paladin_spell_t
@@ -433,6 +476,23 @@ struct blade_of_justice_t : public paladin_melee_attack_t
   {
     paladin_melee_attack_t::impact( state );
     p()->trigger_expurgation( state->target );
+
+    // Legacy Azerite: Expurgation burns the target on a critical Blade of Justice.
+    if ( p()->legacy_azerite.expurgation.ok() && p()->active.legacy_expurgation && state->result == RESULT_CRIT )
+    {
+      p()->active.legacy_expurgation->execute_on_target( state->target );
+    }
+
+    // BracketSim legacy compatibility: the Expurgation CONDUIT (164) burns for
+    // a share of the crit itself rather than for a fixed amount, which is what
+    // separates it from the azerite trait above.
+    if ( p()->legacy_conduits.has( 164 ) && p()->active.legacy_conduit_expurgation &&
+         state->result == RESULT_CRIT )
+    {
+      p()->active.legacy_conduit_expurgation->base_td =
+          state->result_amount * p()->legacy_conduits.percent( 164 );
+      p()->active.legacy_conduit_expurgation->execute_on_target( state->target );
+    }
   }
 };
 
@@ -547,6 +607,11 @@ struct divine_storm_t: public holy_power_consumer_t<paladin_melee_attack_t>
   {
     parse_options( options_str );
 
+    // BracketSim legacy compatibility: Tempest of the Lightbringer. Effect 2 of
+    // the runeforge is how much harder Divine Storm hits.
+    if ( p->shadowlands_legacy.tempest_of_the_lightbringer )
+      base_multiplier *= 1.0 + p->find_spell( 337257 )->effectN( 2 ).percent();
+
     if ( !( p->talents.divine_storm->ok() ) )
       background = true;
 
@@ -642,6 +707,60 @@ struct divine_storm_t: public holy_power_consumer_t<paladin_melee_attack_t>
       p()->trigger_expurgation( execute_state->target, mult );
     }
   }
+
+  // Legacy Azerite: Empyrean Power adds flat damage while its buff is up.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = holy_power_consumer_t::bonus_da( s );
+
+    if ( p()->buffs.legacy_empyrean_power->up() )
+      b += p()->legacy_azerite.empyrean_power.value();
+
+    return b;
+  }
+};
+
+// BracketSim legacy compatibility: Templar's Vindication (conduit 176) echoes
+// Templar's Verdict for a share of the hit it copies. Spell 339538 carries no
+// damage of its own, so the amount is handed to it at trigger time.
+//
+// Shadowlands set base_multiplier to the conduit's effect 2 AND multiplied the
+// handed-over amount by that same base_multiplier before executing, so the
+// share was applied twice and the echo landed for 9% rather than 30%. This
+// applies it once, which is what the conduit's tooltip describes.
+struct legacy_echoed_verdict_t : public paladin_melee_attack_t
+{
+  legacy_echoed_verdict_t( paladin_t* p )
+    : paladin_melee_attack_t( "legacy_echoed_verdict", p, p->find_spell( 339538 ) )
+  {
+    background = true;
+    may_crit   = false;
+    aoe        = 0;
+  }
+};
+
+struct legacy_echoed_verdict_event_t : public event_t
+{
+  action_t* echo;
+  player_t* target;
+  double amount;
+
+  legacy_echoed_verdict_event_t( paladin_t* p, player_t* tgt, action_t* a, timespan_t delay, double amt )
+    : event_t( *p->sim, delay ), echo( a ), target( tgt ), amount( amt )
+  {
+  }
+
+  const char* name() const override
+  { return "legacy_echoed_verdict_delay"; }
+
+  void execute() override
+  {
+    if ( target->is_sleeping() )
+      return;
+    echo->base_dd_min = echo->base_dd_max = amount;
+    echo->set_target( target );
+    echo->schedule_execute();
+  }
 };
 
 struct templars_verdict_t : public holy_power_consumer_t<paladin_melee_attack_t>
@@ -649,27 +768,105 @@ struct templars_verdict_t : public holy_power_consumer_t<paladin_melee_attack_t>
   // Templar's Verdict damage is stored in a different spell
   struct templars_verdict_damage_t : public paladin_melee_attack_t
   {
+    // BracketSim legacy compatibility: Templar's Vindication rolls off the
+    // action that actually deals the damage, which on the non-Final-Verdict
+    // path is this child and not its parent.
+    legacy_echoed_verdict_t* legacy_echo;
+    double legacy_echo_chance;
+    double legacy_echo_share;
+
     templars_verdict_damage_t( paladin_t *p ) :
-      paladin_melee_attack_t( "templars_verdict_dmg", p, p->find_spell( 224266 ) )
+      // BracketSim legacy compatibility: Final Verdict overrides Templar's
+      // Verdict with spell 336872, which is what the runeforge's own effect 1
+      // names. The action keeps its name so the report stays comparable.
+      paladin_melee_attack_t( "templars_verdict_dmg", p,
+                              p->shadowlands_legacy.final_verdict ? p->find_spell( 336872 )
+                                                                  : p->find_spell( 224266 ) )
     {
       dual = background = true;
 
       // spell data please?
       aoe = 0;
+
+      legacy_echo        = nullptr;
+      legacy_echo_chance = 0.0;
+      legacy_echo_share  = 0.0;
+      if ( p->legacy_conduits.has( 176 ) )
+      {
+        legacy_echo        = new legacy_echoed_verdict_t( p );
+        legacy_echo_chance = p->legacy_conduits.percent( 176 );
+        // Effect 2 is the echo's damage share and does NOT rank-scale; only
+        // the chance does. Conduit spell 339531 is ABSENT from Midnight, so
+        // the 30% is read from the archived 9.2.7 client data - the same
+        // source legacy_conduits.hpp carries its rank table from. Reading it
+        // off the missing spell returned zero and the echo landed for nothing.
+        legacy_echo_share  = 0.30;
+        add_child( legacy_echo );
+      }
+    }
+
+    void impact( action_state_t* s ) override
+    {
+      paladin_melee_attack_t::impact( s );
+
+      if ( legacy_echo && rng().roll( legacy_echo_chance ) )
+      {
+        make_event<legacy_echoed_verdict_event_t>( *sim, p(), s->target, legacy_echo,
+                                                   timespan_t::from_millis( 600 ),
+                                                   s->result_amount * legacy_echo_share );
+      }
     }
   };
 
+  // BracketSim legacy compatibility: on the Final Verdict path the parent
+  // carries the damage itself, so the echo has to be rolled here instead.
+  legacy_echoed_verdict_t* legacy_echo;
+  double legacy_echo_chance;
+  double legacy_echo_share;
+
   bool is_fv;
+  // BracketSim legacy compatibility: the Final Verdict RUNEFORGE's second
+  // effect. Zero when the runeforge is not worn.
+  double legacy_final_verdict_chance;
 
   templars_verdict_t( paladin_t* p, util::string_view options_str ) :
     holy_power_consumer_t(
       ( p->talents.final_verdict->ok() ) ? "final_verdict" : "templars_verdict",
       p,
       ( p->talents.final_verdict->ok() ) ? ( p->find_spell( 383328 ) ) : ( p->find_specialization_spell( "Templar's Verdict" ) ) ),
+    legacy_echo( nullptr ),
+    legacy_echo_chance( 0.0 ),
+    legacy_echo_share( 0.0 ),
     is_fv( p->talents.final_verdict->ok() )
   {
     parse_options( options_str );
     is_divine_arbiter_verdict = true;
+
+    if ( p->legacy_conduits.has( 176 ) && p->talents.final_verdict->ok() )
+    {
+      legacy_echo        = new legacy_echoed_verdict_t( p );
+      legacy_echo_chance = p->legacy_conduits.percent( 176 );
+      // Archived 9.2.7 value; see the note in templars_verdict_damage_t.
+      legacy_echo_share  = 0.30;
+      add_child( legacy_echo );
+    }
+
+    // BracketSim legacy compatibility: Final Verdict (runeforge 7064) has TWO
+    // effects and only the first was wired.
+    //
+    // Effect 1 is the 336872 override, applied above - and applied only inside
+    // the `!is_fv` branch, so on any character who takes the modern Final
+    // Verdict TALENT of the same name the legendary did nothing whatsoever.
+    // Measured on a real Retribution profile it moved DPS by +0.07%, which is
+    // run error, and the name collision hid the reason.
+    //
+    // Effect 2 is a separate Dummy worth 15: "Has a 15% chance to activate
+    // Hammer of Wrath and reset its cooldown." It does not depend on the
+    // override, so it is rolled whether or not the talent masks the first half.
+    // The 15 is read off the runeforge's own spell rather than written here.
+    legacy_final_verdict_chance = p->shadowlands_legacy.final_verdict
+                                      ? p->find_spell( 337247 )->effectN( 2 ).percent()
+                                      : 0.0;
 
     // spell is not usable without a 2hander
     if ( p->items[ SLOT_MAIN_HAND ].dbc_inventory_type() != INVTYPE_2HWEAPON )
@@ -728,6 +925,22 @@ struct templars_verdict_t : public holy_power_consumer_t<paladin_melee_attack_t>
           p()->cooldowns.hammer_of_wrath->reset( true );
       }
     }
+
+    // BracketSim legacy compatibility: the runeforge's own roll, independent of
+    // the talent's. The two never coexisted in game, so letting both apply is
+    // correct as well as simpler - the same call the conduits made when several
+    // of them later became talents of the same name.
+    if ( legacy_final_verdict_chance > 0 && rng().roll( legacy_final_verdict_chance ) )
+    {
+      // "Activate" is the usable window the modern kit carries on
+      // buffs.hammer_of_wrath - resetting the cooldown on its own would change
+      // nothing outside execute range, which is most of a fight. Judgment is
+      // deliberately NOT reset here: the modern talent resets both, but this
+      // runeforge's description names only Hammer of Wrath.
+      p()->buffs.hammer_of_wrath->trigger();
+      if ( p()->cooldowns.hammer_of_wrath != nullptr )
+        p()->cooldowns.hammer_of_wrath->reset( true );
+    }
   }
   void impact(action_state_t* s) override
   {
@@ -736,6 +949,13 @@ struct templars_verdict_t : public holy_power_consumer_t<paladin_melee_attack_t>
     {
       double mult = p()->sets->set( PALADIN_RETRIBUTION, MID1, B4 )->effectN( 1 ).percent() * base_multiplier;
       p()->trigger_expurgation( execute_state->target, mult );
+    }
+
+    if ( legacy_echo && rng().roll( legacy_echo_chance ) )
+    {
+      make_event<legacy_echoed_verdict_event_t>( *sim, p(), s->target, legacy_echo,
+                                                 timespan_t::from_millis( 600 ),
+                                                 s->result_amount * legacy_echo_share );
     }
   }
 };
@@ -758,6 +978,21 @@ struct truths_wake_t : public paladin_spell_t
     {
       d->adjust_duration( timespan_t::from_seconds( p()->talents.burn_to_ash->effectN( 1 ).base_value() ) );
     }
+  }
+};
+
+// BracketSim legacy compatibility: the Truth's Wake CONDUIT (167). Midnight's
+// truths_wake_t above is the modern talent and carries its own damage from
+// spell 403695; the conduit's dot instead burns for a share of the Wake of
+// Ashes hit that applied it, so it is a separate action under its own name.
+struct legacy_truths_wake_t : public paladin_spell_t
+{
+  legacy_truths_wake_t( paladin_t* p )
+    : paladin_spell_t( "legacy_truths_wake", p, p->find_spell( 339376 ) )
+  {
+    background    = true;
+    hasted_ticks  = false;
+    tick_may_crit = false;
   }
 };
 
@@ -799,6 +1034,9 @@ struct seething_flames_event_t : public event_t
 struct wake_of_ashes_t : public paladin_spell_t
 {
   truths_wake_t* truths_wake;
+  // BracketSim legacy compatibility: Truth's Wake (conduit 167).
+  legacy_truths_wake_t* legacy_truths_wake;
+  double legacy_truths_wake_share;
   seething_flames_t* seething_flames[2];
 
   wake_of_ashes_t( paladin_t* p, util::string_view options_str ) :
@@ -823,6 +1061,18 @@ struct wake_of_ashes_t : public paladin_spell_t
     truths_wake = new truths_wake_t( p );
     add_child( truths_wake );
 
+    legacy_truths_wake       = nullptr;
+    legacy_truths_wake_share = 0.0;
+    if ( p->legacy_conduits.has( 167 ) )
+    {
+      legacy_truths_wake = new legacy_truths_wake_t( p );
+      // The rank value is the TOTAL share of the hit, spread over the dot's
+      // ticks - effect 2 of the conduit's own spell is that tick count.
+      legacy_truths_wake_share =
+          p->legacy_conduits.percent( 167 ) / p->find_spell( 339374 )->effectN( 2 ).base_value();
+      add_child( legacy_truths_wake );
+    }
+
     if ( p->talents.seething_flames->ok() )
     {
       seething_flames[0] = new seething_flames_t( p, "seething_flames_0", 405345 );
@@ -840,6 +1090,13 @@ struct wake_of_ashes_t : public paladin_spell_t
     {
       truths_wake->set_target( s->target );
       truths_wake->execute();
+
+      if ( legacy_truths_wake )
+      {
+        legacy_truths_wake->base_td = s->result_raw * legacy_truths_wake_share;
+        legacy_truths_wake->set_target( s->target );
+        legacy_truths_wake->execute();
+      }
     }
   }
 
@@ -1082,6 +1339,17 @@ void paladin_t::trigger_es_explosion( player_t* target )
 
 void paladin_t::create_ret_actions()
 {
+  // Legacy Azerite
+  if ( legacy_azerite.lights_decree.enabled() )
+    active.legacy_lights_decree = new legacy_lights_decree_t( this );
+
+  if ( legacy_azerite.expurgation.enabled() )
+    active.legacy_expurgation = new legacy_expurgation_t( this );
+
+  // BracketSim legacy compatibility: the Expurgation CONDUIT (164).
+  if ( legacy_conduits.has( 164 ) )
+    active.legacy_conduit_expurgation = new legacy_conduit_expurgation_t( this );
+
   if ( talents.empyrean_legacy->ok() )
   {
     double empyrean_legacy_mult = 1.0 + talents.empyrean_legacy->effectN( 2 ).percent();
@@ -1143,6 +1411,45 @@ action_t* paladin_t::create_action_retribution( util::string_view name, util::st
 
 void paladin_t::create_buffs_retribution()
 {
+  // Legacy Azerite
+  buffs.legacy_empyrean_power = make_buff( this, "legacy_empyrean_power", find_spell( 286393 ) )
+                                   ->set_default_value( legacy_azerite.empyrean_power.value() );
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+  buffs.legacy_the_magistrates_judgment =
+      make_buff( this, "legacy_the_magistrates_judgment", find_spell( 337682 ) )
+          ->set_default_value_from_effect( 1 )
+          ->set_chance( shadowlands_legacy.the_magistrates_judgment ? 1.0 : 0.0 );
+  buffs.legacy_vanguards_momentum =
+      make_buff( this, "legacy_vanguards_momentum", find_spell( 345046 ) )
+          ->set_default_value_from_effect( 1 )
+          ->set_chance( shadowlands_legacy.vanguards_momentum ? 1.0 : 0.0 );
+
+  // BracketSim legacy compatibility: Of Dusk and Dawn (7055). Reaching 5 Holy
+  // Power grants Blessing of Dawn (337747), 12s of +6% damage. Its effect 1
+  // whitelist names essentially every paladin damage spell there is, so a flat
+  // player multiplier is faithful here rather than an approximation.
+  //
+  // Blessing of Dusk, the effect 2 half, is -4% damage taken. Defensive, so it
+  // is deliberately not modelled and the runeforge is understated by that much.
+  buffs.legacy_blessing_of_dawn =
+      make_buff( this, "legacy_blessing_of_dawn", find_spell( 337747 ) )
+          ->set_default_value_from_effect( 1 )
+          ->set_chance( shadowlands_legacy.of_dusk_and_dawn ? 1.0 : 0.0 );
+
+  // BracketSim legacy compatibility: Relentless Inquisitor (7066), the
+  // RUNEFORGE - 1% haste per stack to five, 12s, off spending Holy Power.
+  // Named apart from the azerite trait of the same name, which already owns
+  // "relentless_inquisitor" in this module's reports.
+  buffs.legacy_relentless_inquisitor_rf =
+      make_buff( this, "relentless_inquisitor_runeforge", find_spell( 337315 ) )
+          ->set_default_value_from_effect( 1, 0.01 )
+          ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+          ->set_chance( shadowlands_legacy.relentless_inquisitor ? 1.0 : 0.0 );
+
+  buffs.legacy_relentless_inquisitor =
+      make_buff<stat_buff_t>( this, "relentless_inquisitor", find_spell( 279204 ) )
+          ->add_stat( STAT_HASTE_RATING, legacy_azerite.relentless_inquisitor.value() );
+
   buffs.rush_of_light = make_buff( this, "rush_of_light", find_spell( 407065 ) )
     ->add_invalidate( CACHE_HASTE )
     ->set_default_value( talents.rush_of_light->effectN( 1 ).percent() );
@@ -1181,6 +1488,12 @@ void paladin_t::init_rng_retribution()
 
 void paladin_t::init_spells_retribution()
 {
+  // Legacy Azerite traits
+  legacy_azerite.expurgation           = find_azerite_spell( "Expurgation" );
+  legacy_azerite.relentless_inquisitor = find_azerite_spell( "Relentless Inquisitor" );
+  legacy_azerite.empyrean_power        = find_azerite_spell( "Empyrean Power" );
+  legacy_azerite.lights_decree         = find_azerite_spell( "Light's Decree" );
+
   // Talents
   talents.blade_of_justice            = find_talent_spell( talent_tree::SPECIALIZATION, "Blade of Justice" );
   talents.divine_storm                = find_talent_spell( talent_tree::SPECIALIZATION, "Divine Storm" );

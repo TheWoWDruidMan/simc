@@ -47,6 +47,7 @@ namespace {
   dbc::filtered_dbc_index_t<dbc_item_data_t, potion_filter_t> potion_data_index;
   dbc::filtered_dbc_index_t<dbc_item_data_t, consumable_filter_t<ITEM_SUBCLASS_FLASK>> flask_data_index;
   dbc::filtered_dbc_index_t<dbc_item_data_t, consumable_filter_t<ITEM_SUBCLASS_FOOD>> food_data_index;
+  dbc::filtered_dbc_index_t<dbc_item_data_t, consumable_filter_t<ITEM_SUBCLASS_ELIXIR>> elixir_data_index;
   dbc::filtered_dbc_index_t<dbc_item_data_t, gem_filter_t> gem_index;
 }
 
@@ -58,11 +59,13 @@ void dbc::init_item_data()
   potion_data_index.init( dbc_item_data_t::data( false ), false );
   flask_data_index.init( dbc_item_data_t::data( false ), false );
   food_data_index.init( dbc_item_data_t::data( false ), false );
+  elixir_data_index.init( dbc_item_data_t::data( false ), false );
   gem_index.init( dbc_item_data_t::data( false ), false );
 #if SC_USE_PTR
   potion_data_index.init( dbc_item_data_t::data( true ), true );
   flask_data_index.init( dbc_item_data_t::data( true ), true );
   food_data_index.init( dbc_item_data_t::data( true ), true );
+  elixir_data_index.init( dbc_item_data_t::data( true ), true );
   gem_index.init( dbc_item_data_t::data( true ), true );
 #endif
 }
@@ -1235,6 +1238,8 @@ const dbc_item_data_t& dbc::find_consumable( item_subclass_consumable type, bool
       return flask_data_index.get( ptr, f );
     case ITEM_SUBCLASS_FOOD:
       return food_data_index.get( ptr, f );
+    case ITEM_SUBCLASS_ELIXIR:
+      return elixir_data_index.get( ptr, f );
     default:
       return dbc_item_data_t::nil();
   }

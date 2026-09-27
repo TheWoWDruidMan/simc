@@ -31,6 +31,11 @@ using namespace helpers;
       // Diabolist
       bool touch_of_rancora = false;
       bool touch_of_rancora_casted = false;
+
+      // BracketSim legacy compatibility: Shadowlands conduits that raise a
+      // named handful of spells rather than everything the class casts.
+      bool legacy_ashen_remains = false;   // conduit 211, needs Immolate up
+      bool legacy_withering_bolt = false;  // conduit 203, scales with dot count
     } affected_by;
 
     struct triggers_t
@@ -192,6 +197,13 @@ using namespace helpers;
     {
       // Shared
 
+      // BracketSim legacy compatibility: both of Decimating Bolt's runeforges
+      // carry spell-modifier auras with their own whitelists, so they are parsed
+      // whole rather than hooked onto a hand-picked spender.
+      parse_effects( p()->buffs.legacy_decaying_soul_satchel );  // 356369
+      parse_effects( p()->buffs.legacy_shard_of_annihilation );  // 356342
+      parse_effects( p()->buffs.legacy_decimating_bolt );        // 325299
+
       // Affliction
       if ( affliction() )
       {
@@ -285,6 +297,57 @@ using namespace helpers;
       {
         int shards_used = as<int>( last_resource_cost );
 
+        // BracketSim legacy compatibility: Wilfred's Sigil of Superior
+        // Summoning, runeforge 7025, spell 337020. "Every Soul Shard you spend
+        // reduces the cooldown of your Summon Demonic Tyrant / Summon Darkglare
+        // / Summon Infernal."
+        //
+        // DETECTED BUT NEVER READ: the flag was set from the bonus id in
+        // sc_warlock_init.cpp and nothing anywhere asked for it, so the
+        // legendary equipped, showed its tooltip, and did nothing.
+        //
+        // One spell, three numbers, one per spec - effect 1 is Affliction's
+        // Darkglare, effect 2 Demonology's Tyrant, effect 3 Destruction's
+        // Infernal. They are milliseconds, so time_value() is the reading
+        // rather than base_value().
+        //
+        // The cooldown is looked up by the action's own name rather than kept
+        // in cooldowns_t, because these three summons have no named cooldown
+        // there and inventing one would touch every spec's init for a legacy
+        // item.
+        if ( p()->shadowlands_legacy.wilfreds_sigil_of_superior_summoning && shards_used > 0 )
+        {
+          const spell_data_t* sigil = p()->find_spell( 337020 );
+          const char* which = nullptr;
+          int effect = 0;
+          if ( p()->specialization() == WARLOCK_AFFLICTION )      { which = "summon_darkglare";       effect = 1; }
+          else if ( p()->specialization() == WARLOCK_DEMONOLOGY ) { which = "summon_demonic_tyrant";  effect = 2; }
+          else if ( p()->specialization() == WARLOCK_DESTRUCTION ){ which = "summon_infernal";        effect = 3; }
+          if ( which )
+          {
+            cooldown_t* cd = p()->get_cooldown( which );
+            if ( cd )
+              cd->adjust( -sigil->effectN( effect ).time_value() * shards_used );
+          }
+        }
+
+        /*
+         * BracketSim legacy compatibility: Grim Inquisitor's Dread Calling,
+         * runeforge 7034, spell 337141. "Each Soul Shard spent on Hand of
+         * Gul'dan increases the damage of your next Call Dreadstalkers by 4%."
+         *
+         * Effect 1 of the driver is a dummy carrying that 4, so the number is
+         * read rather than typed. It is HAND OF GUL'DAN only - this hook sees
+         * every Soul Shard the warlock spends - and the name is the test
+         * because the action has no flag of its own.
+         */
+        if ( p()->shadowlands_legacy.grim_inquisitors_dread_calling && shards_used > 0
+             && util::str_compare_ci( name_str, "hand_of_guldan" ) )
+        {
+          p()->legacy_dread_calling_banked +=
+              p()->find_spell( 337141 )->effectN( 1 ).percent() * shards_used;
+        }
+
         // Only effective shards consumed count towards the Rain of Chaos proc
         if ( p()->buffs.rain_of_chaos->check() && shards_used > 0 )
         {
@@ -364,6 +427,27 @@ using namespace helpers;
       player_t* execute_target = target;
 
       action_base_t::execute();
+
+      // BracketSim legacy (27 Sep 2026): Decimating Bolt's empowerment and Shard of Annihilation ride the next 3
+      // empowered bolts, then they are gone. The old port never took a stack off, so Shard (44 s, 100% crit, +50%
+      // crit damage) covered every bolt: 60 Demonology crit 80 of 81 Demonbolts, a false +69%. Drain Soul and
+      // Malefic Grasp are channels; consuming at the cast is an approximation (their later ticks lose the bonus).
+      if ( !background && ( p()->buffs.legacy_decimating_bolt->check() || p()->buffs.legacy_shard_of_annihilation->check() ) )
+      {
+        switch ( data().id() )
+        {
+          case 686: case 29722: case 244670: case 434506: case 264178: case 198590: case 1261153:
+            p()->buffs.legacy_decimating_bolt->decrement();
+            p()->buffs.legacy_shard_of_annihilation->decrement();
+            break;
+          default:
+            break;
+        }
+      }
+
+      // Legacy Azerite: Rolling Havoc, on any spell that Havoc actually cleaved.
+      if ( p()->legacy_azerite.rolling_havoc.ok() && use_havoc() && num_targets_hit > 1 )
+        p()->buffs.rolling_havoc->trigger();
 
       // NOTE: Casted spells do not consume any Demonic Art buff if none were active at the start of the cast
       if ( diabolist() && triggers.demonic_art && triggers.demonic_art_buff )
@@ -534,6 +618,17 @@ using namespace helpers;
           m *= 1.0 + p()->talents.deaths_embrace->effectN( 1 ).percent() * ( 1 - t->health_percentage() / deaths_embrace_health );
       }
 
+      // BracketSim legacy compatibility: Ashen Remains (conduit 211) raises
+      // Incinerate and Chaos Bolt against a target that has Immolate on it.
+      if ( affected_by.legacy_ashen_remains && td( t )->dots.immolate->is_ticking() )
+        m *= 1.0 + p()->legacy_conduits.percent( 211 );
+
+      // BracketSim legacy compatibility: Withering Bolt (conduit 203) raises
+      // Shadow Bolt and Drain Soul by its value for EACH affliction dot on the
+      // target, which is the whole of what makes it worth anything.
+      if ( affected_by.legacy_withering_bolt )
+        m *= 1.0 + p()->legacy_conduits.percent( 203 ) * td( t )->count_affliction_dots();
+
       return m;
     }
 
@@ -597,7 +692,11 @@ using namespace helpers;
 
       if ( destruction() && affected_by.havoc )
       {
-        base_aoe_multiplier *= p()->talents.havoc_debuff->effectN( 1 ).percent();
+        // BracketSim legacy compatibility: the conduit Duplicitous Havoc (208)
+        // ADDS to Havoc's own share rather than multiplying it, which is how
+        // Shadowlands wrote it. Correctly invisible on a single target.
+        base_aoe_multiplier *= p()->talents.havoc_debuff->effectN( 1 ).percent() +
+                               p()->legacy_conduits.percent( 208 );
         p()->havoc_spells.push_back( this );
       }
     }
@@ -745,6 +844,187 @@ using namespace helpers;
     }
   };
 
+  // BracketSim legacy compatibility: Shadowlands covenant abilities ========
+  // Cast time, cooldown, duration and damage all come from the covenant spells
+  // themselves, which still resolve in current client data.
+
+  struct legacy_scouring_tithe_t : public warlock_spell_t
+  {
+    legacy_scouring_tithe_t( warlock_t* p, util::string_view options_str )
+      : warlock_spell_t( "Scouring Tithe", p, p->legacy_covenant.scouring_tithe, options_str )
+    {
+      // The Soul Shards it refunded when the target died under it are not
+      // modelled: the sim's target does not die.
+    }
+  
+    void execute() override
+    {
+      warlock_spell_t::execute();
+
+      // BracketSim legacy compatibility: the soulbind traits that ride this
+      // covenant ability. The shared player_t layer owns them because they are
+      // identical on every class bar a duration that tracks whatever ability
+      // they ride; only the host and its cooldown are class knowledge.
+      player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_KYRIAN,
+                                              cooldown );
+    }
+};
+
+  struct legacy_impending_catastrophe_dot_t : public warlock_spell_t
+  {
+    legacy_impending_catastrophe_dot_t( warlock_t* p )
+      : warlock_spell_t( "Impending Catastrophe Dot", p, p->legacy_covenant.impending_catastrophe_dot )
+    {
+      background = true;
+      aoe = -1;
+    }
+
+    // BracketSim legacy compatibility: the conduit Catastrophic Origin (219).
+    // It lengthens the dot on the PRIMARY target only - chain_target 0 - which
+    // is how Shadowlands wrote it. Applying it to every target would roughly
+    // double what the conduit is worth on multi-target.
+    timespan_t composite_dot_duration( const action_state_t* s ) const override
+    {
+      timespan_t d = warlock_spell_t::composite_dot_duration( s );
+
+      if ( s->chain_target == 0 && p()->legacy_conduits.has( 219 ) )
+        d *= 1.0 + p()->legacy_conduits.percent( 219 );
+
+      return d;
+    }
+  };
+
+  struct legacy_impending_catastrophe_t : public warlock_spell_t
+  {
+    action_t* impact_damage;
+    action_t* dot_damage;
+
+    legacy_impending_catastrophe_t( warlock_t* p, util::string_view options_str )
+      : warlock_spell_t( "Impending Catastrophe", p, p->legacy_covenant.impending_catastrophe, options_str ),
+        impact_damage( new warlock_spell_t( "Impending Catastrophe Impact", p,
+                                            p->legacy_covenant.impending_catastrophe_impact ) ),
+        dot_damage( new legacy_impending_catastrophe_dot_t( p ) )
+    {
+      may_miss = harmful = false;
+      impact_damage->background = true;
+      add_child( impact_damage );
+      add_child( dot_damage );
+    }
+
+    void execute() override
+    {
+      warlock_spell_t::execute();
+      // BracketSim legacy compatibility: the soulbind traits that ride this
+      // covenant ability. The shared player_t layer owns them because they are
+      // identical on every class bar a duration that tracks whatever ability
+      // they ride; only the host and its cooldown are class knowledge.
+      player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_VENTHYR,
+                                              cooldown );
+
+      // BracketSim legacy compatibility: Contained Perpetual Explosion. Effect 1
+      // is what each EXTRA enemy the cloud passed through was worth, so on a
+      // single target it correctly changes nothing.
+      if ( p()->shadowlands_legacy.contained_perpetual_explosion )
+      {
+        const int extra = std::max( num_targets_hit - 1, 0 );
+        dot_damage->base_multiplier =
+            1.0 + extra * p()->find_spell( 356259 )->effectN( 1 ).percent();
+      }
+
+      // The curse the anima inflicted on landing is not modelled.
+      impact_damage->execute_on_target( target );
+      dot_damage->execute_on_target( target );
+    }
+  };
+
+  struct legacy_decimating_bolt_t : public warlock_spell_t
+  {
+    action_t* bolt;
+
+    legacy_decimating_bolt_t( warlock_t* p, util::string_view options_str )
+      : warlock_spell_t( "Decimating Bolt", p, p->legacy_covenant.decimating_bolt, options_str ),
+        bolt( new warlock_spell_t( "Decimating Bolt Damage", p, p->legacy_covenant.decimating_bolt_damage ) )
+    {
+      may_miss = harmful = false;
+      bolt->background = true;
+      add_child( bolt );
+
+      // BracketSim legacy compatibility: the conduit Fatal Decimation (218)
+      // raises the damage of the missiles, which is where all of Decimating
+      // Bolt's damage lives - the cast itself is harmful = false.
+      bolt->base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 218 );
+    }
+
+    void execute() override
+    {
+      warlock_spell_t::execute();
+      // BracketSim legacy compatibility: the soulbind traits that ride this
+      // covenant ability. The shared player_t layer owns them because they are
+      // identical on every class bar a duration that tracks whatever ability
+      // they ride; only the host and its cooldown are class knowledge.
+      player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NECROLORD,
+                                              cooldown );
+      // Effects 2 to 4 fire the same bolt spell three times, 100ms apart. The
+      // Shadow Bolt damage buff it left behind is not modelled.
+      for ( size_t idx = 2; idx <= data().effect_count(); idx++ )
+        if ( data().effectN( idx ).trigger_spell_id() > 0 )
+          bolt->execute_on_target( target );
+
+      // BracketSim legacy (27 Sep 2026): the empowerment (3 stacks) and Shard of Annihilation ride this cast.
+      // Decaying Soul Satchel does NOT - it is Soul Rot's (Night Fae) legendary (Wowhead 356369: "Each target
+      // affected by Soul Rot increases your haste and critical strike chance by 5% for 8 sec"); see legacy_soul_rot_t.
+      p()->buffs.legacy_decimating_bolt->trigger( p()->buffs.legacy_decimating_bolt->max_stack() );
+      p()->buffs.legacy_shard_of_annihilation->trigger(
+          p()->buffs.legacy_shard_of_annihilation->max_stack() );
+    }
+  };
+
+  struct legacy_soul_rot_t : public warlock_spell_t
+  {
+    legacy_soul_rot_t( warlock_t* p, util::string_view options_str )
+      : warlock_spell_t( "Soul Rot", p, p->legacy_covenant.soul_rot, options_str )
+    {
+      // The self-heal from the drain is not modelled.
+      aoe = -1;
+
+      // BracketSim legacy compatibility: the conduit Soul Eater (220) widens
+      // the drain. On a single target this half does nothing, which is correct.
+      if ( p->legacy_conduits.has( 220 ) )
+        radius *= 1.0 + p->legacy_conduits.percent( 220 );
+    }
+
+    // The other half of Soul Eater: every tick hits harder. Shadowlands also
+    // doubled the primary target's ticks, but that is Soul Rot's own hardcoded
+    // tooltip behaviour and not the conduit's, so it is deliberately not added
+    // here - this port never had it, and slipping it in under a conduit patch
+    // would credit the conduit with someone else's damage.
+    double composite_ta_multiplier( const action_state_t* s ) const override
+    {
+      double pm = warlock_spell_t::composite_ta_multiplier( s );
+
+      if ( p()->legacy_conduits.has( 220 ) )
+        pm *= 1.0 + p()->legacy_conduits.percent( 220 );
+
+      return pm;
+    }
+  
+    void execute() override
+    {
+      warlock_spell_t::execute();
+
+      // BracketSim legacy compatibility: the soulbind traits that ride this
+      // covenant ability. The shared player_t layer owns them because they are
+      // identical on every class bar a duration that tracks whatever ability
+      // they ride; only the host and its cooldown are class knowledge.
+      player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NIGHT_FAE,
+                                              cooldown );
+
+      // BracketSim legacy (27 Sep 2026): Decaying Soul Satchel, one stack per target Soul Rot hit.
+      if ( num_targets_hit > 0 )
+        p()->buffs.legacy_decaying_soul_satchel->trigger( as<int>( num_targets_hit ) );
+    }
+};
+
   struct corruption_t : public warlock_spell_t
   {
     struct corruption_dot_t : public warlock_spell_t
@@ -767,6 +1047,25 @@ using namespace helpers;
         affected_by.deaths_embrace = affliction() && p->talents.deaths_embrace.ok();
       }
 
+
+      // BracketSim legacy compatibility: Sacrolash's Dark Strike (7030).
+      // Effect 1 of 337111 is a flat percent on periodic damage, and its own
+      // affected-spell list already names Wither as well as Corruption, which
+      // is why both dots carry this. The Curse extension in its tooltip is not
+      // modelled - Shadowlands did not model it either.
+      //
+      // Midnight has a TALENT of the same name, looked up in sc_warlock_init
+      // and never applied - its own comment says "(not implemented)". So this
+      // is the runeforge alone and does not double up with anything.
+      double composite_ta_multiplier( const action_state_t* s ) const override
+      {
+        double m = warlock_spell_t::composite_ta_multiplier( s );
+
+        if ( p()->shadowlands_legacy.sacrolashs_dark_strike )
+          m *= 1.0 + p()->find_spell( 337111 )->effectN( 1 ).percent();
+
+        return m;
+      }
       void tick( dot_t* d ) override
       {
         warlock_spell_t::tick( d );
@@ -830,6 +1129,8 @@ using namespace helpers;
     {
       affected_by.sacrificed_souls = demonology() && p->talents.sacrificed_souls.ok();
       affected_by.deaths_embrace = affliction() && p->talents.deaths_embrace.ok();
+      // BracketSim legacy compatibility: Withering Bolt (conduit 203) names this spell.
+      affected_by.legacy_withering_bolt = true;
 
       if ( demonology() )
       {
@@ -876,6 +1177,12 @@ using namespace helpers;
 
       if ( time_to_execute == 0_ms )
         p()->buffs.nightfall->decrement();
+
+      // BracketSim legacy compatibility: Balespider's Burning Core, runeforge
+      // 7036. "Shadow Bolt increases the damage of your Demonbolt." The buff
+      // itself names Demonbolt, so only Demonology has anything to gain.
+      if ( p()->shadowlands_legacy.balespiders_burning_core && demonology() )
+        p()->buffs.legacy_balespiders_burning_core->trigger();
     }
 
     void impact( action_state_t* s ) override
@@ -1065,6 +1372,9 @@ using namespace helpers;
         background = dual = true;
         dot_ignore_stack = true;
 
+        // BracketSim legacy compatibility: Sacrolash's Dark Strike (7030) -
+        // see the Corruption dot; 337111 names Wither too.
+
         affected_by.chaotic_energies = destruction();
 
         if ( affliction() )
@@ -1080,6 +1390,25 @@ using namespace helpers;
 
           affected_by.deaths_embrace = p->talents.deaths_embrace.ok();
         }
+      }
+
+      // BracketSim legacy compatibility: Sacrolash's Dark Strike (7030).
+      // Effect 1 of 337111 is a flat percent on periodic damage, and its own
+      // affected-spell list already names Wither as well as Corruption, which
+      // is why both dots carry this. The Curse extension in its tooltip is not
+      // modelled - Shadowlands did not model it either.
+      //
+      // Midnight has a TALENT of the same name, looked up in sc_warlock_init
+      // and never applied - its own comment says "(not implemented)". So this
+      // is the runeforge alone and does not double up with anything.
+      double composite_ta_multiplier( const action_state_t* s ) const override
+      {
+        double m = warlock_spell_t::composite_ta_multiplier( s );
+
+        if ( p()->shadowlands_legacy.sacrolashs_dark_strike )
+          m *= 1.0 + p()->find_spell( 337111 )->effectN( 1 ).percent();
+
+        return m;
       }
 
       void tick( dot_t* d ) override
@@ -1115,6 +1444,12 @@ using namespace helpers;
 
             if ( p()->talents.flashpoint.ok() && d->target->health_percentage() >= p()->talents.flashpoint->effectN( 2 ).base_value() )
               p()->buffs.flashpoint->trigger();
+
+            // Legacy Azerite: Flashpoint. Its spell carries only the haste
+            // amount; the 80% health threshold exists only in the tooltip text,
+            // so it is named here rather than read from a missing effect.
+            if ( p()->legacy_azerite.flashpoint.ok() && d->target->health_percentage() >= 80.0 )
+              p()->buffs.legacy_flashpoint->trigger();
 
             if ( p()->talents.demonfire_infusion.ok() && p()->progress_rng.demonfire_infusion->trigger( d->state ) )
             {
@@ -1402,6 +1737,26 @@ using namespace helpers;
   // Soul Harvester Actions End
   // Affliction Actions Begin
 
+  // Legacy Azerite: Pandemic Invocation =====================================
+
+  struct legacy_pandemic_invocation_t : public warlock_spell_t
+  {
+    legacy_pandemic_invocation_t( warlock_t* p )
+      : warlock_spell_t( "Pandemic Invocation", p, p->find_spell( 289367 ) )
+    {
+      background  = true;
+      base_dd_min = base_dd_max = p->legacy_azerite.pandemic_invocation.value();
+    }
+
+    void execute() override
+    {
+      warlock_spell_t::execute();
+
+      if ( p()->rng().roll( p()->legacy_azerite.pandemic_invocation.spell_ref().effectN( 3 ).percent() / 100.0 ) )
+        p()->resource_gain( RESOURCE_SOUL_SHARD, 1.0, p()->gains.legacy_pandemic_invocation );
+    }
+  };
+
   struct agony_t : public warlock_spell_t
   {
     agony_t* twin = nullptr;
@@ -1411,6 +1766,10 @@ using namespace helpers;
       : warlock_spell_t( "Agony", p, p->talents.agony, options_str )
     {
       may_crit = false;
+
+      // BracketSim legacy compatibility: Rolling Agony (conduit 201) lengthens
+      // Agony. Its rank value is in milliseconds, not a percentage.
+      dot_duration += timespan_t::from_millis( p->legacy_conduits.value( 201 ) );
 
       triggers.ravenous_afflictions = p->talents.ravenous_afflictions.ok();
 
@@ -1439,9 +1798,30 @@ using namespace helpers;
       warlock_spell_t::last_tick( d );
     }
 
+    // Legacy Azerite: Sudden Onset adds flat damage to every Agony tick.
+    double bonus_ta( const action_state_t* s ) const override
+    {
+      double ta = warlock_spell_t::bonus_ta( s );
+
+      ta += p()->legacy_azerite.sudden_onset.value();
+      ta += p()->legacy_azerite.dreadful_calling.value( 2 );
+
+      return ta;
+    }
+
     void execute() override
     {
+      // Legacy Azerite: Pandemic Invocation fires when the dot is refreshed
+      // inside its pandemic window, so the check has to happen before execute.
+      bool pandemic_invocation_usable =
+          p()->legacy_azerite.pandemic_invocation.ok() && td( target )->dots.agony->is_ticking() &&
+          td( target )->dots.agony->remains() <=
+              p()->legacy_azerite.pandemic_invocation.spell_ref().effectN( 2 ).time_value();
+
       warlock_spell_t::execute();
+
+      if ( pandemic_invocation_usable && p()->legacy_pandemic_invocation )
+        p()->legacy_pandemic_invocation->execute_on_target( target );
 
       if ( twin != nullptr && execute_state )
       {
@@ -1462,6 +1842,13 @@ using namespace helpers;
         if ( p()->talents.sudden_onset.ok() )
           initial_stacks += ( int )( p()->talents.sudden_onset->effectN( 2 ).base_value() );
 
+        // Legacy Azerite: Sudden Onset starts Agony at a floor of its own. The
+        // trait and the modern talent of the same name both apply.
+        if ( p()->legacy_azerite.sudden_onset.ok() )
+          initial_stacks = std::max(
+              initial_stacks,
+              ( int )( p()->legacy_azerite.sudden_onset.spell_ref().effectN( 2 ).base_value() ) );
+
         if ( active_4pc<MID1>() )
           initial_stacks += ( int )( p()->tier.wl_affliction_12_0_class_set_4pc->effectN( 1 ).base_value() );
 
@@ -1476,11 +1863,46 @@ using namespace helpers;
     {
       warlock_spell_t::tick( d );
 
+      // BracketSim legacy compatibility: Corrupting Leer rolls on every Agony
+      // tick to pull Summon Darkglare forward. The five seconds is the value
+      // Shadowlands hardcoded, with a comment saying it lives in the spell
+      // description; the conduit's rank supplies the chance. Midnight caches no
+      // Darkglare cooldown, so it is looked up by name the way the Dreadful
+      // Calling azerite port already does.
+      if ( p()->legacy_conduits.has( 174 ) &&
+           rng().roll( p()->legacy_conduits.percent( 174 ) ) )
+      {
+        p()->get_cooldown( "summon_darkglare" )->adjust( -5.0_s );
+      }
+
+      // BracketSim legacy compatibility: Inevitable Demise banks stacks off
+      // Agony ticks, but only while Drain Life is not channelling. Midnight
+      // tracks Drain Life as a target dot rather than a self buff.
+      if ( result_is_hit( d->state->result ) && p()->legacy_azerite.inevitable_demise.ok() &&
+           !( p()->channeling && p()->channeling->id == 234153 ) )
+      {
+        p()->buffs.inevitable_demise->trigger();
+      }
+
       if ( result_is_hit( d->state->result ) )
       {
         if ( p()->progress_rng.agony_energize->trigger( d->state ) )
         {
           p()->resource_gain( RESOURCE_SOUL_SHARD, 1.0, p()->gains.agony );
+
+          // Legacy Azerite: Wracking Brilliance fires on every second Agony shard.
+          if ( p()->legacy_azerite.wracking_brilliance.ok() )
+          {
+            if ( p()->legacy_wracking_brilliance )
+            {
+              p()->legacy_wracking_brilliance = false;
+              p()->buffs.wracking_brilliance->trigger();
+            }
+            else
+            {
+              p()->legacy_wracking_brilliance = true;
+            }
+          }
 
           // Agony energize spell triggers procs
           p()->trigger_aura_applied_callbacks( p()->proc_data_entries.agony_energize, p() );
@@ -1517,6 +1939,11 @@ using namespace helpers;
       // - Cull the Weak: reduces the cooldown of Dark Harvest
       // - Hellcaller Blackened Soul: increments Wither stacks on impact
       // - Shard Instability: unaffected; Fatal Echoes does not consume a stack of this buff
+
+      // Legacy Azerite: Cascading Calamity rewards refreshing Unstable
+      // Affliction on a target that already has it.
+      if ( p()->legacy_azerite.cascading_calamity.ok() && td( ua_target )->dots.unstable_affliction->is_ticking() )
+        p()->buffs.legacy_cascading_calamity->trigger();
 
       warlock_spell_t::execute();
 
@@ -2282,6 +2709,9 @@ using namespace helpers;
     {
       channeled = true;
 
+      // BracketSim legacy compatibility: Withering Bolt (conduit 203) names this spell.
+      affected_by.legacy_withering_bolt = true;
+
       affected_by.deaths_embrace = p->talents.deaths_embrace.ok();
 
       if ( p->talents.cunning_cruelty.ok() )
@@ -2596,6 +3026,18 @@ using namespace helpers;
     { }
   };
 
+  // Legacy Azerite: Umbral Blaze ============================================
+
+  struct legacy_umbral_blaze_t : public warlock_spell_t
+  {
+    legacy_umbral_blaze_t( warlock_t* p ) : warlock_spell_t( "Umbral Blaze", p, p->find_spell( 273526 ) )
+    {
+      background   = true;
+      base_td      = p->legacy_azerite.umbral_blaze.value();
+      hasted_ticks = false;
+    }
+  };
+
   struct hand_of_guldan_t : public warlock_spell_t
   {
     struct hand_of_guldan_state_t : public action_state_t
@@ -2843,6 +3285,23 @@ using namespace helpers;
 
       warlock_spell_t::execute();
 
+      // Legacy Azerite: Demonic Meteor refunds a Soul Shard, at a chance scaled
+      // by how many were spent.
+      if ( p()->legacy_azerite.demonic_meteor.ok() &&
+           rng().roll( p()->legacy_azerite.demonic_meteor.spell_ref().effectN( 2 ).percent() * shards_used ) )
+      {
+        p()->resource_gain( RESOURCE_SOUL_SHARD, 1.0, p()->gains.legacy_demonic_meteor );
+      }
+
+      // BracketSim legacy compatibility: the conduit Borne of Blood (204). A
+      // flat chance per cast, not scaled by shards spent - that scaling belongs
+      // to Demonic Meteor above and the two are easy to confuse.
+      if ( p()->legacy_conduits.has( 204 ) &&
+           rng().roll( p()->legacy_conduits.percent( 204 ) ) )
+      {
+        p()->buffs.demonic_core->trigger();
+      }
+
       if ( p()->talents.doom.ok() )
       {
         for ( const auto t : p()->sim->target_non_sleeping_list )
@@ -2870,11 +3329,36 @@ using namespace helpers;
                             p()->gains.dominion_of_argus );
     }
 
+    // Legacy Azerite: Demonic Meteor
+    double bonus_da( const action_state_t* s ) const override
+    {
+      double da = warlock_spell_t::bonus_da( s );
+
+      da += p()->legacy_azerite.demonic_meteor.value();
+
+      return da;
+    }
+
     void impact( action_state_t* s ) override
     {
       warlock_spell_t::impact( s );
 
       impact_spell->execute_on_target( s->target );
+
+      // BracketSim legacy compatibility: Forces of the Horned Nightmare. Effect
+      // 1 of the runeforge is the chance the meteor lands a second time.
+      if ( p()->shadowlands_legacy.forces_of_the_horned_nightmare &&
+           rng().roll( p()->find_spell( 337146 )->effectN( 1 ).percent() ) )
+      {
+        make_event( *sim, 400_ms, [ this, t = s->target ] { impact_spell->execute_on_target( t ); } );
+      }
+
+      // Legacy Azerite: Umbral Blaze burns the primary target.
+      if ( p()->legacy_azerite.umbral_blaze.ok() && p()->legacy_umbral_blaze && s->target == target &&
+           rng().roll( p()->find_spell( 273524 )->proc_chance() ) )
+      {
+        p()->legacy_umbral_blaze->execute_on_target( s->target );
+      }
     }
   };
 
@@ -2965,6 +3449,20 @@ using namespace helpers;
       p()->buffs.demonic_core->decrement();
 
       p()->buffs.power_siphon->decrement();
+
+      /*
+       * BracketSim legacy compatibility: Balespider's Burning Core, runeforge
+       * 7036 - spent here, after the damage has been dealt.
+       *
+       * THE CONSUMPTION IS AN INFERENCE, and the only one in this port. Spell
+       * 337161 carries the duration, the stack cap and the percent; it does not
+       * carry "your NEXT Demonbolt", which is what the live 9.x tooltip said.
+       * Without consuming, a Demonology rotation sits at four stacks from the
+       * first few seconds onwards and never leaves, which makes the stack cap
+       * decoration and hands the build a permanent +60% Demonbolt. Reading the
+       * cap as meaningful is the only reading under which the two agree.
+       */
+      p()->buffs.legacy_balespiders_burning_core->expire();
     }
 
     void impact( action_state_t* s ) override
@@ -2973,6 +3471,18 @@ using namespace helpers;
 
       if ( p()->talents.doom.ok() && debug_cast<demonbolt_state_t*>( s )->core_spent && !td( s->target )->debuffs.doom->check() )
         td( s->target )->debuffs.doom->trigger();
+    }
+
+    double action_multiplier() const override
+    {
+      double m = warlock_spell_t::action_multiplier();
+
+      // Balespider's Burning Core: effect 1 of 337161 per stack.
+      if ( p()->shadowlands_legacy.balespiders_burning_core )
+        m *= 1.0 + p()->buffs.legacy_balespiders_burning_core->check()
+                     * p()->buffs.legacy_balespiders_burning_core->default_value;
+
+      return m;
     }
   };
 
@@ -3148,6 +3658,10 @@ using namespace helpers;
 
           launch_counter++;
         }
+
+        // Legacy Azerite: Explosive Potential rewards imploding a real group.
+        if ( p()->legacy_azerite.explosive_potential.ok() && launch_counter >= 3 )
+          p()->buffs.legacy_explosive_potential->trigger();
       }
 
       if ( p()->talents.to_hell_and_back.ok() )
@@ -3414,6 +3928,25 @@ using namespace helpers;
 
       warlock_spell_t::execute();
 
+      // Legacy Azerite: Dreadful Calling pulls in Summon Darkglare. Midnight has
+      // no cached cooldown for it, so it is looked up by name.
+      if ( p()->legacy_azerite.dreadful_calling.ok() )
+        p()->get_cooldown( "summon_darkglare" )
+            ->adjust( -1 * p()->legacy_azerite.dreadful_calling.spell_ref().effectN( 1 ).time_value() );
+
+      /*
+       * BracketSim legacy compatibility: Grim Inquisitor's Dread Calling,
+       * runeforge 7034. What was banked by Hand of Gul'dan is handed to the
+       * dogs about to be summoned and the bank is emptied - BEFORE the summons,
+       * so every Dreadstalker in this cast reads the same number, and any shard
+       * spent after this point belongs to the next pack.
+       */
+      if ( p()->shadowlands_legacy.grim_inquisitors_dread_calling )
+      {
+        p()->legacy_dread_calling_summoned = p()->legacy_dread_calling_banked;
+        p()->legacy_dread_calling_banked = 0.0;
+      }
+
       unsigned count = as<unsigned>( p()->talents.call_dreadstalkers->effectN( 1 ).base_value() );
 
       const auto delay_dur_adjusts = p()->dreadstalkers_delay_duration_adjustment_helper( *call_dread_target );
@@ -3576,6 +4109,14 @@ using namespace helpers;
     void execute() override
     {
       warlock_spell_t::execute();
+
+      // Legacy Azerite: Baleful Invocation hands back Soul Shards on summon.
+      if ( p()->legacy_azerite.baleful_invocation.ok() )
+      {
+        p()->resource_gain( RESOURCE_SOUL_SHARD,
+                            p()->find_spell( 287060 )->effectN( 1 ).base_value() / 10.0,
+                            p()->gains.legacy_baleful_invocation );
+      }
 
       // Last tested 2021-07-13
       // There is a chance for tyrant to get an extra cast off before reaching the required haste breakpoint.
@@ -3922,11 +4463,19 @@ using namespace helpers;
       : warlock_spell_t( "Incinerate", p, p->warlock_base.incinerate, options_str ),
       fnb_action( new incinerate_fnb_t( p ) )
     {
+      // BracketSim legacy compatibility: Ashen Remains (conduit 211) names this spell.
+      affected_by.legacy_ashen_remains = true;
       energize_type = action_energize::PER_HIT;
       energize_resource = RESOURCE_SOUL_SHARD;
       energize_amount = ( p->warlock_base.incinerate_energize->effectN( 1 ).base_value() ) / 10.0;
 
       energize_mult = 1.0 + p->talents.diabolic_embers->effectN( 1 ).percent();
+
+      // BracketSim legacy compatibility: Embers of the Diabolic Raiment. Effect
+      // 1 of the runeforge is how much more Soul Shard Incinerate hands back.
+      if ( p->shadowlands_legacy.embers_of_the_diabolic_raiment )
+        energize_mult += p->find_spell( 337272 )->effectN( 1 ).percent();
+
       energize_amount *= energize_mult;
 
       affected_by.chaotic_energies = true;
@@ -3934,6 +4483,9 @@ using namespace helpers;
 
       triggers.fiendish_cruelty = p->talents.fiendish_cruelty.ok();
       triggers.embers_of_nihilam_1 = p->talents.embers_of_nihilam_1.ok();
+
+      // Legacy Azerite: Chaos Shards also adds flat damage to Incinerate.
+      base_dd_adder += p->legacy_azerite.chaos_shards.value( 2 );
 
       add_child( fnb_action );
     }
@@ -3955,8 +4507,10 @@ using namespace helpers;
       if ( affected_by.havoc )
       {
         // NOTE: The FnB talent adds its bonus damage to Incinerate Havoc (regardless of havoc target range)
+        // BracketSim legacy compatibility: the conduit Duplicitous Havoc (208).
         base_aoe_multiplier *= p()->talents.havoc_debuff->effectN( 1 ).percent() +
-                               p()->talents.fire_and_brimstone->effectN( 1 ).percent();
+                               p()->talents.fire_and_brimstone->effectN( 1 ).percent() +
+                               p()->legacy_conduits.percent( 208 );
         p()->havoc_spells.push_back( this );
       }
     }
@@ -4041,6 +4595,30 @@ using namespace helpers;
         affected_by.chaotic_energies = true;
       }
 
+      // BracketSim legacy compatibility: the conduit Combusting Engine (212).
+      double composite_ta_multiplier( const action_state_t* s ) const override
+      {
+        double m = warlock_spell_t::composite_ta_multiplier( s );
+
+        if ( td( s->target )->debuffs.legacy_combusting_engine->check() )
+          m *= 1.0 + td( s->target )->debuffs.legacy_combusting_engine->check_stack_value();
+
+        return m;
+      }
+
+      // Reapplying Immolate clears the stacks it was feeding on.
+      void impact( action_state_t* s ) override
+      {
+        warlock_spell_t::impact( s );
+        td( s->target )->debuffs.legacy_combusting_engine->expire();
+      }
+
+      void last_tick( dot_t* d ) override
+      {
+        warlock_spell_t::last_tick( d );
+        td( d->target )->debuffs.legacy_combusting_engine->expire();
+      }
+
       void tick( dot_t* d ) override
       {
         warlock_spell_t::tick( d );
@@ -4054,6 +4632,12 @@ using namespace helpers;
 
           if ( p()->talents.flashpoint.ok() && d->target->health_percentage() >= p()->talents.flashpoint->effectN( 2 ).base_value() )
             p()->buffs.flashpoint->trigger();
+
+          // Legacy Azerite: Flashpoint. Its spell carries only the haste
+          // amount; the 80% health threshold exists only in the tooltip text,
+          // so it is named here rather than read from a missing effect.
+          if ( p()->legacy_azerite.flashpoint.ok() && d->target->health_percentage() >= 80.0 )
+            p()->buffs.legacy_flashpoint->trigger();
 
           if ( p()->talents.demonfire_infusion.ok() && p()->progress_rng.demonfire_infusion->trigger( d->state ) )
           {
@@ -4284,6 +4868,8 @@ using namespace helpers;
     chaos_bolt_t( warlock_t* p, util::string_view options_str )
       : warlock_spell_t( "Chaos Bolt", p, p->talents.chaos_bolt, options_str )
     {
+      // BracketSim legacy compatibility: Ashen Remains (conduit 211) names this spell.
+      affected_by.legacy_ashen_remains = true;
       affected_by.chaotic_energies = true;
       affected_by.havoc = true;
       affected_by.chaos_incarnate = p->talents.chaos_incarnate.ok();
@@ -4355,6 +4941,30 @@ using namespace helpers;
       warlock_spell_t::schedule_execute( s );
     }
 
+    // BracketSim legacy compatibility: Madness of the Azj'Aqir speeds up and
+    // amplifies the next Chaos Bolt. Effects 2 and 1 of spell 337170, which
+    // Midnight ships.
+    timespan_t execute_time() const override
+    {
+      timespan_t t = warlock_spell_t::execute_time();
+
+      if ( p()->buffs.legacy_madness_of_the_azjaqir->check() )
+        t *= 1.0 + p()->buffs.legacy_madness_of_the_azjaqir->data().effectN( 2 ).percent();
+
+      return t;
+    }
+
+    double action_multiplier() const override
+    {
+      double m = warlock_spell_t::action_multiplier();
+
+      if ( p()->buffs.legacy_madness_of_the_azjaqir->check() )
+        m *= 1.0 + p()->buffs.legacy_madness_of_the_azjaqir->data().effectN( 1 ).percent();
+
+      return m;
+    }
+
+
     void execute() override
     {
       if ( pre_execute_state )
@@ -4371,6 +4981,12 @@ using namespace helpers;
       if ( p()->hero.diabolic_oculi.ok() )
         p()->buffs.demonic_oculi->trigger();
 
+      // BracketSim legacy compatibility: Madness of the Azj'Aqir. The buff was
+      // built with its chance set from the runeforge flag and nothing ever
+      // fired it; Shadowlands triggers it here, on every Chaos Bolt.
+      if ( p()->shadowlands_legacy.madness_of_the_azjaqir )
+        p()->buffs.legacy_madness_of_the_azjaqir->trigger();
+
       // NOTE: 2026-03-17 Rancora-empowered Havoc copies behave as if +0.20 were added to the Havoc coefficient before only one 1.20x bonus, instead
       // of applying the second 1.20x multiplicatively to the final damage (bug). To emulate that behavior, temporarily rescale 'base_aoe_multiplier'
       // from: 0.60 -> 0.6667 and 0.70 -> 0.75; so that execute() produces final damage multipliers of 0.96 / 1.08 on Havoc copies.
@@ -4380,6 +4996,13 @@ using namespace helpers;
         base_aoe_multiplier *= havoc_rancora_mul_adjust;
 
       warlock_spell_t::execute();
+
+      // Legacy Azerite: Chaotic Inferno speeds up the next Incinerate; Crashing
+      // Chaos is spent here.
+      if ( p()->legacy_azerite.chaotic_inferno.ok() )
+        p()->buffs.legacy_chaotic_inferno->trigger();
+
+      p()->buffs.legacy_crashing_chaos->decrement();
 
       base_aoe_multiplier = prev_base_aoe_multiplier; // Restore original previous havoc aoe multiplier
 
@@ -4450,6 +5073,15 @@ using namespace helpers;
 
       cooldown->hasted = true;
 
+      // BracketSim legacy compatibility: Cinders of the Azj'Aqir gives
+      // Conflagrate another charge and a shorter recharge.
+      if ( p->shadowlands_legacy.cinders_of_the_azjaqir )
+      {
+        const spell_data_t* cinders = p->find_spell( 337166 );
+        cooldown->charges += as<int>( cinders->effectN( 1 ).base_value() );
+        cooldown->duration += timespan_t::from_millis( cinders->effectN( 2 ).base_value() );
+      }
+
       if ( p->talents.roaring_blaze.ok() )
       {
         if ( p->hero.wither.ok() )
@@ -4467,6 +5099,17 @@ using namespace helpers;
     void impact( action_state_t* s ) override
     {
       warlock_spell_t::impact( s );
+
+      // BracketSim legacy compatibility: the conduit Combusting Engine (212).
+      // Only on a target that already has Immolate - Shadowlands checked the
+      // same thing, with a note that it was unsure whether the game stacks it
+      // without one. Following the reference rather than guessing.
+      if ( p()->legacy_conduits.has( 212 ) && result_is_hit( s->result ) &&
+           td( s->target )->dots.immolate->is_ticking() )
+      {
+        td( s->target )->debuffs.legacy_combusting_engine->increment(
+            1, td( s->target )->debuffs.legacy_combusting_engine->default_value );
+      }
 
       // Roaring Blaze doesn't apply to havoc targets
       if ( p()->talents.roaring_blaze.ok() && ( s->chain_target == 0 ) && result_is_hit( s->result ) )
@@ -4504,6 +5147,11 @@ using namespace helpers;
 
       if ( p()->talents.backdraft.ok() )
         p()->buffs.backdraft->trigger();
+
+      // Legacy Azerite: Bursting Flare pays out into a burning target.
+      if ( p()->legacy_azerite.bursting_flare.ok() &&
+           ( td( target )->dots.immolate->is_ticking() || td( target )->dots.wither->is_ticking() ) )
+        p()->buffs.legacy_bursting_flare->trigger();
     }
 
     double composite_da_multiplier( const action_state_t* s ) const override
@@ -5078,6 +5726,10 @@ using namespace helpers;
 
       if ( p()->talents.crashing_chaos.ok() )
         p()->buffs.crashing_chaos->trigger();
+
+      // Legacy Azerite: Crashing Chaos, which stacks with the modern talent.
+      if ( p()->legacy_azerite.crashing_chaos.ok() )
+        p()->buffs.legacy_crashing_chaos->trigger( p()->buffs.legacy_crashing_chaos->max_stack() );
 
       if ( p()->talents.rain_of_chaos.ok() )
         p()->buffs.rain_of_chaos->trigger();
@@ -5827,6 +6479,16 @@ using namespace helpers;
       return nullptr;
     }
 
+    // BracketSim legacy compatibility: Shadowlands covenant abilities.
+    if ( action_name == "scouring_tithe" && legacy_covenant.scouring_tithe->ok() )
+      return new legacy_scouring_tithe_t( this, options_str );
+    if ( action_name == "impending_catastrophe" && legacy_covenant.impending_catastrophe->ok() )
+      return new legacy_impending_catastrophe_t( this, options_str );
+    if ( action_name == "decimating_bolt" && legacy_covenant.decimating_bolt->ok() )
+      return new legacy_decimating_bolt_t( this, options_str );
+    if ( action_name == "soul_rot" && legacy_covenant.soul_rot->ok() )
+      return new legacy_soul_rot_t( this, options_str );
+
     // Pets
     if ( action_name == "summon_felhunter" )
       return new summon_main_pet_t( "felhunter", this );
@@ -5987,11 +6649,20 @@ using namespace helpers;
 
     create_soul_harvester_proc_actions();
 
+    // Legacy Azerite: Umbral Blaze hangs off Hand of Gul'dan, which every
+    // specialization can reach through its shared action list.
+    if ( legacy_azerite.umbral_blaze.ok() )
+      legacy_umbral_blaze = new legacy_umbral_blaze_t( this );
+
     player_t::create_actions();
   }
 
   void warlock_t::create_affliction_proc_actions()
   {
+    // Legacy Azerite
+    if ( legacy_azerite.pandemic_invocation.ok() )
+      legacy_pandemic_invocation = new legacy_pandemic_invocation_t( this );
+
     if ( talents.shadow_of_nathreza_1.ok() )
       proc_actions.shadow_of_nathreza = new shadow_of_nathreza_dmg_t( this );
 
@@ -6101,6 +6772,40 @@ using namespace helpers;
           if ( new_ == 1 ) cb->activate();
           else cb->deactivate();
         } );
+    }
+
+    /*
+     * BracketSim legacy compatibility: Relic of Demonic Synergy, runeforge
+     * 7027, driver 337057.
+     *
+     * "Damage done by you or your primary demon has a chance to grant THE OTHER
+     * ONE increased damage for 15 sec." Two directions, so two drivers, and
+     * each one grants the buff the other side wears. Real PPM 3 and the proc
+     * flags are the driver spell's own and are not restated here.
+     *
+     * The warlock's driver is built here. The primary demon's is built in
+     * felguard_pet_t, because the callback has to be registered on the actor
+     * whose damage drives it.
+     */
+    if ( shadowlands_legacy.relic_of_demonic_synergy )
+    {
+      auto const synergy = new special_effect_t( this );
+      synergy->name_str = "legacy_relic_of_demonic_synergy";
+      synergy->spell_id = 337057;
+      // The warlock's damage buffs the DEMON.
+      synergy->custom_buff = buffs.legacy_demonic_synergy_pet;
+      special_effects.push_back( synergy );
+
+      /*
+       * initialize() BY HAND, because player_t::init_special_effects() has
+       * already run by the time this line is reached and it is what normally
+       * initializes everything in `special_effects`. Without it the callback is
+       * constructed, never registered, and the legendary measures as an exact
+       * tie - which is exactly what it did on the first build: 11,824 DPS
+       * against an 11,823 reference, with no buff in the report at all.
+       */
+      auto cb = new dbc_proc_callback_t( this, *synergy );
+      cb->initialize();
     }
   }
 

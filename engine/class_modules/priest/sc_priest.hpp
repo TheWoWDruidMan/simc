@@ -15,6 +15,11 @@
 
 #include "simulationcraft.hpp"
 
+// BracketSim legacy compatibility: Shadowlands conduits. Priest is split across
+// several translation units, so the include has to be here with the member and
+// not in one .cpp the way the single-file modules do it.
+#include "player/legacy_conduits.hpp"
+
 namespace priestspace
 {
 /* Forward declarations
@@ -108,6 +113,12 @@ public:
     propagate_const<buff_t*> death_and_madness_debuff;
     buff_t* atonement;
     propagate_const<buff_t*> horrific_visions;
+    // BracketSim legacy compatibility: Kevin's Wrath, the debuff the Oozeling
+    // leaves - the target takes 6% more damage from you.
+    buff_t* legacy_kevins_wrath;
+    // BracketSim legacy compatibility: the Wrathful Faerie sits on the target
+    // and turns the priest's damage against it into Insanity.
+    buff_t* legacy_wrathful_faerie;
   } buffs;
 
   priest_t& priest()
@@ -190,6 +201,9 @@ public:
     propagate_const<buff_t*> borrowed_time;
     propagate_const<buff_t*> revel_in_purity;
     propagate_const<buff_t*> harsh_discipline;
+    // BracketSim legacy compatibility: The Penitent One (336009). Power Word:
+    // Radiance puts this up; the next Penance is free and fires extra bolts.
+    propagate_const<buff_t*> legacy_the_penitent_one;
     propagate_const<buff_t*> train_of_thought;
     propagate_const<buff_t*> wrath_unleashed;
     propagate_const<buff_t*> weal_and_woe;
@@ -210,7 +224,25 @@ public:
     propagate_const<buff_t*> shadowform;
     propagate_const<buff_t*> shadowform_state;  // Dummy buff to track whether player entered Shadowform initially
     propagate_const<buff_t*> void_torrent;
+    // BracketSim legacy compatibility: Shadowlands covenant abilities.
+    buff_t* legacy_boon_of_the_ascended;
+    // BracketSim legacy compatibility: Pallid Command's stacking damage buff
+    // on the Rattling Mage (spell 357165, 2% per stack, 50 stacks).
+    buff_t* legacy_rigor_mortis;
+    buff_t* legacy_shadow_word_manipulation;
+    // BracketSim legacy compatibility: soulbind traits that ride a covenant
+    // ability. Combat Meditation (328266) and Lead by Example (342156).
+    // BracketSim legacy compatibility: Fae Guardians, and the internal cooldown
+    // that gates the Wrathful Faerie's energize.
+    buff_t* legacy_fae_guardians;
+    buff_t* legacy_wrathful_faerie_icd;
+    // BracketSim legacy compatibility: Talbadar's Stratagem (buff 342416),
+    // +55% Mind Blast while all three dots are on the target.
+    buff_t* legacy_talbadars_stratagem;
+
     propagate_const<buff_t*> voidform;
+    // Legacy Azerite (Battle for Azeroth)
+    propagate_const<buff_t*> legacy_chorus_of_insanity;
     propagate_const<buff_t*> mind_devourer;
     propagate_const<buff_t*> shadowy_insight;
     propagate_const<absorb_buff_t*> mental_fortitude;
@@ -242,6 +274,86 @@ public:
     propagate_const<buff_t*> darkening_horizon;
     propagate_const<buff_t*> collapsing_void;
   } buffs;
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. Named
+  // legacy_azerite because player_t already owns an "azerite" member.
+  struct legacy_azerite_t
+  {
+    azerite_power_t sanctum;
+    azerite_power_t sacred_flame;
+    azerite_power_t depth_of_the_shadows;
+    azerite_power_t chorus_of_insanity;
+    azerite_power_t death_throes;
+    azerite_power_t searing_dialogue;
+    azerite_power_t spiteful_apparitions;
+    azerite_power_t thought_harvester;
+    azerite_power_t torment_of_torments;
+    azerite_power_t whispers_of_the_damned;
+  } legacy_azerite;
+
+  // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
+  // has no runeforge DBC, so each one is switched on by the bonus id its
+  // original legendary item carried and is inert on any other character.
+  // BracketSim legacy compatibility: Shadowlands covenant abilities. Midnight
+  // has no covenant DBC, but every covenant spell still resolves, so they are
+  // looked up by id and gated on the chosen covenant.
+  struct legacy_covenant_t
+  {
+    std::string chosen = "none";
+    const spell_data_t* boon_of_the_ascended = spell_data_t::not_found();
+    const spell_data_t* ascended_blast = spell_data_t::not_found();
+    const spell_data_t* ascended_nova = spell_data_t::not_found();
+    const spell_data_t* ascended_eruption = spell_data_t::not_found();
+    const spell_data_t* mindgames = spell_data_t::not_found();
+    const spell_data_t* unholy_nova = spell_data_t::not_found();
+    const spell_data_t* unholy_transfusion = spell_data_t::not_found();
+    const spell_data_t* fae_guardians = spell_data_t::not_found();
+    const spell_data_t* wrathful_faerie = spell_data_t::not_found();
+  } legacy_covenant;
+
+  // Mindgames survived as a PvP talent, so the covenant version reuses that
+  // implementation with the covenant spell's own cooldown.
+  // BracketSim legacy compatibility: Wrathful Faerie energize, called from
+  // every priest damage impact and tick.
+  void trigger_legacy_wrathful_faerie( player_t* t );
+
+  const spell_data_t* legacy_mindgames_spell() const
+  { return talents.pvp.mindgames->ok() ? talents.pvp.mindgames : legacy_covenant.mindgames; }
+
+  struct shadowlands_legacy_t
+  {
+    bool legacy_shadowlands_enabled = true;
+    bool kiss_of_death = false;
+    // These two ride a covenant ability, so they only do anything when the
+    // matching covenant is chosen as well.
+    bool shadow_word_manipulation = false;
+    bool bwonsamdis_pact = false;
+    bool spheres_harmony = false;
+    // This one is spec-native.
+    bool eternal_call_to_the_void = false;
+    bool painbreaker_psalm = false;
+    bool twins_of_the_sun_priestess = false;
+    // Unity (9.2) resolves to the covenant legendary, so on a Necrolord priest
+    // the Unity wrist IS Pallid Command. It rides Unholy Nova.
+    bool pallid_command = false;
+    // Shadow Word: Madness is Devouring Plague's successor - Insidious Ire is
+    // already gated on exactly the same three dots, and a live combat log shows
+    // the legendary's buff landing 1ms after every Shadow Word: Madness cast.
+    bool talbadars_stratagem = false;
+    // Power Word: Radiance has a 60% chance to make the next Penance free and
+    // fire 3 extra bolts. Shadowlands SimulationCraft built the Penance half
+    // and left the trigger unhooked - its own header says so - so the trigger
+    // site is new here. The chance and the bolt count are read off 336011.
+    bool the_penitent_one = false;
+    const spell_data_t* the_penitent_one_spell = spell_data_t::not_found();
+  } shadowlands_legacy;
+
+  // BracketSim legacy compatibility: Shadowlands conduits, as id:rank pairs.
+  // The values live in legacy_conduits.hpp because Midnight ships neither the
+  // ConduitRank table nor most conduit spells, and the client's own conduit
+  // tooltips are stale - a live test on this very character proved the archived
+  // 9.2.7 numbers are the ones the game actually runs.
+  legacy_conduit::set_t legacy_conduits;
 
   // Talents
   struct
@@ -719,6 +831,8 @@ public:
   {
     propagate_const<real_ppm_t*> idol_of_cthun;
     propagate_const<real_ppm_t*> power_of_the_dark_side;
+    // BracketSim legacy compatibility: Eternal Call to the Void.
+    propagate_const<real_ppm_t*> legacy_eternal_call_to_the_void;
   } rppm;
 
   struct threshold_rngs_t
@@ -752,6 +866,11 @@ public:
     propagate_const<gain_t*> insanity_dark_thoughts;
     propagate_const<gain_t*> insanity_horrific_vision;
     propagate_const<gain_t*> insanity_vision_of_nzoth;
+    // BracketSim legacy compatibility: Death Throes (Battle for Azeroth).
+    propagate_const<gain_t*> insanity_death_throes;
+    propagate_const<gain_t*> insanity_whispers_of_the_damned;
+    propagate_const<gain_t*> insanity_legacy_wrathful_faerie;
+    propagate_const<gain_t*> insanity_legacy_painbreaker_psalm;
   } gains;
 
   // Benefits
@@ -839,6 +958,10 @@ public:
     propagate_const<actions::spells::shadeburst_t*> shadeburst;
     propagate_const<actions::spells::searing_light_t*> searing_light_dot;
     propagate_const<action_t*> void_shield_damage;
+    // BracketSim legacy compatibility: Boon of the Ascended's closing burst.
+    propagate_const<action_t*> legacy_ascended_eruption;
+    // BracketSim legacy compatibility: Eternal Call to the Void.
+    propagate_const<action_t*> legacy_eternal_call_to_the_void;
   } background_actions;
 
   // Items
@@ -862,6 +985,10 @@ public:
     spawner::pet_spawner_t<pet_t, priest_t> void_tendril;
     spawner::pet_spawner_t<pet_t, priest_t> void_lasher;
     spawner::pet_spawner_t<pet_t, priest_t> thing_from_beyond;
+    // BracketSim legacy compatibility: Pallid Command's Rattling Mage.
+    spawner::pet_spawner_t<pet_t, priest_t> legacy_rattling_mage;
+    // BracketSim legacy compatibility: the Marileth soulbind's Kevin's Oozeling.
+    spawner::pet_spawner_t<pet_t, priest_t> legacy_kevins_oozeling;
 
     priest_pets_t( priest_t& p );
     void set_pet_defaults( priest_t& p );
@@ -872,6 +999,30 @@ public:
   {
     // Default param to set if you should cast Power Infusion on yourself
     bool self_power_infusion = true;
+
+    // BracketSim legacy compatibility: how many stacks of Rigor Mortis the
+    // Rattling Mage reaches, worth 2% damage each.
+    //
+    // Shadowlands modelled this as an ally count, on the reading that only
+    // allies fed the stacks. A live combat log disproves that: solo on a
+    // dummy, with no allies present at all, the mage went from 1 stack to the
+    // 50 cap in under two seconds off the priest's own damage. So the cap is
+    // the correct default for any normal fight, and this stays an option only
+    // so the scaling can be swept and verified.
+    int legacy_rigor_mortis_stacks = 50;
+    // BracketSim legacy compatibility: which faerie Bwonsamdi's Pact (7703)
+    // doubles. Only "wrathful" does anything for the priest's own damage;
+    // "benevolent" doubles an ALLY's cooldown recharge, and there are no
+    // allies here.
+    std::string legacy_bwonsamdis_pact_mask = "wrathful";
+    // BracketSim legacy compatibility: Shadow Word: Manipulation gives one
+    // stack per second left on Mindgames when a shield breaks. When that
+    // happens is a player's business, not something a sim can know, so it is
+    // stated. 7 is Shadowlands' own default.
+    int legacy_shadow_word_manipulation_seconds = 7;
+
+    // How many allies Lead by Example also buffs, which a single-actor sim
+    // cannot observe. Each is worth 2% Intellect to you, up to four.
 
     // Add in options to override insanity gained
     // Mindgames gives 20 insanity from the healing and 20 from damage dealt
@@ -927,6 +1078,8 @@ public:
   // player_t overrides
   void init_base_stats() override;
   void init_resources( bool force ) override;
+  // BracketSim legacy compatibility: Vision of Perfection.
+  void vision_of_perfection_proc() override;
   void init_spells() override;
   void init_special_effects() override;
   void init_special_effects_shadow();
@@ -1030,6 +1183,8 @@ public:
   void trigger_ancient_madness( int stacks );
   void trigger_ancient_madness_extension();
   void refresh_insidious_ire_buff( action_state_t* s );
+  // BracketSim legacy compatibility: Talbadar's Stratagem, same three-dot gate.
+  void refresh_legacy_talbadars_buff( action_state_t* s );
   void spawn_thing_from_beyond( player_t* target = nullptr );
   void trigger_idol_of_nzoth( player_t* target, int stacks );
   double shadow_weaving_active_dots( const player_t* target, const unsigned int spell_id ) const;
@@ -1596,6 +1751,9 @@ struct priest_spell_t : public priest_action_t<spell_t>
       {
         priest().trigger_idol_of_nzoth( target, idol_of_nzoth_impact_stacks );
       }
+
+      // BracketSim legacy compatibility: Wrathful Faerie.
+      priest().trigger_legacy_wrathful_faerie( s->target );
     }
   }
 
@@ -1612,6 +1770,10 @@ struct priest_spell_t : public priest_action_t<spell_t>
     {
       priest().trigger_idol_of_nzoth( d->target, idol_of_nzoth_tick_stacks );
     }
+
+    // BracketSim legacy compatibility: Wrathful Faerie.
+    if ( result_is_hit( d->state->result ) )
+      priest().trigger_legacy_wrathful_faerie( d->target );
   }
 
   double composite_target_da_multiplier( player_t* t ) const override

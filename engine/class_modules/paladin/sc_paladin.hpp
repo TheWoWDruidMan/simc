@@ -1,6 +1,12 @@
 #pragma once
 #include "simulationcraft.hpp"
+// BracketSim legacy compatibility: Shadowlands conduits. Values live in
+// legacy_conduits.hpp because Midnight ships neither the ConduitRank table nor
+// most conduit spells, and the client's own conduit tooltips are stale - a live
+// in-game test proved the archived 9.2.7 numbers are what the game runs.
+#include "player/legacy_conduits.hpp"
 #include "action/parse_effects.hpp"
+#include "player/azerite_data.hpp"
 
 namespace paladin
 {
@@ -89,6 +95,8 @@ struct paladin_td_t : public actor_target_data_t
     buff_t* empyrean_hammer;
     buff_t* consecration;
     buff_t* seal_of_reprisal;
+    // BracketSim legacy compatibility: Vengeful Shock (conduit 195).
+    buff_t* legacy_vengeful_shock;
   } debuff;
 
   struct
@@ -152,6 +160,14 @@ public:
     action_t* background_avenging_wrath;
     action_t* background_crusade;
 
+    // Legacy Azerite (Battle for Azeroth)
+    action_t* legacy_inner_light_damage;
+    action_t* legacy_lights_decree;
+    action_t* legacy_expurgation;
+    // BracketSim legacy compatibility: the Expurgation CONDUIT (164), which is
+    // a different action from both the azerite trait above and the modern
+    // talent's `expurgation`.
+    action_t* legacy_conduit_expurgation;
     action_t* afterimage;
     action_t* guided_prayer;
   } active;
@@ -165,6 +181,19 @@ public:
     buff_t* divine_arbiter_hammer_of_light;
     buff_t* divine_arbiter_verdict;
     buff_t* divine_power;
+    // BracketSim legacy compatibility: Divine Resonance. Divine Toll leaves a
+    // window that fires a free Judgment on the period in spell 355455.
+    buff_t* legacy_divine_resonance;
+    // Blessing of the Seasons. Summer is the damage blessing, Autumn the
+    // cooldown one; Equinox comes from the Seasons of Plenty legendary and
+    // doubles whichever blessing is up.
+    // BracketSim legacy compatibility: Virtuous Command (conduit 182), the
+    // 5 second window Judgment opens.
+    buff_t* legacy_virtuous_command;
+    buff_t* legacy_blessing_of_summer;
+    buff_t* legacy_blessing_of_autumn;
+    buff_t* legacy_equinox;
+
     buff_t* divine_purpose;
     buff_t* divine_shield;
     buff_t* divine_steed;
@@ -268,6 +297,27 @@ public:
     buff_t* all_in; // Ret TWW2 4pc
 
     buff_t* light_blessed_shield; // Prot Midnight 4p
+
+    // Legacy Azerite (Battle for Azeroth). These carry a legacy_ prefix where a
+    // modern talent or buff already owns the plain name - both sources are meant
+    // to apply at once, see simc-tests/PORTING_RULES.md.
+    buff_t* legacy_avengers_might;
+    buff_t* legacy_inner_light;
+    buff_t* legacy_inspiring_vanguard;
+    buff_t* legacy_soaring_shield;
+    buff_t* legacy_empyrean_power;
+    buff_t* legacy_relentless_inquisitor;
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    buff_t* legacy_the_magistrates_judgment;
+    // BracketSim legacy compatibility: Of Dusk and Dawn's damage half, and
+    // the Relentless Inquisitor RUNEFORGE. Both names are already taken in
+    // this module - blessing_of_dawn by the modern talent, relentless_
+    // inquisitor by the azerite trait - so both carry a legacy_ prefix and
+    // their own report names. The paladin module has been bitten by that
+    // collision twice already (divine_resonance, final_verdict).
+    buff_t* legacy_blessing_of_dawn;
+    buff_t* legacy_relentless_inquisitor_rf;
+    buff_t* legacy_vanguards_momentum;
   } buffs;
 
   // Gains
@@ -348,6 +398,7 @@ public:
     cooldown_t* hammerfall_icd;
     cooldown_t* art_of_war;
 
+    cooldown_t* legacy_inner_light_icd;
     cooldown_t* guided_prayer_icd;
   } cooldowns;
 
@@ -769,6 +820,90 @@ public:
     } herald_of_the_sun;
   } talents;
 
+  // Battle for Azeroth Azerite traits. Named legacy_azerite because player_t
+  // already owns an "azerite" member.
+  struct legacy_azerite_t
+  {
+    // Shared
+    azerite_power_t avengers_might;
+    azerite_power_t grace_of_the_justicar;  // Healing, never implemented
+    azerite_power_t indomitable_justice;
+
+    // Protection
+    azerite_power_t bulwark_of_light;  // Defensive, never implemented
+    azerite_power_t inspiring_vanguard;
+    azerite_power_t inner_light;
+    azerite_power_t soaring_shield;
+
+    // Retribution
+    azerite_power_t empyrean_power;
+    azerite_power_t expurgation;
+    azerite_power_t lights_decree;
+    azerite_power_t relentless_inquisitor;
+  } legacy_azerite;
+
+  // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
+  // has no runeforge DBC, so each one is switched on by the bonus id its
+  // original legendary item carried. Several share a name with a current
+  // talent, so those carry a legacy_ prefix and both sources can be active.
+  // BracketSim legacy compatibility: Shadowlands covenant abilities. Midnight
+  // has no covenant DBC, but every covenant spell still resolves, so they are
+  // looked up by id and gated on the chosen covenant.
+  // BracketSim legacy compatibility: Shadowlands conduits, as id:rank pairs.
+  legacy_conduit::set_t legacy_conduits;
+
+  struct legacy_covenant_t
+  {
+    std::string chosen = "none";
+    const spell_data_t* divine_toll = spell_data_t::not_found();
+    const spell_data_t* ashen_hallow = spell_data_t::not_found();
+    const spell_data_t* ashen_hallow_damage = spell_data_t::not_found();
+    const spell_data_t* vanquishers_hammer = spell_data_t::not_found();
+    // Blessing of the Seasons: the hidden driver plus the four blessings it
+    // cycles through. Only Summer and Autumn do anything in a damage sim.
+    const spell_data_t* blessing_of_the_seasons = spell_data_t::not_found();
+    const spell_data_t* blessing_of_summer = spell_data_t::not_found();
+    const spell_data_t* blessing_of_autumn = spell_data_t::not_found();
+    const spell_data_t* blessing_of_winter = spell_data_t::not_found();
+    const spell_data_t* blessing_of_spring = spell_data_t::not_found();
+  } legacy_covenant;
+
+  // Which blessing the next cast will use. The ability cycles Summer, Autumn,
+  // Winter, Spring and back, so the damage-relevant Summer comes up once every
+  // four casts rather than on demand.
+  unsigned legacy_next_season = 0;
+
+  // BracketSim legacy compatibility: Virtuous Command's echo, a share of the
+  // triggering hit dealt again as Holy damage.
+  action_t* legacy_virtuous_command_damage = nullptr;
+
+  // Divine Toll survived as a modern talent, so the covenant version reuses
+  // that implementation with the covenant spell's own cooldown and target cap.
+  const spell_data_t* legacy_divine_toll_spell() const
+  { return talents.divine_toll->ok() ? talents.divine_toll : legacy_covenant.divine_toll; }
+
+  struct shadowlands_legacy_t
+  {
+    bool legacy_shadowlands_enabled = true;
+    bool holy_avengers_engraved_sigil = false;
+    // These two ride a covenant ability, so they only do anything when the
+    // matching covenant is chosen as well.
+    bool duty_bound_gavel = false;
+    bool divine_resonance = false;
+    bool final_verdict = false;
+    bool tempest_of_the_lightbringer = false;
+    bool radiant_embers = false;
+    bool of_dusk_and_dawn = false;
+    bool relentless_inquisitor = false;
+    bool the_mad_paragon = false;
+    bool the_magistrates_judgment = false;
+    bool vanguards_momentum = false;
+    // Grants Equinox ten seconds after each Blessing of the Seasons cast.
+    // Previously recorded in PORT_STATE.md as having "no host" - it does have
+    // one, the host just had not been ported yet.
+    bool seasons_of_plenty = false;
+  } shadowlands_legacy;
+
   // Paladin options
   struct options_t
   {
@@ -780,6 +915,11 @@ public:
     double reflection_of_radiance_proc_chance_holy_bulwark  = .2;
     std::string starting_armament                           = "holy_bulwark";
     bool max_range_apex                                     = false;
+    // BracketSim legacy compatibility: Indomitable Justice scales off the
+    // health gap between the paladin and its target. 0 keeps the Battle for
+    // Azeroth default (80% for Protection, 100% otherwise), -1 uses the
+    // paladin's real health, and 1-100 pins it.
+    int legacy_indomitable_justice_pct                      = 0;
   } options;
   player_t* beacon_target;
 
@@ -803,6 +943,8 @@ public:
   void create_buffs() override;
   void init_special_effects() override;
   void init_rng() override;
+  // BracketSim legacy compatibility: Vision of Perfection.
+  void vision_of_perfection_proc() override;
   void init_spells() override;
   void init_action_list() override;
   void init_blizzard_action_list() override;
@@ -1252,6 +1394,26 @@ public:
     {
       p()->buffs.rush_of_light->trigger();
     }
+
+    // BracketSim legacy compatibility: Virtuous Command. Inside Judgment's
+    // window, the four abilities the conduit names echo a share of their damage
+    // as Holy. The list is checked by name because those four have no shared
+    // base to hang it on, and the echo has no coefficient of its own - its
+    // amount IS a share of the hit that triggered it.
+    if ( p()->legacy_conduits.has( 182 ) && p()->buffs.legacy_virtuous_command->check() &&
+         ab::result_is_hit( s->result ) && s->result_amount > 0 &&
+         p()->legacy_virtuous_command_damage && this != p()->legacy_virtuous_command_damage )
+    {
+      static const std::array<util::string_view, 4> commanded = {
+        { "templars_verdict", "crusader_strike", "blade_of_justice", "melee" } };
+      if ( range::contains( commanded, ab::name_str ) )
+      {
+        auto vc = p()->legacy_virtuous_command_damage;
+        vc->base_dd_min = vc->base_dd_max =
+            s->result_amount * p()->legacy_conduits.percent( 182 );
+        vc->execute_on_target( s->target );
+      }
+    }
   }
 
   double action_multiplier() const override
@@ -1483,7 +1645,18 @@ public:
       return 0.0;
     }
 
-    return ab::cost();
+    double c = ab::cost();
+
+    // BracketSim legacy compatibility: The Magistrate's Judgment (7056). Buff
+    // 337682's effect 1 is a flat -1 to the Holy Power cost of the next spender,
+    // and its affected-spell list survives in current data (Divine Storm,
+    // Templar's Verdict, Final Verdict, Word of Glory, Execution Sentence and
+    // the rest). Judgment triggered the buff and nothing ever read it, so the
+    // buff appeared in every report while the legendary did nothing.
+    if ( ab::p()->buffs.legacy_the_magistrates_judgment->check() )
+      c += ab::p()->buffs.legacy_the_magistrates_judgment->data().effectN( 1 ).base_value();
+
+    return std::max( 0.0, c );
   }
 
   void impact( action_state_t* s ) override
@@ -1571,6 +1744,21 @@ public:
 
     ab::execute();
 
+    // BracketSim legacy compatibility: The Magistrate's Judgment is spent by the
+    // spender it cheapened. Free spenders do not consume it - they had no cost
+    // to reduce.
+    if ( !ab::background && !isFreeSLDPSpender && p->buffs.legacy_the_magistrates_judgment->check() )
+      p->buffs.legacy_the_magistrates_judgment->decrement();
+
+    // BracketSim legacy compatibility: Relentless Inquisitor (7066). "Spending
+    // Holy Power grants you 1% haste per finisher for 12 sec, stacking up to 5
+    // times." Shadowlands triggered one stack per spender, not one per Holy
+    // Power spent, and the buff's own 5 stack cap does the rest.
+    //
+    // The flag was DETECTED AND NEVER READ - the runeforge did nothing at all.
+    if ( !ab::background && p->shadowlands_legacy.relentless_inquisitor )
+      p->buffs.legacy_relentless_inquisitor_rf->trigger();
+
     if ( triggers_endless_gleam && is_divine_storm && ab::execute_state->n_targets > 1 )
     {
       auto tl = ab::target_list();
@@ -1621,6 +1809,28 @@ public:
       }
       if ( crusade_stacks > 0 )
         p->buffs.avenging_wrath->trigger( as<int>( crusade_stacks ) );
+    }
+
+    // Legacy Azerite: Relentless Inquisitor gains one stack per Holy Power spent.
+    if ( p->legacy_azerite.relentless_inquisitor.ok() )
+    {
+      int ri_stacks = as<int>( num_hopo_spent );
+      if ( ri_stacks > 0 )
+        p->buffs.legacy_relentless_inquisitor->trigger( ri_stacks );
+    }
+
+    // Legacy Azerite: Light's Decree, an AoE hit per Holy Power spent while
+    // Avenging Wrath is up. Crusade shares the Avenging Wrath buff in Midnight.
+    if ( p->legacy_azerite.lights_decree.ok() && p->active.legacy_lights_decree && p->buffs.avenging_wrath->up() )
+    {
+      // Damage is based on the base cost of the spell, so Inquisition counts as 1.
+      double ld_hopo = ab::base_cost();
+      if ( ld_hopo > 0 )
+      {
+        p->active.legacy_lights_decree->base_dd_min = p->active.legacy_lights_decree->base_dd_max =
+            p->legacy_azerite.lights_decree.value() * ld_hopo;
+        p->active.legacy_lights_decree->execute();
+      }
     }
 
     if ( p->talents.tirions_devotion->ok() && p->talents.lay_on_hands->ok() && !ab::background )
@@ -1861,6 +2071,8 @@ struct judgment_t : public judgment_base_t
 {
   bool triggered_hammer_and_anvil;
   unrelenting_edict_t* ue;
+  // Legacy Azerite: Indomitable Justice, resolved once at construction.
+  int legacy_indomitable_justice_pct;
 
   judgment_t( paladin_t* p, util::string_view name, const spell_data_t* s = spell_data_t::nil() );
   judgment_t( paladin_t* p, util::string_view name, util::string_view options_str,
@@ -1870,6 +2082,7 @@ struct judgment_t : public judgment_base_t
   void execute() override;
   void impact(action_state_t* s) override;
   bool action_ready() override;
+  double bonus_da( const action_state_t* s ) const override;
 };
 
 
@@ -1887,6 +2100,9 @@ struct consecration_tick_t : public paladin_spell_t
 {
   golden_path_t* heal_tick;
   consecration_tick_t( util::string_view name, paladin_t* p );
+  // BracketSim legacy compatibility: the conduit Golden Path (141) needs this
+  // tick to fire its heal, which the port built and never executed.
+  void execute() override;
   double action_multiplier() const override;
   double composite_target_multiplier( player_t* target ) const override;
 };

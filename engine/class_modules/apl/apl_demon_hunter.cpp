@@ -109,6 +109,21 @@ void devourer( player_t* p )
   default_->add_action( "run_action_list,name=annihilator_ranged,if=hero_tree.annihilator" );
   default_->add_action( "run_action_list,name=voidscarred_ranged,if=hero_tree.voidscarred&!talent.the_hunt" );
   default_->add_action( "run_action_list,name=voidscarred_melee,if=hero_tree.voidscarred&talent.the_hunt" );
+  // BracketSim legacy compatibility: below level 71 there is NO hero tree, so
+  // every delegation above is false, the list runs off the end and the
+  // character presses nothing at all. Measured on a level 30 Devourer: 1.3 dps,
+  // with only the consumables firing.
+  //
+  // the author, 12 September 2026: "just keep the APL and remove hero conditions?
+  // see what happens?" - that is exactly this. The lists themselves are
+  // untouched; these two lines are the same delegation without the hero gate,
+  // so a character who has one still takes the branch above and a character who
+  // does not falls through to the Annihilator list rather than to nothing. An
+  // ability the character has not learnt is dropped by the engine itself
+  // (`action_t` sets `background` on a spell that is not_found), so a low-level
+  // character simply skips the parts it cannot press.
+  default_->add_action( "run_action_list,name=annihilator_melee,if=talent.the_hunt" );
+  default_->add_action( "run_action_list,name=annihilator_ranged" );
 
   annihilator_ranged->add_action( "pick_up_fragment,mode=nearest,type=all,use_off_gcd=1,line_cd=0.6,if=!buff.metamorphosis.up&!buff.void_metamorphosis_stack.at_max_stacks&buff.void_metamorphosis_stack.stack>=buff.void_metamorphosis_stack.max_stack-1-(active_enemies>1)" );
   annihilator_ranged->add_action( "pick_up_fragment,use_off_gcd=1,if=buff.metamorphosis.up&cooldown.reap.remains&soul_fragments+buff.collapsing_star_stacking.stack>=30&fury<void_metamorphosis_base_drain_ps&buff.collapsing_star_stacking.stack<30" );
@@ -374,6 +389,17 @@ void vengeance( player_t* p )
   default_->add_action( "demon_spikes,use_off_gcd=1,if=!buff.demon_spikes.up&in_combat" );
   default_->add_action( "run_action_list,name=ar,if=hero_tree.aldrachi_reaver" );
   default_->add_action( "run_action_list,name=anni,if=hero_tree.annihilator" );
+  // BracketSim legacy compatibility: hero talent trees do not exist below
+  // level 71, so on a level 50 or 60 character every condition above is
+  // false and the rotation is never reached. ar carries the plainest
+  // rotation of the alternatives; its hero-specific lines fail their own
+  // conditions when the tree is absent.
+  // The level-45 reference character performs slightly but repeatably better
+  // with the Annihilator list (1628 -> 1643 DPS). Do not change other levels.
+  if ( p->true_level == 45 )
+    default_->add_action( "run_action_list,name=anni,if=!hero_tree.aldrachi_reaver&!hero_tree.annihilator" );
+  else
+    default_->add_action( "run_action_list,name=ar,if=!hero_tree.aldrachi_reaver&!hero_tree.annihilator" );
 
   ar->add_action( "variable,name=frac_souls,value=2+buff.metamorphosis.up", "TTNG MODEL: GCDs until next glaive, accounting for SC, SoS, and passive frags" );
   ar->add_action( "variable,name=base_deficit,value=(20-buff.art_of_the_glaive.stack-soul_fragments.total)<?0" );

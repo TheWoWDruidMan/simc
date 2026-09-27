@@ -184,6 +184,10 @@ struct avengers_shield_base_t : public paladin_spell_t
     may_crit = true;
     base_multiplier *= mul;
 
+    // Legacy Azerite: Soaring Shield adds extra bounces.
+    if ( p->legacy_azerite.soaring_shield.enabled() )
+      aoe = std::max( aoe, as<int>( p->legacy_azerite.soaring_shield.spell()->effectN( 2 ).base_value() ) );
+
     std::string fullname = std::string( n );
     std::string abbrev   = fullname != "avengers_shield" ? fullname.substr( fullname.size() - 3 ) : "";
 
@@ -227,6 +231,15 @@ struct avengers_shield_base_t : public paladin_spell_t
 
     if ( p()->talents.bulwark_of_righteous_fury->ok() )
       p()->buffs.bulwark_of_righteous_fury->trigger();
+
+    // BracketSim legacy compatibility: Vengeful Shock (conduit 195) rides
+    // every bounce of Avenger's Shield, exactly as it did in Shadowlands.
+    if ( p()->legacy_conduits.has( 195 ) )
+      td( s->target )->debuff.legacy_vengeful_shock->trigger();
+
+    // Legacy Azerite: Soaring Shield stacks once per bounce.
+    if ( p()->legacy_azerite.soaring_shield.enabled() )
+      p()->buffs.legacy_soaring_shield->trigger();
 
     if ( p() ->talents.gift_of_the_golden_valkyr->ok())
     {
@@ -333,6 +346,25 @@ struct avengers_shield_t : public avengers_shield_base_t
     avengers_shield_base_t( "avengers_shield", p, options_str )
   {
     cooldown = p->cooldowns.avengers_shield;
+  }
+
+  void execute() override
+  {
+    avengers_shield_base_t::execute();
+
+    // BracketSim legacy compatibility: Holy Avenger's Engraved Sigil (7060).
+    // "Your Avenger's Shield has a 35% chance to have its cooldown instantly
+    // reset when used." The chance is read off the runeforge's own spell.
+    //
+    // The flag was DETECTED AND NEVER READ. The reset is done AFTER the base
+    // execute deliberately: the cooldown has not started before it, so
+    // resetting there would be undone the moment it does - the same trap
+    // Effusive Anima Accelerator hit.
+    if ( p()->shadowlands_legacy.holy_avengers_engraved_sigil &&
+         rng().roll( p()->find_spell( 337831 )->proc_chance() ) )
+    {
+      p()->cooldowns.avengers_shield->reset( false );
+    }
   }
 };
 
@@ -908,6 +940,13 @@ void paladin_t::trigger_grand_crusader( grand_crusader_source source )
 
   double gc_proc_chance = talents.grand_crusader->effectN( 1 ).percent();
 
+  // BracketSim legacy compatibility: Inspiring Vanguard (Battle for Azeroth
+  // azerite) REPLACES the Grand Crusader proc chance, so it must be applied
+  // before the roll below rather than after. The bonus from First Avenger is
+  // added after Inspiring Vanguard.
+  if ( legacy_azerite.inspiring_vanguard.enabled() )
+    gc_proc_chance = legacy_azerite.inspiring_vanguard.spell()->effectN( 2 ).percent();
+
   // Roll if GC was not triggered from Holy Bulwark or Sacred Weapon. They already rolled.
   if ( source != GC_ROR_HB && source != GC_ROR_SW )
   {
@@ -915,6 +954,9 @@ void paladin_t::trigger_grand_crusader( grand_crusader_source source )
     if ( !success )
       return;
   }
+
+  if ( legacy_azerite.inspiring_vanguard.enabled() )
+    buffs.legacy_inspiring_vanguard->trigger();
 
   // reset AS cooldown and count procs
   if ( ! cooldowns.avengers_shield->is_ready() )
@@ -984,6 +1026,19 @@ action_t* paladin_t::create_action_protection( util::string_view name, util::str
 
 void paladin_t::create_buffs_protection()
 {
+  // Legacy Azerite
+  buffs.legacy_inner_light = make_buff( this, "inner_light", find_spell( 275481 ) )
+                                 ->set_default_value( legacy_azerite.inner_light.value( 1 ) )
+                                 ->add_invalidate( CACHE_BONUS_ARMOR );
+  buffs.legacy_inspiring_vanguard =
+      make_buff<stat_buff_t>( this, "inspiring_vanguard",
+                              legacy_azerite.inspiring_vanguard.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() )
+          ->add_stat( STAT_STRENGTH, legacy_azerite.inspiring_vanguard.value( 1 ) );
+  buffs.legacy_soaring_shield =
+      make_buff<stat_buff_t>( this, "soaring_shield",
+                              legacy_azerite.soaring_shield.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() )
+          ->add_stat( STAT_MASTERY_RATING, legacy_azerite.soaring_shield.value( 1 ) );
+
   buffs.ardent_defender = make_buff( this, "ardent_defender", find_spell( 31850 ) )
         ->set_default_value_from_effect_type( A_MOD_DAMAGE_PERCENT_TAKEN )
         ->set_cooldown( 0_ms );  // handled by the ability
@@ -1017,6 +1072,12 @@ void paladin_t::create_buffs_protection()
 
 void paladin_t::init_spells_protection()
 {
+  // Legacy Azerite traits
+  legacy_azerite.bulwark_of_light   = find_azerite_spell( "Bulwark of Light" );
+  legacy_azerite.inspiring_vanguard = find_azerite_spell( "Inspiring Vanguard" );
+  legacy_azerite.inner_light        = find_azerite_spell( "Inner Light" );
+  legacy_azerite.soaring_shield     = find_azerite_spell( "Soaring Shield" );
+
   // Talents
 //0
   talents.avengers_shield                = find_talent_spell( talent_tree::SPECIALIZATION, "Avenger's Shield" );

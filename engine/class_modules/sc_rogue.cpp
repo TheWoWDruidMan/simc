@@ -4,6 +4,11 @@
 // ==========================================================================
 
 #include "simulationcraft.hpp"
+// BracketSim legacy compatibility: Shadowlands conduits. Values live in
+// legacy_conduits.hpp because Midnight ships neither the ConduitRank table nor
+// most conduit spells, and the client's own conduit tooltips are stale - a live
+// in-game test proved the archived 9.2.7 numbers are what the game runs.
+#include "player/legacy_conduits.hpp"
 #include "util/util.hpp"
 #include "class_modules/apl/apl_rogue.hpp"
 
@@ -23,12 +28,14 @@ enum class secondary_trigger
   INTERNAL_BLEEDING,
   MAIN_GAUCHE,
   FAN_THE_HAMMER,
+  CONCEALED_BLUNDERBUSS,
   COUP_DE_GRACE,
   HAND_OF_FATE,
   KILLING_SPREE,
   SCOUNDREL_STRIKE,
   SHADOW_CLONE,
   SHADOWED_FINISHERS,
+  LEGACY_REPLICATING_SHADOWS,
 };
 
 enum stealth_type_e
@@ -168,6 +175,7 @@ public:
     damage_buff_t* fazed;
     buff_t* numbing_poison;
     buff_t* wound_poison;
+    buff_t* banshees_blight; // BracketSim legacy: Edge of Night
   } debuffs;
 
   rogue_td_t( player_t* target, rogue_t* source );
@@ -280,9 +288,12 @@ public:
     actions::rogue_poison_t* lethal_poison_dtb = nullptr;
     actions::rogue_poison_t* nonlethal_poison = nullptr;
     actions::rogue_poison_t* nonlethal_poison_dtb = nullptr;
+    actions::rogue_attack_t* bloodfang = nullptr;
     actions::rogue_attack_t* blade_flurry = nullptr;
     actions::rogue_attack_t* caustic_spatter = nullptr;
+    actions::rogue_attack_t* concealed_blunderbuss = nullptr;
     actions::rogue_attack_t* echoing_reprimand = nullptr;
+    actions::rogue_attack_t* legacy_flagellation_lash = nullptr;
     actions::rogue_attack_t* fan_the_hammer = nullptr;
     actions::rogue_attack_t* goremaws_bite = nullptr;
     actions::rogue_attack_t* internal_bleeding = nullptr;
@@ -293,6 +304,11 @@ public:
     actions::rogue_attack_t* secondary_poisoning = nullptr;
     actions::shadow_blades_attack_t* shadow_blades_attack = nullptr;
     actions::rogue_spell_t* thistle_tea_auto = nullptr;
+
+    // Legacy Azerite (Battle for Azeroth)
+    actions::rogue_attack_t* legacy_double_dose = nullptr;
+    actions::rogue_attack_t* legacy_replicating_shadows = nullptr;
+    actions::rogue_attack_t* legacy_nothing_personal = nullptr;
 
     residual_action::residual_periodic_action_t<spell_t>* doomblade = nullptr;
 
@@ -361,6 +377,24 @@ public:
     buff_t* sprint;
     buff_t* stealth;
     buff_t* vanish;
+    buff_t* master_assassins_mark;
+    buff_t* master_assassins_mark_aura;
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+    buff_t* blade_in_the_shadows;
+    buff_t* brigands_blitz;
+    buff_t* brigands_blitz_driver;
+    buff_t* deadshot;
+    buff_t* double_dose;
+    buff_t* keep_your_wits_about_you;
+    buff_t* nights_vengeance;
+    buff_t* nothing_personal;
+    buff_t* paradise_lost;
+    buff_t* perforate;
+    buff_t* legacy_scent_of_blood;
+    buff_t* snake_eyes;
+    buff_t* legacy_the_first_dance;
+    buff_t* legacy_double_dose;
+    buff_t* legacy_flagellation;
     // Assassination
     buff_t* envenom;
     // Outlaw
@@ -373,6 +407,11 @@ public:
     buff_t* deadly_pursuit_tracker;
     buff_t* opportunity;
     buff_t* roll_the_bones;
+    buff_t* concealed_blunderbuss;
+    buff_t* greenskins_wickers;
+    buff_t* guile_charm_insight_1;
+    buff_t* guile_charm_insight_2;
+    buff_t* guile_charm_insight_3;
     // Roll the bones buffs
     buff_t* one_of_a_kind;
     damage_buff_t* double_trouble;
@@ -450,6 +489,14 @@ public:
     damage_buff_t* mid2_assassination_2pc;
     buff_t* mid2_outlaw_4pc;
 
+    // BracketSim legacy compatibility: second wave of Shadowlands runeforges.
+    buff_t* legacy_deathly_shadows;
+    buff_t* legacy_finality_eviscerate;
+    buff_t* legacy_finality_rupture;
+    buff_t* legacy_finality_black_powder;
+    buff_t* legacy_dashing_scoundrel;
+    // BracketSim legacy compatibility: Deeper Daggers (conduit 245).
+    damage_buff_t* legacy_deeper_daggers;
   } buffs;
 
   // Cooldowns
@@ -458,6 +505,8 @@ public:
     cooldown_t* stealth;
 
     cooldown_t* adrenaline_rush;
+    // BracketSim legacy compatibility: Obedience shortens this one.
+    cooldown_t* legacy_flagellation = nullptr;
     cooldown_t* between_the_eyes;
     cooldown_t* blade_flurry;
     cooldown_t* blade_rush;
@@ -493,6 +542,11 @@ public:
   // Gains
   struct gains_t
   {
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+    gain_t* legacy_ace_up_your_sleeve;
+    gain_t* legacy_shrouded_suffocation;
+    gain_t* legacy_the_first_dance;
+
     gain_t* adrenaline_rush;
     gain_t* adrenaline_rush_expiry;
     gain_t* blade_rush;
@@ -527,6 +581,8 @@ public:
     gain_t* shrouded_suffocation;
     gain_t* deal_fate;
 
+    // BracketSim legacy compatibility: Deathly Shadows (Shadowlands runeforge).
+    gain_t* legacy_deathly_shadows;
   } gains;
 
   // Spell Data
@@ -1073,15 +1129,75 @@ public:
     const spell_data_t* executioner;
   } mastery;
 
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. These
+  // powers are still in the live DBC but upstream dropped their class hooks
+  // after Battle for Azeroth, so they are restored here.
+  struct azerite_powers_t
+  {
+    // Assassination
+    azerite_power_t double_dose;
+    azerite_power_t echoing_blades;
+    azerite_power_t nothing_personal;
+    azerite_power_t scent_of_blood;
+    azerite_power_t shrouded_suffocation;
+    azerite_power_t twist_the_knife;
+
+    // Outlaw
+    azerite_power_t ace_up_your_sleeve;
+    azerite_power_t brigands_blitz;
+    azerite_power_t deadshot;
+    azerite_power_t keep_your_wits_about_you;
+    azerite_power_t paradise_lost;
+    azerite_power_t snake_eyes;
+
+    // Subtlety
+    azerite_power_t blade_in_the_shadows;
+    azerite_power_t inevitability;
+    azerite_power_t nights_vengeance;
+    azerite_power_t perforate;
+    azerite_power_t replicating_shadows;
+    azerite_power_t the_first_dance;
+  } azerite;
+
   // Legendary effects
   struct legendary_t
   {
+    bool master_assassins_mark = false;
+    bool tiny_toxic_blade = false;
+    bool essence_of_bloodfang = false;
+    bool invigorating_shadowdust = false;
+    bool zoldyck_insignia = false;
+    bool duskwalkers_patch = false;
+    bool greenskins_wickers = false;
+    bool guile_charm = false;
+    bool celerity = false;
+    bool concealed_blunderbuss = false;
+    int guile_charm_counter = 0;
+    double duskwalkers_patch_counter = 0.0;
+
+    // Second wave of Shadowlands runeforges. Dashing Scoundrel, Doomblade and
+    // Finality share a name with a current talent, so those carry a legacy_
+    // prefix on their buffs and both sources can be active at once.
+    bool akaaris_soul_fragment = false;
+    bool dashing_scoundrel = false;
+    bool deathly_shadows = false;
+    bool doomblade = false;
+    bool finality = false;
+    bool resounding_clarity = false;
+
+    // These three ride a covenant ability, so they only do anything when the
+    // matching covenant is chosen as well.
+    bool obedience = false;
+    bool toxic_onslaught = false;
+    bool deathspike = false;
   } legendary;
 
   // Procs
   struct procs_t
   {
     // Shared
+    proc_t* invigorating_shadowdust;
+    proc_t* duskwalkers_patch;
     proc_t* supercharger_wasted;
 
     // Assassination
@@ -1093,6 +1209,13 @@ public:
 
     // Hero
     proc_t* controlled_chaos;
+
+    // BracketSim legacy compatibility: Count the Odds (conduit 244). A roll
+    // that lands when all four Roll the Bones buffs are already up gives
+    // nothing, and counting those separately is the only way to tell a
+    // conduit that is not proccing from one that has nowhere to put its proc.
+    proc_t* legacy_count_the_odds;
+    proc_t* legacy_count_the_odds_capped;
 
   } procs;
 
@@ -1125,7 +1248,46 @@ public:
     bool rogue_ready_trigger = true;
     bool priority_rotation = false;
     double the_first_dance_trigger_rate = 0.75;
+    bool legacy_shadowlands_enabled = true;
+    // Whether a modern talent suppresses the Shadowlands legendary it was
+    // derived from. This pairing never existed in-game - the talents came
+    // later - so there is no live behaviour to copy and this is a modelling
+    // choice, not a measured fact. Defaults to overriding, which matches how
+    // WoW resolves a talent that duplicates a covenant ability and is the
+    // conservative option, since stacking would inflate results.
+    bool legacy_talent_overrides_legendary = true;
   } options;
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities. Midnight
+  // has no covenant DBC, but every covenant spell still resolves, so they are
+  // looked up by id and gated on the chosen covenant.
+  // BracketSim legacy compatibility: Shadowlands conduits, as id:rank pairs.
+  legacy_conduit::set_t legacy_conduits;
+
+  // BracketSim legacy compatibility: Edge of Night (186398), Sylvanas' dagger - Banshee's Blight.
+  // Ported from upstream SimulationCraft's shadowlands branch (sc_rogue.cpp, banshees_blight_t), 26 Sep.
+  struct legacy_banshees_blight_t
+  {
+    const spell_data_t* driver = spell_data_t::nil();
+    double damage = 0.0;       // driver effect 1 at each dagger's item level, summed over both hands
+    action_t* strike = nullptr; // 358126, once per stack on the finisher's target
+  } legacy_banshees_blight;
+
+  struct legacy_covenant_t
+  {
+    std::string chosen = "none";
+    const spell_data_t* echoing_reprimand = spell_data_t::not_found();
+    const spell_data_t* flagellation = spell_data_t::not_found();
+    const spell_data_t* flagellation_lash = spell_data_t::not_found();
+    const spell_data_t* serrated_bone_spike = spell_data_t::not_found();
+    const spell_data_t* serrated_bone_spike_dot = spell_data_t::not_found();
+    const spell_data_t* sepsis = spell_data_t::not_found();
+    const spell_data_t* sepsis_burst = spell_data_t::not_found();
+  } legacy_covenant;
+
+  // Legacy Azerite: Replicating Shadows spreads Rupture out from the last one
+  // the player applied by hand. Combat state, cleared every iteration.
+  player_t* legacy_last_rupture_target = nullptr;
 
   rogue_t( sim_t* sim, util::string_view name, race_e r = RACE_NIGHT_ELF ) :
     player_t( sim, ROGUE, name, r ),
@@ -1249,10 +1411,15 @@ public:
   void      invalidate_cache( cache_e ) override;
 
   void break_stealth();
+  // BracketSim legacy compatibility: Vision of Perfection.
+  void vision_of_perfection_proc() override;
   void cancel_auto_attacks() override;
   void do_exsanguinate( dot_t* dot, double coeff );
 
   void trigger_venomous_wounds_death( player_t* ); // On-death trigger for Venomous Wounds energy replenish
+  // BracketSim legacy compatibility: charge N combo points from a legacy
+  // source, reusing Midnight's Supercharger buffs.
+  void trigger_legacy_animacharge( int count );
 
   double consume_cp_max() const
   {
@@ -1275,7 +1442,16 @@ public:
     if ( use_supercharger && current_cp > 0 )
     {
       if ( range::any_of( buffs.supercharger, []( const buff_t* buff ) { return buff->check(); } ) )
-        current_cp += talent.rogue.supercharger->effectN( 2 ).base_value() + talent.rogue.forced_induction->effectN( 1 ).base_value();
+      {
+        // BracketSim legacy compatibility: read the bonus off the Supercharger
+        // SPELL rather than the talent entry, so it is still correct for a
+        // rogue who charged the point with legacy Echoing Reprimand and never
+        // took the talent - where the talent entry reads zero.
+        double bonus = talent.rogue.supercharger->ok()
+                           ? talent.rogue.supercharger->effectN( 2 ).base_value()
+                           : find_spell( 470347 )->effectN( 2 ).base_value();
+        current_cp += bonus + talent.rogue.forced_induction->effectN( 1 ).base_value();
+      }
     }
 
     return current_cp;
@@ -1616,6 +1792,8 @@ public:
     bool fazed_crit_chance = false;
     bool fazed_crit_damage = false;
     bool improved_ambush = false;
+    bool master_assassins_mark = false;
+    bool legacy_zoldyck_insignia = false;
     bool lethal_dose = false;
     bool maim_mangle = false;           // Renamed Systemic Failure for DF talent
     bool menacing_rush = false;
@@ -1680,6 +1858,31 @@ public:
     // Dynamically affected flags
     // Special things like CP, Energy, Crit, etc.
     affected_by.improved_ambush = ab::data().affected_by( p->talent.rogue.improved_ambush->effectN( 1 ) );
+
+    if ( p->legendary.master_assassins_mark )
+    {
+      affected_by.master_assassins_mark = ab::data().affected_by( p->find_spell( 340094 )->effectN( 1 ) );
+    }
+
+    // Zoldyck Recipe is the modern talent derived from this runeforge. Whether
+    // the two stack is a modelling choice - see
+    // options.legacy_talent_overrides_legendary - because no live character
+    // ever had both. Azerite traits, by contrast, always stack with their
+    // modern equivalents.
+    if ( p->legendary.zoldyck_insignia &&
+         !( p->options.legacy_talent_overrides_legendary &&
+            p->talent.assassination.zoldyck_recipe->ok() ) )
+    {
+      // Not in spell data, exactly as for the modern Zoldyck Recipe talent:
+      // the Potent Assassin mastery whitelist is the closest match to the
+      // "Poisons and Bleeds" wording, and is what historical SimulationCraft
+      // used for this runeforge.
+      affected_by.legacy_zoldyck_insignia =
+        ab::data().affected_by( p->mastery.potent_assassin->effectN( 1 ) ) ||
+        ab::data().affected_by( p->mastery.potent_assassin->effectN( 2 ) ) ||
+        ab::data().affected_by_label( p->mastery.potent_assassin->effectN( 3 ) ) ||
+        ab::data().affected_by_label( p->mastery.potent_assassin->effectN( 4 ) );
+    }
 
     // Hero Talents
     if ( p->talent.deathstalker.momentum_of_despair->ok() )
@@ -1860,6 +2063,16 @@ public:
     auto_attack_damage_buffs.clear();
     crit_chance_buffs.clear();
 
+    // BracketSim legacy compatibility: second wave of Shadowlands runeforges,
+    // and the Deeper Daggers conduit. WITHOUT this line the buff goes up on
+    // every Eviscerate and sits at 98% uptime while changing nothing, because
+    // no action has been told to read it - which is exactly how it first
+    // measured.
+    register_damage_buff( debug_cast<damage_buff_t*>( p()->buffs.legacy_deeper_daggers ) );
+    register_damage_buff( debug_cast<damage_buff_t*>( p()->buffs.legacy_deathly_shadows ) );
+    register_damage_buff( debug_cast<damage_buff_t*>( p()->buffs.legacy_finality_eviscerate ) );
+    register_damage_buff( debug_cast<damage_buff_t*>( p()->buffs.legacy_finality_black_powder ) );
+
     register_damage_buff( p()->buffs.acrobatic_strikes );
     register_damage_buff( p()->buffs.between_the_eyes );
     register_damage_buff( p()->buffs.cold_blood );
@@ -2022,11 +2235,22 @@ public:
     }
 
     // Apply and Snapshot Supercharger Buffs
-    if ( p()->talent.rogue.supercharger->ok() && consumes_supercharger() )
+    // BracketSim legacy compatibility: a point charged by legacy Echoing
+    // Reprimand has to be worth something to the finisher, or it is charged,
+    // never spent, and sits at 100% uptime doing nothing - which is exactly
+    // what the first attempt at this produced. The bonus is read off the
+    // Supercharger SPELL so it is correct without the talent.
+    const bool supercharged = p()->talent.rogue.supercharger->ok() ||
+                              p()->legacy_covenant.echoing_reprimand->ok();
+    if ( supercharged && consumes_supercharger() )
     {
       if ( range::any_of( p()->buffs.supercharger, []( const buff_t* buff ) { return buff->check(); } ) )
-        effective_cp += as<int>( p()->talent.rogue.supercharger->effectN( 2 ).base_value() +
-                                 p()->talent.rogue.forced_induction->effectN( 1 ).base_value() );
+      {
+        double bonus = p()->talent.rogue.supercharger->ok()
+                           ? p()->talent.rogue.supercharger->effectN( 2 ).base_value()
+                           : p()->find_spell( 470347 )->effectN( 2 ).base_value();
+        effective_cp += as<int>( bonus + p()->talent.rogue.forced_induction->effectN( 1 ).base_value() );
+      }
     }
 
     auto rs = cast_state( state );
@@ -2215,6 +2439,29 @@ public:
   virtual bool consumes_combo_points() const
   { return ab::base_costs[ RESOURCE_COMBO_POINT ] > 0; }
 
+  // BracketSim legacy: Edge of Night. A damaging finisher rolls 3% per combo point spent (driver
+  // effect 2); on a hit it deals the dagger's damage once per Blight stack on its target, 150 ms apart.
+  // Upstream's rules: primary finishers only (not secondary casts), and only ones with an AP coefficient.
+  void trigger_legacy_banshees_blight( const action_state_t* state )
+  {
+    auto& blight = p()->legacy_banshees_blight;
+    if ( !blight.strike || is_secondary_action() || !consumes_combo_points() )
+      return;
+    if ( ab::attack_power_mod.direct <= 0.0 && ab::attack_power_mod.tick <= 0.0 )
+      return;
+    const auto rs = cast_state( state );
+    const int stacks = td( rs->target )->debuffs.banshees_blight->check();
+    if ( stacks <= 0 || !p()->rng().roll( rs->get_combo_points() * blight.driver->effectN( 2 ).percent() ) )
+      return;
+    player_t* target = rs->target;
+    for ( int i = 0; i < stacks; ++i )
+    {
+      make_event( *ab::sim, i * 150_ms, [ this, target ] {
+        p()->legacy_banshees_blight.strike->execute_on_target( target );
+      } );
+    }
+  }
+
   // Overridable function to determine whether a finisher is working with Supercharger
   virtual bool consumes_supercharger() const
   { return consumes_combo_points() && ( ab::attack_power_mod.direct > 0.0 || ab::attack_power_mod.tick > 0.0 ); }
@@ -2240,6 +2487,7 @@ public:
   void trigger_ancient_arts( const action_state_t* state );
   void trigger_blade_flurry( const action_state_t* );
   void trigger_blindside( const action_state_t* );
+  void trigger_bloodfang( const action_state_t* );
   void trigger_caustic_spatter( const action_state_t* state );
   void trigger_caustic_spatter_debuff( const action_state_t* state );
   void trigger_cloud_cover( const action_state_t* state );
@@ -2263,6 +2511,7 @@ public:
   void trigger_master_of_shadows();
   void trigger_nimble_flurry( const action_state_t* state );
   void trigger_opportunity( const action_state_t*, rogue_attack_t* action, double modifier = 1.0 );
+  void trigger_legacy_guile_charm( const action_state_t* state );
   void trigger_palmed_bullets( const action_state_t* state );
   void trigger_poison_bomb( const action_state_t* );
   void trigger_relentless_strikes( const action_state_t* );
@@ -2275,6 +2524,8 @@ public:
   void trigger_shadow_blades_attack( const action_state_t* );
   bool trigger_shadow_clone( const action_state_t* state, rogue_attack_t* action = nullptr, double chance = 0.0, timespan_t delay = 0_ms );
   void trigger_shadow_techniques( const action_state_t* );
+  // BracketSim legacy compatibility: Count the Odds (conduit 244).
+  void trigger_legacy_count_the_odds( const action_state_t* );
   void trigger_shadow_techniques_buff( const action_state_t*, bool ignore_shadowcraft = false );
   void trigger_shadow_techniques_cp( const action_state_t* );
   void trigger_supercharger();
@@ -2352,6 +2603,12 @@ public:
          state->target->health_percentage() < p()->spec.zoldyck_insignia->effectN( 2 ).base_value() )
     {
       m *= 1.0 + p()->spec.zoldyck_insignia->effectN( 1 ).percent();
+    }
+
+    if ( affected_by.legacy_zoldyck_insignia &&
+         state->target->health_percentage() < p()->find_spell( 340083 )->effectN( 2 ).base_value() )
+    {
+      m *= 1.0 + p()->find_spell( 340083 )->effectN( 1 ).percent();
     }
 
     if ( affected_by.lethal_dose )
@@ -2496,6 +2753,12 @@ public:
       m *= 1.0 + p()->spec.zoldyck_insignia->effectN( 1 ).percent();
     }
 
+    if ( affected_by.legacy_zoldyck_insignia &&
+         state->target->health_percentage() < p()->find_spell( 340083 )->effectN( 2 ).base_value() )
+    {
+      m *= 1.0 + p()->find_spell( 340083 )->effectN( 1 ).percent();
+    }
+
     if ( affected_by.lethal_dose )
     {
       m *= 1.0 + ( p()->talent.assassination.lethal_dose->effectN( 1 ).percent() *
@@ -2568,6 +2831,12 @@ public:
     if ( affected_by.dashing_scoundrel && p()->buffs.envenom->check() )
     {
       c += p()->spec.envenom->effectN( 5 ).percent() * p()->buffs.envenom->check();
+    }
+
+    if ( affected_by.master_assassins_mark )
+    {
+      c += p()->buffs.master_assassins_mark->value();
+      c += p()->buffs.master_assassins_mark_aura->value();
     }
 
     if ( affected_by.darkest_night_crit && p()->buffs.darkest_night->up() )
@@ -2666,6 +2935,22 @@ public:
       else
       {
         // Energy Spend Mechanics
+
+        // BracketSim legacy compatibility: Duskwalker's Patch. One second off
+        // Deathmark for every 30 Energy spent, carrying the remainder forward.
+        if ( p()->legendary.duskwalkers_patch )
+        {
+          const double per_tick = p()->find_spell( 340084 )->effectN( 2 ).base_value();
+          const timespan_t reduction =
+            timespan_t::from_seconds( p()->find_spell( 340084 )->effectN( 1 ).base_value() );
+          p()->legendary.duskwalkers_patch_counter += ab::last_resource_cost;
+          while ( per_tick > 0 && p()->legendary.duskwalkers_patch_counter >= per_tick )
+          {
+            p()->cooldowns.deathmark->adjust( -reduction );
+            p()->legendary.duskwalkers_patch_counter -= per_tick;
+            p()->procs.duskwalkers_patch->occur();
+          }
+        }
       }
 
       // 2024-09-07 -- Thistle Tea now triggers automatically when Energy drops low enough
@@ -2720,6 +3005,7 @@ public:
       trigger_danse_macabre( ab::execute_state );
       trigger_relentless_strikes( ab::execute_state );
       trigger_ancient_arts( ab::execute_state );
+      trigger_legacy_banshees_blight( ab::execute_state );
     }
 
     // Trigger the 1ms delayed breaking of all stealth buffs
@@ -2839,6 +3125,7 @@ struct rogue_attack_t : public rogue_action_t<melee_attack_t>
     trigger_nimble_flurry( state );
     trigger_lingering_shadow( state );
     trigger_shadow_blades_attack( state );
+    trigger_bloodfang( state );
     trigger_caustic_spatter( state );
     trigger_cloud_cover( state );
     trigger_deathstalkers_mark( state );
@@ -2853,6 +3140,64 @@ struct rogue_attack_t : public rogue_action_t<melee_attack_t>
     trigger_shadow_blades_attack( d->state );
     trigger_caustic_spatter( d->state );
     trigger_cloud_cover( d->state );
+  }
+};
+
+// BracketSim legacy compatibility: Essence of Bloodfang.
+// Spell 340424 is a Periodic Health Leech. action_t::parse_effect_data only
+// parses the damage half of that aura, so the leech heal is driven explicitly
+// from each tick using the effect's own value multiplier.
+struct bloodfang_t : public rogue_attack_t
+{
+  struct bloodfang_heal_t : public rogue_heal_t
+  {
+    bloodfang_heal_t( util::string_view name, rogue_t* p ) :
+      rogue_heal_t( name, p, p->find_spell( 340424 ) )
+    {
+      background = direct_tick = not_a_proc = true;
+      may_crit = false;
+      dot_duration = timespan_t::zero();
+      base_dd_min = base_dd_max = 0.0;
+      attack_power_mod.direct = attack_power_mod.tick = 0.0;
+      spell_power_mod.direct = spell_power_mod.tick = 0.0;
+    }
+
+    // The healed amount is a share of damage that already went through every
+    // multiplier, so none of them may be applied a second time here.
+    double composite_versatility( const action_state_t* ) const override
+    { return 1.0; }
+
+    double composite_player_multiplier( const action_state_t* ) const override
+    { return 1.0; }
+
+    double composite_da_multiplier( const action_state_t* ) const override
+    { return 1.0; }
+
+    result_amount_type amount_type( const action_state_t*, bool ) const override
+    { return result_amount_type::HEAL_OVER_TIME; }
+  };
+
+  bloodfang_heal_t* heal;
+  const double leech_multiplier;
+
+  bloodfang_t( util::string_view name, rogue_t* p ) :
+    rogue_attack_t( name, p, p->find_spell( 340424 ) ),
+    heal( p->get_background_action<bloodfang_heal_t>( "bloodfang_heal" ) ),
+    leech_multiplier( p->find_spell( 340424 )->effectN( 1 ).m_value() )
+  {
+    internal_cooldown->duration = p->find_spell( 340079 )->internal_cooldown();
+    add_child( heal );
+  }
+
+  void tick( dot_t* d ) override
+  {
+    rogue_attack_t::tick( d );
+
+    if ( heal && d->state->result_amount > 0 )
+    {
+      heal->base_dd_min = heal->base_dd_max = d->state->result_amount * leech_multiplier;
+      heal->execute();
+    }
   }
 };
 
@@ -2878,6 +3223,16 @@ struct rogue_poison_t : public rogue_attack_t
     trigger_gcd = timespan_t::zero();
 
     base_proc_chance = p->get_passive_value( data(), "proc_chance", 0.01 );
+
+    // BracketSim legacy compatibility: the conduit Lethal Poisons (240) raises
+    // the INSTANT damage of the lethal poisons - Deadly, Instant, Wound and
+    // Amplifying - and leaves Deadly Poison's dot alone. This build already
+    // knows which poisons are lethal, so the flag is the gate; base_dd_multiplier
+    // is the direct-damage half only, which is exactly the half the conduit
+    // names. Shadowlands did it with apply_affecting_conduit and a spell family
+    // mask; spell 341539 is not in Midnight, so the rank value is applied here.
+    if ( is_lethal )
+      base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 240 );
   }
 
   timespan_t execute_time() const override
@@ -2936,6 +3291,14 @@ struct rogue_poison_t : public rogue_attack_t
 
     // MIDNIGHT TOCHECK -- Does this trigger twice with Deathmark?
     trigger_secondary_poisoning( source_state );
+
+    // Legacy Azerite: Double Dose counts the poison procs from one Mutilate; a
+    // proc off both weapons in the same cast fires the extra hit.
+    if ( p()->azerite.double_dose.ok() &&
+         ( source_state->action->name_str == "mutilate_mh" || source_state->action->name_str == "mutilate_oh" ) )
+    {
+      p()->buffs.legacy_double_dose->trigger();
+    }
   }
 
   void impact( action_state_t* state ) override
@@ -3442,6 +3805,13 @@ struct melee_t : public rogue_attack_t
   double composite_crit_chance() const override
   {
     double c = rogue_attack_t::composite_crit_chance();
+
+    if ( p()->legendary.master_assassins_mark )
+    {
+      c += p()->buffs.master_assassins_mark->value();
+      c += p()->buffs.master_assassins_mark_aura->value();
+    }
+
     return c;
   }
 
@@ -3559,6 +3929,10 @@ struct adrenaline_rush_t : public rogue_spell_t
     // 2020-12-02 - Using over Celerity proc'ed AR does not extend but applies base duration.
     p()->buffs.adrenaline_rush->expire();
     p()->buffs.adrenaline_rush->trigger();
+
+    // Legacy Azerite: Brigand's Blitz ramps for as long as Adrenaline Rush runs.
+    if ( p()->azerite.brigands_blitz.ok() )
+      p()->buffs.brigands_blitz_driver->trigger();
     p()->buffs.loaded_dice->trigger();
 
     if ( precombat_seconds > 0_s && !p()->in_combat )
@@ -3604,6 +3978,9 @@ struct ambush_t : public rogue_attack_t
     {
       trigger_opportunity( state, nullptr, p()->talent.outlaw.hidden_opportunity->effectN( 1 ).percent() );
     }
+
+    // BracketSim legacy compatibility: Count the Odds (conduit 244).
+    this->trigger_legacy_count_the_odds( state );
   }
 
   bool procs_main_gauche() const override
@@ -3694,6 +4071,14 @@ struct backstab_t : public rogue_attack_t
     affected_by.lingering_shadow.direct = true;
   }
 
+  // Legacy Azerite: Inevitability
+  double bonus_da( const action_state_t* state ) const override
+  {
+    double b = rogue_attack_t::bonus_da( state );
+    b += p()->azerite.inevitability.value( 3 );
+    return b;
+  }
+
   void init() override
   {
     rogue_attack_t::init();
@@ -3715,6 +4100,18 @@ struct backstab_t : public rogue_attack_t
     }
 
     return m;
+  }
+
+  void execute() override
+  {
+    rogue_attack_t::execute();
+
+    // Legacy Azerite: Perforate rewards hitting from behind.
+    if ( p()->azerite.perforate.ok() && p()->position() == POSITION_BACK )
+    {
+      p()->buffs.perforate->trigger();
+      p()->cooldowns.shadow_blades->adjust( -p()->azerite.perforate.spell_ref().effectN( 2 ).time_value(), false );
+    }
   }
 
   void impact( action_state_t* state ) override
@@ -3785,6 +4182,9 @@ struct dispatch_t: public rogue_attack_t
     rogue_attack_t::impact( state );
     trigger_palmed_bullets( state );
     trigger_scoundrel_strike( state, p()->active.scoundrel_strike.dispatch );
+
+    // BracketSim legacy compatibility: Count the Odds (conduit 244).
+    this->trigger_legacy_count_the_odds( state );
   }
 
   bool ready() override
@@ -3822,12 +4222,42 @@ struct between_the_eyes_t : public rogue_attack_t
     return c;
   }
 
+  // BracketSim legacy compatibility: Ace Up Your Sleeve adds flat damage; the
+  // combo point multiplier is applied to it afterwards.
+  double bonus_da( const action_state_t* state ) const override
+  {
+    double b = rogue_attack_t::bonus_da( state );
+
+    if ( p()->azerite.ace_up_your_sleeve.ok() )
+      b += p()->azerite.ace_up_your_sleeve.value();
+
+    return b;
+  }
+
   void execute() override
   {
     rogue_attack_t::execute();
 
     trigger_restless_blades( execute_state );
     trigger_hand_of_fate( execute_state );
+
+    // BracketSim legacy compatibility: Between the Eyes banks a Deadshot charge.
+    if ( result_is_hit( execute_state->result ) )
+      p()->buffs.deadshot->trigger();
+
+    // BracketSim legacy compatibility: Ace Up Your Sleeve also rolls per combo
+    // point spent for a burst of extra combo points.
+    if ( p()->azerite.ace_up_your_sleeve.ok() && result_is_hit( execute_state->result ) )
+    {
+      const auto ace_state = cast_state( execute_state );
+      if ( rng().roll( ace_state->get_combo_points() *
+                       p()->azerite.ace_up_your_sleeve.spell_ref().effectN( 2 ).percent() ) )
+      {
+        trigger_combo_point_gain(
+          as<int>( p()->azerite.ace_up_your_sleeve.spell_ref().effectN( 3 ).base_value() ),
+          p()->gains.legacy_ace_up_your_sleeve );
+      }
+    }
 
     if ( result_is_hit( execute_state->result ) )
     {
@@ -3836,6 +4266,12 @@ struct between_the_eyes_t : public rogue_attack_t
 
       // 2026-01-04 -- Updated from 3x CP spend to 2s base + 2s per CP
       p()->buffs.between_the_eyes->trigger( data().duration() * ( cp_spend + 1 ) );
+
+      if ( p()->legendary.greenskins_wickers &&
+           rng().roll( rs->get_combo_points( true ) * p()->find_spell( 340085 )->effectN( 1 ).percent() ) )
+      {
+        p()->buffs.greenskins_wickers->trigger();
+      }
 
       if ( p()->talent.outlaw.gravedigger_1->ok() && rng().roll( p()->talent.outlaw.gravedigger_1->effectN( 1 ).percent() ) )
       {
@@ -3891,6 +4327,17 @@ struct blade_flurry_attack_t : public rogue_attack_t
   {
     rogue_attack_t::init();
     snapshot_flags |= STATE_TGT_MUL_DA;
+  }
+
+  // BracketSim legacy compatibility: Keep Your Wits About You adds flat damage
+  // to each Blade Flurry cleave hit.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = rogue_attack_t::bonus_da( s );
+
+    b += p()->azerite.keep_your_wits_about_you.value( 2 );
+
+    return b;
   }
 
   bool procs_poison() const override
@@ -4141,6 +4588,15 @@ struct deathmark_t : public rogue_attack_t
     td( state->target )->debuffs.deathmark->trigger();
     p()->buffs.finish_the_job->trigger();
 
+    // Legacy Azerite: Nothing Personal. Battle for Azeroth hung this off
+    // Vendetta, which Deathmark replaced.
+    if ( p()->azerite.nothing_personal.ok() )
+    {
+      p()->buffs.nothing_personal->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, data().duration() );
+      if ( p()->active.legacy_nothing_personal )
+        p()->active.legacy_nothing_personal->execute_on_target( state->target );
+    }
+
     trigger_fatebound_edge_case( state );
   }
 
@@ -4187,6 +4643,9 @@ struct envenom_t : public rogue_attack_t
   {
     dot_duration = timespan_t::zero();
     affected_by.lethal_dose = false;
+    // Historical behaviour: Envenom itself is not a Poison or a Bleed, so
+    // Zoldyck Insignia never applied to it.
+    affected_by.legacy_zoldyck_insignia = false;
     affected_by.darkest_night = affected_by.darkest_night_crit = true;
     affected_by.delivered_doom = true;
 
@@ -4244,12 +4703,29 @@ struct envenom_t : public rogue_attack_t
     }
   }
 
+  // BracketSim legacy compatibility: Twist the Knife adds flat Envenom damage.
+  // The combo point multiplier is applied to this afterwards, as it was in
+  // Battle for Azeroth.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = rogue_attack_t::bonus_da( s );
+
+    if ( p()->azerite.twist_the_knife.ok() )
+      b += p()->azerite.twist_the_knife.value();
+
+    return b;
+  }
+
   void execute() override
   {
     rogue_attack_t::execute();
 
     trigger_poison_bomb( execute_state );
     trigger_hand_of_fate( execute_state, true );
+
+    // BracketSim legacy compatibility: Dashing Scoundrel rides the Envenom
+    // window, which is where the poison crit bonus applies.
+    p()->buffs.legacy_dashing_scoundrel->trigger();
 
     if ( p()->talent.fatebound.overflowing_purse->ok() )
     {
@@ -4274,6 +4750,11 @@ struct envenom_t : public rogue_attack_t
     {
       envenom_duration += p()->talent.assassination.unstable_toxin->effectN( 2 ).time_value();
     }
+
+    // BracketSim legacy compatibility: Twist the Knife stretches the Envenom
+    // buff when the finisher crits.
+    if ( p()->azerite.twist_the_knife.ok() && state->result == RESULT_CRIT )
+      envenom_duration += p()->azerite.twist_the_knife.spell_ref().effectN( 2 ).time_value();
 
     if ( p()->talent.assassination.implacable_1->ok() )
     {
@@ -4315,6 +4796,8 @@ struct envenom_t : public rogue_attack_t
 
 // Eviscerate ===============================================================
 
+// BracketSim legacy compatibility: Finality (Shadowlands runeforge). Each of
+// the three finishers banks a bonus for the next use of that same finisher.
 struct eviscerate_t : public rogue_attack_t
 {
   struct eviscerate_bonus_t : public rogue_attack_t
@@ -4363,6 +4846,22 @@ struct eviscerate_t : public rogue_attack_t
     rogue_attack_t::execute();
 
     trigger_cut_to_the_chase( execute_state );
+
+    // BracketSim legacy compatibility: Deeper Daggers (conduit 245) goes up
+    // BEFORE the bonus damage, which is what makes it self-affecting - the
+    // Shadowlands comment says the same and it is the behaviour players saw.
+    if ( p()->legacy_conduits.has( 245 ) )
+      p()->buffs.legacy_deeper_daggers->trigger();
+
+    // BracketSim legacy compatibility: Finality banks a bonus for the next
+    // Eviscerate and is spent by it.
+    if ( p()->legendary.finality )
+    {
+      if ( p()->buffs.legacy_finality_eviscerate->check() )
+        p()->buffs.legacy_finality_eviscerate->expire();
+      else
+        p()->buffs.legacy_finality_eviscerate->trigger();
+    }
   }
 
   void impact( action_state_t* state ) override
@@ -4391,8 +4890,29 @@ struct eviscerate_t : public rogue_attack_t
 
 struct fan_of_knives_t: public rogue_attack_t
 {
+  // Legacy Azerite: Echoing Blades. A guaranteed-crit splash off the first few
+  // critical Fan of Knives hits of each cast.
+  struct legacy_echoing_blades_t : public rogue_attack_t
+  {
+    legacy_echoing_blades_t( util::string_view name, rogue_t* p ) :
+      rogue_attack_t( name, p, p->find_spell( 287653 ) )
+    {
+      aoe = -1;
+      background = true;
+      may_miss = may_block = may_dodge = may_parry = false;
+      base_dd_min = base_dd_max = p->azerite.echoing_blades.value( 6 );
+    }
+
+    double composite_crit_chance() const override
+    { return 1.0; }
+  };
+
+  legacy_echoing_blades_t* legacy_echoing_blades;
+  int legacy_echoing_blades_crit_count;
+
   fan_of_knives_t( util::string_view name, rogue_t* p, util::string_view options_str = {} ):
-    rogue_attack_t( name, p, p->spec.fan_of_knives, options_str )
+    rogue_attack_t( name, p, p->spec.fan_of_knives, options_str ),
+    legacy_echoing_blades( nullptr ), legacy_echoing_blades_crit_count( 0 )
   {
     energize_type     = action_energize::ON_HIT;
     energize_resource = RESOURCE_COMBO_POINT;
@@ -4405,6 +4925,45 @@ struct fan_of_knives_t: public rogue_attack_t
     if ( p->talent.deathstalker.follow_the_blood->ok() )
     {
       affected_by.follow_the_blood.direct = true;
+    }
+
+    if ( p->azerite.echoing_blades.ok() )
+    {
+      legacy_echoing_blades = p->get_background_action<legacy_echoing_blades_t>( "legacy_echoing_blades" );
+      add_child( legacy_echoing_blades );
+    }
+
+    // BracketSim legacy compatibility: the conduit Poisoned Katar (237) is two
+    // effects on Fan of Knives - damage and crit chance. Shadowlands applied it
+    // with apply_affecting_conduit and no effect number, which substitutes the
+    // rank value into EVERY effect of the conduit spell, so both halves take
+    // the same number. Copied as it stood rather than inventing a split: the
+    // conduit's own tooltip prints 7% and 5%, but the API tooltip disagrees
+    // with the ConduitRank table on 56 of the 93 conduits this build already
+    // measures, so it is not evidence about either half.
+    if ( p->legacy_conduits.has( 237 ) )
+    {
+      base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 237 );
+      base_crit += p->legacy_conduits.percent( 237 );
+    }
+  }
+
+  // Legacy Azerite: Echoing Blades
+  double bonus_da( const action_state_t* state ) const override
+  {
+    double b = rogue_attack_t::bonus_da( state );
+    b += p()->azerite.echoing_blades.value( 2 );
+    return b;
+  }
+
+  void impact( action_state_t* state ) override
+  {
+    rogue_attack_t::impact( state );
+
+    if ( legacy_echoing_blades && state->result == RESULT_CRIT &&
+         ++legacy_echoing_blades_crit_count <= p()->azerite.echoing_blades.spell_ref().effectN( 4 ).base_value() )
+    {
+      legacy_echoing_blades->execute_on_target( state->target );
     }
   }
 
@@ -4434,6 +4993,9 @@ struct fan_of_knives_t: public rogue_attack_t
 
   void execute() override
   {
+    // Legacy Azerite: Echoing Blades caps its splashes per cast.
+    legacy_echoing_blades_crit_count = 0;
+
     rogue_attack_t::execute();
 
     if ( crit_any_target && p()->talent.deathstalker.momentum_of_despair->ok() )
@@ -4522,6 +5084,16 @@ struct garrote_t : public rogue_attack_t
                                 p()->gains.shrouded_suffocation );
     }
 
+    // BracketSim legacy compatibility: the Azerite trait of the same name is a
+    // separate source with its own combo point value, so both can pay out.
+    if ( p()->azerite.shrouded_suffocation.ok() && !is_secondary_action() &&
+         p()->stealthed( STEALTH_BASIC | STEALTH_ROGUE ) )
+    {
+      trigger_combo_point_gain(
+        as<int>( p()->azerite.shrouded_suffocation.spell_ref().effectN( 2 ).base_value() ),
+        p()->gains.legacy_shrouded_suffocation );
+    }
+
     trigger_deathstalkers_mark_debuff( execute_state );
   }
 
@@ -4563,6 +5135,14 @@ struct gloomblade_t : public rogue_attack_t
     rogue_attack_t( name, p, p->talent.subtlety.gloomblade, options_str )
   {
     affected_by.lingering_shadow.direct = true;
+  }
+
+  // Legacy Azerite: Inevitability
+  double bonus_da( const action_state_t* state ) const override
+  {
+    double b = rogue_attack_t::bonus_da( state );
+    b += p()->azerite.inevitability.value( 3 );
+    return b;
   }
 
   void init() override
@@ -4919,6 +5499,10 @@ struct pistol_shot_t : public rogue_attack_t
     if ( !is_secondary_action() )
     {
       add_child( p()->active.fan_the_hammer );
+      if ( p()->active.concealed_blunderbuss )
+      {
+        add_child( p()->active.concealed_blunderbuss );
+      }
     }
   }
 
@@ -4940,12 +5524,28 @@ struct pistol_shot_t : public rogue_attack_t
 
     m *= 1.0 + p()->buffs.opportunity->value();
 
+    if ( !is_secondary_action() )
+    {
+      m *= 1.0 + p()->buffs.greenskins_wickers->value();
+    }
+
     if ( secondary_trigger_type == secondary_trigger::FAN_THE_HAMMER )
     {
       m *= 1.0 - p()->talent.outlaw.fan_the_hammer->effectN( 3 ).percent();
     }
 
     return m;
+  }
+
+  // BracketSim legacy compatibility: Deadshot is banked by Between the Eyes and
+  // spent by the next Pistol Shot.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = rogue_attack_t::bonus_da( s );
+
+    b += p()->buffs.deadshot->stack_value();
+
+    return b;
   }
 
   double generate_cp() const override
@@ -4992,6 +5592,24 @@ struct pistol_shot_t : public rogue_attack_t
         p()->active.fan_the_hammer->trigger_secondary_action( execute_state->target, 0.1_s * ( 1 + i ) );
       }
     }
+
+    if ( p()->active.concealed_blunderbuss && !is_secondary_action() )
+    {
+      const unsigned num_shots = as<unsigned>( p()->buffs.concealed_blunderbuss->value() );
+      for ( unsigned i = 0; i < num_shots; ++i )
+      {
+        p()->active.concealed_blunderbuss->trigger_secondary_action( execute_state->target, 0.1_s * ( 1 + i ) );
+      }
+      p()->buffs.concealed_blunderbuss->expire();
+    }
+
+    if ( !is_secondary_action() )
+    {
+      p()->buffs.greenskins_wickers->expire();
+    }
+
+    // BracketSim legacy compatibility: Deadshot is consumed by the shot it buffs.
+    p()->buffs.deadshot->expire();
 
     if ( p()->talent.trickster.clever_combatant->ok() )
     {
@@ -5060,6 +5678,18 @@ struct mutilate_t : public rogue_attack_t
       trigger_doomblade( state );
     }
 
+    // BracketSim legacy compatibility: Maim, Mangle. Shadowlands raised
+    // Mutilate's damage by the rank value against anything carrying Garrote.
+    double composite_target_multiplier( player_t* target ) const override
+    {
+      double m = rogue_attack_t::composite_target_multiplier( target );
+
+      if ( p()->legacy_conduits.has( 239 ) && td( target )->dots.garrote->is_ticking() )
+        m *= 1.0 + p()->legacy_conduits.percent( 239 );
+
+      return m;
+    }
+
     bool procs_seal_fate() const override
     { return true; }
 
@@ -5094,12 +5724,21 @@ struct mutilate_t : public rogue_attack_t
 
   void execute() override
   {
+    // Legacy Azerite: Double Dose counts poison procs within a single Mutilate.
+    p()->buffs.legacy_double_dose->expire();
+
     rogue_attack_t::execute();
 
     if ( result_is_hit( execute_state->result ) )
     {
       mh_strike->execute_on_target( execute_state->target );
       oh_strike->execute_on_target( execute_state->target );
+
+      if ( p()->active.legacy_double_dose &&
+           p()->buffs.legacy_double_dose->check() == p()->buffs.legacy_double_dose->max_stack() )
+      {
+        p()->active.legacy_double_dose->execute_on_target( execute_state->target );
+      }
 
       trigger_blindside( execute_state );
       trigger_echoing_reprimand( execute_state );
@@ -5176,6 +5815,29 @@ struct rupture_t : public rogue_attack_t
   {
     rogue_attack_t::execute();
 
+    // BracketSim legacy compatibility: Finality banks a bonus for the next
+    // Rupture and is spent by it.
+    if ( p()->legendary.finality )
+    {
+      if ( p()->buffs.legacy_finality_rupture->check() )
+        p()->buffs.legacy_finality_rupture->expire();
+      else
+        p()->buffs.legacy_finality_rupture->trigger();
+    }
+
+    // Legacy Azerite: Replicating Shadows spreads from the last Rupture the
+    // player applied by hand, so a copy must not become the new origin.
+    if ( !is_secondary_action() && execute_state )
+      p()->legacy_last_rupture_target = execute_state->target;
+
+    // Legacy Azerite: Night's Vengeance arms the next Eviscerate off a hand-cast
+    // Rupture, which is what Nightblade became.
+    if ( p()->azerite.nights_vengeance.ok() && !background && execute_state &&
+         result_is_hit( execute_state->result ) )
+    {
+      p()->buffs.nights_vengeance->trigger();
+    }
+
     trigger_scent_of_blood();
     trigger_hand_of_fate( execute_state );
   }
@@ -5233,6 +5895,88 @@ struct rupture_t : public rogue_attack_t
     }
 
     return rogue_attack_t::create_expression( name );
+  }
+};
+
+// Legacy Azerite: Replicating Shadows ======================================
+// Splash damage on a finisher, plus a copy of Rupture onto the nearest target
+// that does not have one. In Battle for Azeroth the dot it copied was
+// Nightblade; Subtlety's bleed is Rupture again in Midnight, so that is what is
+// spread here.
+
+struct legacy_replicating_shadows_t : public rogue_attack_t
+{
+  legacy_replicating_shadows_t( util::string_view name, rogue_t* p ) :
+    rogue_attack_t( name, p, p->find_spell( 286131 ) )
+  {
+    background = true;
+    may_miss = may_block = may_dodge = may_parry = false;
+    base_dd_min = base_dd_max = p->azerite.replicating_shadows.value();
+  }
+
+  void execute() override
+  {
+    rogue_attack_t::execute();
+
+    player_t* origin = p()->legacy_last_rupture_target;
+    if ( !origin )
+      return;
+
+    rogue_td_t* origin_td = p()->get_target_data( origin );
+    if ( !origin_td->dots.rupture->is_ticking() )
+      return;
+
+    // Nearest enemy to the origin that has no Rupture on it. Spread radius was
+    // estimated at 10 yards in Battle for Azeroth.
+    double min_dist = 0.0;
+    player_t* spread_to = nullptr;
+    for ( const auto enemy : sim->target_non_sleeping_list )
+    {
+      if ( p()->get_target_data( enemy )->dots.rupture->is_ticking() )
+        continue;
+
+      double dist = enemy->get_position_distance( origin->x_position, origin->y_position );
+      if ( !spread_to || dist < min_dist )
+      {
+        min_dist = dist;
+        spread_to = enemy;
+      }
+    }
+
+    if ( !spread_to || min_dist >= 10.0 )
+      return;
+
+    auto copy = p()->find_secondary_trigger_action<rupture_t>(
+        secondary_trigger::LEGACY_REPLICATING_SHADOWS, "legacy_replicating_shadows_rupture" );
+    if ( copy )
+      copy->trigger_secondary_action( spread_to, cast_state( origin_td->dots.rupture->state )->get_combo_points() );
+  }
+};
+
+// Legacy Azerite: Nothing Personal =========================================
+
+struct legacy_nothing_personal_t : public rogue_attack_t
+{
+  legacy_nothing_personal_t( util::string_view name, rogue_t* p ) :
+    rogue_attack_t( name, p, p->find_spell( 286581 ) )
+  {
+    background = true;
+    may_dodge = may_parry = may_block = may_crit = false;
+    tick_may_crit = hasted_ticks = true;
+    base_td = p->azerite.nothing_personal.value();
+  }
+};
+
+// Legacy Azerite: Double Dose ==============================================
+
+struct legacy_double_dose_t : public rogue_attack_t
+{
+  legacy_double_dose_t( util::string_view name, rogue_t* p ) :
+    rogue_attack_t( name, p, p->find_spell( 273009 ) )
+  {
+    background = true;
+    may_miss = may_block = may_dodge = may_parry = false;
+    base_dd_min = base_dd_max = p->azerite.double_dose.value();
   }
 };
 
@@ -5495,6 +6239,16 @@ struct shadow_dance_t : public rogue_spell_t
   {
     rogue_spell_t::execute();
     p()->buffs.shadow_dance->trigger();
+
+    // Legacy Azerite: The First Dance
+    if ( p()->azerite.the_first_dance.ok() )
+    {
+      p()->buffs.legacy_the_first_dance->trigger();
+      trigger_combo_point_gain(
+          as<int>( p()->buffs.legacy_the_first_dance->data().effectN( 3 ).resource( RESOURCE_COMBO_POINT ) ),
+          p()->gains.legacy_the_first_dance );
+    }
+
     p()->buffs.symbolic_victory->trigger();
     p()->buffs.the_rotten->trigger();
     trigger_master_of_shadows();
@@ -5566,6 +6320,14 @@ struct shadowstrike_t : public rogue_attack_t
   shadowstrike_t( util::string_view name, rogue_t* p, util::string_view options_str = {} ) :
     rogue_attack_t( name, p, p->spec.shadowstrike, options_str )
   {
+  }
+
+  // Legacy Azerite: Inevitability
+  double bonus_da( const action_state_t* state ) const override
+  {
+    double b = rogue_attack_t::bonus_da( state );
+    b += p()->azerite.inevitability.value( 3 );
+    return b;
   }
 
   void impact( action_state_t* state ) override
@@ -5729,6 +6491,21 @@ struct black_powder_t: public rogue_attack_t
     {
       bonus_attack->trigger_secondary_action( execute_state->target, cast_state( execute_state )->get_combo_points() );
     }
+
+    // BracketSim legacy compatibility: Deeper Daggers (conduit 245), same
+    // ordering as Eviscerate above.
+    if ( p()->legacy_conduits.has( 245 ) )
+      p()->buffs.legacy_deeper_daggers->trigger();
+
+    // BracketSim legacy compatibility: Finality banks a bonus for the next
+    // Black Powder and is spent by it.
+    if ( p()->legendary.finality )
+    {
+      if ( p()->buffs.legacy_finality_black_powder->check() )
+        p()->buffs.legacy_finality_black_powder->expire();
+      else
+        p()->buffs.legacy_finality_black_powder->trigger();
+    }
   }
 
   bool procs_poison() const override
@@ -5810,7 +6587,10 @@ struct shuriken_storm_t: public rogue_attack_t
   void execute() override
   {
     rogue_attack_t::execute();
-    
+
+    // Legacy Azerite: Blade in the Shadows
+    p()->buffs.blade_in_the_shadows->trigger();
+
     if ( p()->talent.subtlety.shuriken_tornado->ok() )
     {
       trigger_shadow_clone( execute_state, p()->active.shadow_clone_attack.shuriken_tornado,
@@ -5869,6 +6649,15 @@ struct sinister_strike_t : public rogue_attack_t
 {
   struct sinister_strike_extra_attack_t : public rogue_attack_t
   {
+    // BracketSim legacy compatibility: the conduit Triple Threat (241). The
+    // conduit's own strike is a SECOND instance of this action with this flag
+    // set, so it can never roll for another one. Shadowlands used a separate
+    // action for the same reason and noted that Triple Threat does not appear
+    // to chain-proc; sharing one object and a member flag would be unsafe once
+    // the follow-up is scheduled 300ms later.
+    bool legacy_is_triple_threat = false;
+    sinister_strike_extra_attack_t* legacy_triple_threat = nullptr;
+
     sinister_strike_extra_attack_t( util::string_view name, rogue_t* p ) :
       rogue_attack_t( name, p, p->spec.sinister_strike_extra_attack )
     {
@@ -5876,10 +6665,48 @@ struct sinister_strike_t : public rogue_attack_t
       energize_resource = RESOURCE_COMBO_POINT;
     }
 
+    void init() override
+    {
+      rogue_attack_t::init();
+
+    // BracketSim: WEIGHTED BLADES (110211), the +45% Sinister Strike carried by the
+      // EPIC stages of the rogue legendary chain - Fear/Vengeance and The
+      // Sleeper/The Dreamer. The set is detected in player_t::init_special_effects()
+      // and the 45% is stated there with its source, because 110211 is hollow in
+      // this client.
+      //
+      // APPLIED IN init(), NOT IN THE CONSTRUCTOR. sim_t sequences
+      // create_actions() BEFORE INIT_ACTOR_INIT_EFFECTS, so the flag is still
+      // false while this action is being built; init() runs in
+      // INIT_ACTOR_INIT_ACTIONS, after the set has been detected. Reading it in
+      // the constructor silently did nothing and the epics tied the legendaries
+      // to within 0.5%, which is how this was caught.
+      if ( p()->weighted_blades_active )
+        base_multiplier *= 1.45;
+    }
+
+    void execute() override
+    {
+      rogue_attack_t::execute();
+
+      if ( !legacy_is_triple_threat && legacy_triple_threat &&
+           secondary_trigger_type == secondary_trigger::SINISTER_STRIKE &&
+           p()->rng().roll( p()->legacy_conduits.percent( 241 ) ) )
+      {
+        legacy_triple_threat->trigger_secondary_action( execute_state->target, 300_ms );
+      }
+    }
+
     double composite_energize_amount( const action_state_t* ) const override
     {
       // CP generation is not in the spell data and the extra SS procs seem script-driven
       return ( secondary_trigger_type == secondary_trigger::SINISTER_STRIKE ) ? 1 : 0;
+    }
+
+    void impact( action_state_t* state ) override
+    {
+      rogue_attack_t::impact( state );
+      trigger_legacy_guile_charm( state );
     }
 
     bool procs_main_gauche() const override
@@ -5896,15 +6723,41 @@ struct sinister_strike_t : public rogue_attack_t
   {
     extra_attack = p->get_secondary_trigger_action<sinister_strike_extra_attack_t>(
       secondary_trigger::SINISTER_STRIKE, "sinister_strike_extra_attack" );
+
+    // BracketSim legacy compatibility: the conduit Triple Threat (241).
+    if ( p->legacy_conduits.has( 241 ) )
+    {
+      auto tt = p->get_secondary_trigger_action<sinister_strike_extra_attack_t>(
+        secondary_trigger::SINISTER_STRIKE, "legacy_triple_threat" );
+      tt->legacy_is_triple_threat = true;
+      extra_attack->legacy_triple_threat = tt;
+    }
   }
 
   void init() override
   {
     rogue_attack_t::init();
 
+    // BracketSim: WEIGHTED BLADES (110211), the +45% Sinister Strike carried by the
+    // EPIC stages of the rogue legendary chain - Fear/Vengeance and The
+    // Sleeper/The Dreamer. The set is detected in player_t::init_special_effects()
+    // and the 45% is stated there with its source, because 110211 is hollow in
+    // this client.
+    //
+    // APPLIED IN init(), NOT IN THE CONSTRUCTOR. sim_t sequences
+    // create_actions() BEFORE INIT_ACTOR_INIT_EFFECTS, so the flag is still
+    // false while this action is being built; init() runs in
+    // INIT_ACTOR_INIT_ACTIONS, after the set has been detected. Reading it in
+    // the constructor silently did nothing and the epics tied the legendaries
+    // to within 0.5%, which is how this was caught.
+    if ( p()->weighted_blades_active )
+      base_multiplier *= 1.45;
+
     if ( !is_secondary_action() )
     {
       add_child( extra_attack );
+      if ( extra_attack->legacy_triple_threat )
+        add_child( extra_attack->legacy_triple_threat );
       add_child( p()->active.echoing_reprimand );
     }
   }
@@ -5920,6 +6773,7 @@ struct sinister_strike_t : public rogue_attack_t
   void impact( action_state_t* state ) override
   {
     rogue_attack_t::impact( state );
+    trigger_legacy_guile_charm( state );
     trigger_echoing_reprimand( state );
   }
 
@@ -5967,6 +6821,10 @@ struct slice_and_dice_t : public rogue_spell_t
       snd_duration -= precombat_seconds;
 
     p()->buffs.slice_and_dice->trigger( snd_duration );
+
+    // Legacy Azerite: Paradise Lost rides along with Slice and Dice.
+    if ( p()->azerite.paradise_lost.ok() )
+      p()->buffs.paradise_lost->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, snd_duration );
   }
 
   bool ready() override
@@ -6015,6 +6873,11 @@ struct shiv_t : public rogue_attack_t
   shiv_t( util::string_view name, rogue_t* p, util::string_view options_str = {} ) :
     rogue_attack_t( name, p, p->talent.rogue.shiv, options_str )
   {
+    if ( p->legendary.tiny_toxic_blade )
+    {
+      base_multiplier *= 1.0 + p->find_spell( 340078 )->effectN( 1 ).percent();
+      base_costs[ RESOURCE_ENERGY ] = 0.0;
+    }
   }
 
   bool procs_fatal_flourish() const override
@@ -6041,6 +6904,15 @@ struct vanish_t : public rogue_spell_t
 
     p()->buffs.vanish->trigger();
     trigger_master_of_shadows();
+
+    // BracketSim legacy compatibility: Deathly Shadows.
+    if ( p()->legendary.deathly_shadows )
+    {
+      p()->buffs.legacy_deathly_shadows->trigger();
+      p()->resource_gain( RESOURCE_COMBO_POINT,
+                          p()->find_spell( 341202 )->effectN( 4 ).base_value(),
+                          p()->gains.legacy_deathly_shadows, this );
+    }
   }
 
   bool ready() override
@@ -6130,6 +7002,300 @@ struct internal_bleeding_t : public rogue_attack_t
 };
 
 // Kidney Shot ==============================================================
+
+// BracketSim legacy compatibility: Shadowlands covenant abilities ==========
+// Damage, cooldown, duration and resource gains all come from the covenant
+// spells themselves, which still resolve in current client data.
+
+struct legacy_echoing_reprimand_t : public rogue_attack_t
+{
+  int charges;
+
+  legacy_echoing_reprimand_t( util::string_view name, rogue_t* p, util::string_view options_str = {} )
+    : rogue_attack_t( name, p, p->legacy_covenant.echoing_reprimand, options_str ),
+      // One Animacharged combo point, or four with Resounding Clarity - its
+      // own spell's effect 1 carries the number.
+      charges( p->legendary.resounding_clarity
+                   ? as<int>( p->find_spell( 354837 )->effectN( 1 ).base_value() )
+                   : 1 )
+  {
+
+    // BracketSim legacy compatibility: Reverberation (conduit 225) raises this
+    // ability's damage.
+    base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 225 );
+  }
+
+  void execute() override
+  {
+    rogue_attack_t::execute();
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_KYRIAN,
+                                            cooldown );
+
+    // BracketSim legacy compatibility: the Animacharged combo point. Midnight
+    // ships this mechanism as Supercharger, so the legacy ability charges those
+    // buffs rather than a parallel set of its own.
+    p()->trigger_legacy_animacharge( charges );
+  }
+};
+
+struct legacy_flagellation_lash_t : public rogue_attack_t
+{
+  legacy_flagellation_lash_t( util::string_view name, rogue_t* p )
+    : rogue_attack_t( name, p, p->legacy_covenant.flagellation_lash )
+  {
+    background = true;
+
+    // BracketSim legacy compatibility: Lashing Scars (229), the ranked half.
+    // Effect 1 is a P_GENERIC damage modifier on Flagellation, and the lash is
+    // where Flagellation's damage actually lands.
+    base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 229 );
+  }
+};
+
+struct legacy_flagellation_t : public rogue_attack_t
+{
+  // BracketSim legacy compatibility: Lashing Scars (conduit 229).
+  int initial_lashes;
+
+  legacy_flagellation_t( util::string_view name, rogue_t* p, util::string_view options_str = {} )
+    : rogue_attack_t( name, p, p->legacy_covenant.flagellation, options_str ),
+      initial_lashes( 0 )
+  {
+    if ( p->active.legacy_flagellation_lash )
+      add_child( p->active.legacy_flagellation_lash );
+
+    p->cooldowns.legacy_flagellation = cooldown;
+
+    // BracketSim legacy compatibility: Lashing Scars (229) is two effects and
+    // only ONE of them is ranked. Shadowlands read the extra lash count with
+    // conduit->effectN( 2 ).base_value(), which reads the spell's own value
+    // and deliberately bypasses the rank substitution - so it is a flat 4 at
+    // every rank. Spell 341310 is not in Midnight, so that 4 comes from the
+    // archived 9.2.7 row. The damage half IS ranked and is applied below.
+    if ( p->legacy_conduits.has( 229 ) )
+      initial_lashes = 4;
+  }
+
+  void execute() override
+  {
+    rogue_attack_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_VENTHYR,
+                                            cooldown );
+    // The buff that persisted after the debuff ended is not modelled.
+    p()->buffs.legacy_flagellation->trigger();
+
+    // BracketSim legacy compatibility: Lashing Scars (229). Shadowlands noted
+    // that the extra lashes arrive as if a finisher had been spent, delayed by
+    // 0.75 s rather than instant, and stacked the buff with them. Copied as it
+    // stood, including the delay.
+    if ( initial_lashes > 0 && p()->active.legacy_flagellation_lash )
+    {
+      make_event( *sim, 0.75_s, [ this ]() {
+        p()->buffs.legacy_flagellation->trigger( initial_lashes );
+        for ( int i = 0; i < initial_lashes; i++ )
+          p()->active.legacy_flagellation_lash->execute_on_target( target );
+      } );
+    }
+  }
+};
+
+// BracketSim legacy compatibility: Sudden Fractures (conduit 227) gives the
+// Serrated Bone Spike bleed a chance to deal its damage a second time. It is a
+// separate action so the extra hits are reported on their own line rather than
+// silently inflating the bleed, which is how SimulationCraft modelled it too.
+//
+// SimulationCraft built this from spell 341277, which Midnight does not ship.
+// Nor does the bleed's own spell carry any direct damage - executing it as a
+// direct hit deals exactly nothing, and a zero-damage action is left out of the
+// report entirely, so the first attempt looked like the conduit was never read.
+// The amount is therefore taken from the tick that triggered it, which is
+// precisely what "deal its damage a second time" means.
+struct legacy_sudden_fractures_t : public rogue_attack_t
+{
+  legacy_sudden_fractures_t( util::string_view name, rogue_t* p )
+    : rogue_attack_t( name, p, p->legacy_covenant.serrated_bone_spike_dot )
+  {
+    background = true;
+    // The duplicate is a single hit, not a second bleed, and it is a copy of an
+    // amount that has already been rolled - so it neither crits again nor
+    // takes another pass through the damage multipliers.
+    dot_duration = 0_ms;
+    may_crit = false;
+    snapshot_flags = update_flags = 0;
+  }
+
+  bool procs_poison() const override
+  { return false; }
+
+  void execute() override
+  {
+    rogue_attack_t::execute();
+  }
+};
+
+struct legacy_serrated_bone_spike_dot_t : public rogue_attack_t
+{
+  action_t* sudden_fractures;
+
+  legacy_serrated_bone_spike_dot_t( util::string_view name, rogue_t* p )
+    : rogue_attack_t( name, p, p->legacy_covenant.serrated_bone_spike_dot ),
+      sudden_fractures( nullptr )
+  {
+    background = true;
+    // The bleed's own data has no duration, matching "until they die".
+    dot_duration = sim->expected_iteration_time > 0_ms ? sim->expected_iteration_time : 300_s;
+
+    if ( p->legacy_conduits.has( 227 ) )
+    {
+      sudden_fractures = new legacy_sudden_fractures_t( "sudden_fractures", p );
+      add_child( sudden_fractures );
+    }
+  }
+
+  void tick( dot_t* d ) override
+  {
+    rogue_attack_t::tick( d );
+
+    if ( sudden_fractures && rng().roll( p()->legacy_conduits.percent( 227 ) ) )
+    {
+      sudden_fractures->base_dd_min = sudden_fractures->base_dd_max =
+          d->state->result_amount;
+      sudden_fractures->execute_on_target( d->target );
+    }
+  }
+};
+
+struct legacy_serrated_bone_spike_t : public rogue_attack_t
+{
+  action_t* bleed;
+
+  legacy_serrated_bone_spike_t( util::string_view name, rogue_t* p, util::string_view options_str = {} )
+    : rogue_attack_t( name, p, p->legacy_covenant.serrated_bone_spike, options_str ),
+      bleed( new legacy_serrated_bone_spike_dot_t( "serrated_bone_spike_dot", p ) )
+  {
+    add_child( bleed );
+    // The spell carries no cooldown of its own any more, so effect 4 - the
+    // recharge time - is used instead. The three charges it had in Shadowlands
+    // are not in current data, so it is modelled with one.
+    cooldown->duration = timespan_t::from_seconds( data().effectN( 4 ).base_value() );
+
+    // BracketSim legacy compatibility: Deathspike's own effects add the charges
+    // and the extra target.
+    if ( p->legendary.deathspike )
+    {
+      auto rune = p->find_spell( 354731 );
+      cooldown->charges += as<int>( rune->effectN( 1 ).base_value() );
+      aoe = 1 + as<int>( rune->effectN( 2 ).base_value() );
+    }
+    energize_type = action_energize::ON_HIT;
+    energize_resource = RESOURCE_COMBO_POINT;
+    energize_amount = p->find_spell( 328548 )->effectN( 1 ).base_value();
+  }
+
+  void impact( action_state_t* state ) override
+  {
+    rogue_attack_t::impact( state );
+    bleed->execute_on_target( state->target );
+  }
+
+  void execute() override
+  {
+    rogue_attack_t::execute();
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NECROLORD,
+                                            cooldown );
+  }
+};
+
+// BracketSim legacy compatibility: Toxic Onslaught. Sepsis grants the two major
+// cooldowns that are not native to the rogue's own spec, for effect 1's
+// duration. Vendetta became Deathmark, so that is what the two specs that used
+// to get Vendetta get.
+struct legacy_sepsis_t : public rogue_attack_t
+{
+  struct legacy_sepsis_burst_t : public rogue_attack_t
+  {
+    legacy_sepsis_burst_t( util::string_view name, rogue_t* p )
+      : rogue_attack_t( name, p, p->legacy_covenant.sepsis_burst )
+    {
+      background = true;
+    }
+  };
+
+  action_t* burst;
+
+  legacy_sepsis_t( util::string_view name, rogue_t* p, util::string_view options_str = {} )
+    : rogue_attack_t( name, p, p->legacy_covenant.sepsis, options_str ),
+      burst( new legacy_sepsis_burst_t( "sepsis_burst", p ) )
+  {
+    add_child( burst );
+  }
+
+  // BracketSim legacy compatibility: Septic Shock (conduit 228). The dot hits
+  // much harder to begin with and decays by a tenth of that bonus with every
+  // tick it deals. Copied from Shadowlands, which computed it exactly this way.
+  //
+  // Only effect 1 is ranked. Effect 2 - the per-tick decay - is a flat 10 at
+  // every rank, read from the archived 9.2.7 row for spell 341309 because
+  // Midnight does not ship it. Shadowlands read it the same way, through
+  // conduit->effectN( 2 ).percent(), which bypasses the rank substitution.
+  double composite_ta_multiplier( const action_state_t* state ) const override
+  {
+    double m = rogue_attack_t::composite_ta_multiplier( state );
+
+    if ( p()->legacy_conduits.has( 228 ) )
+    {
+      // Midnight's rogue_td_t has no sepsis dot member - Sepsis is a legacy
+      // covenant ability this port added, not a Midnight one - so the dot is
+      // found on the action itself rather than through target data.
+      const dot_t* dot = find_dot( state->target );
+      const int tick = dot ? dot->current_tick : 1;
+      const double reduction = ( tick - 1 ) * 0.10;
+      m *= 1.0 + p()->legacy_conduits.percent( 228 ) * std::max( 1.0 - reduction, 0.0 );
+    }
+
+    return m;
+  }
+
+  void execute() override
+  {
+    rogue_attack_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NIGHT_FAE,
+                                            cooldown );
+
+    // BracketSim legacy compatibility: Toxic Onslaught (7478) is detected but
+    // deliberately does nothing. It granted the two major cooldowns a rogue's
+    // own spec does not have - Adrenaline Rush, Shadow Blades and what was then
+    // Vendetta. In Midnight all three are built from spec talents an off-spec
+    // rogue can never take, their buffs drive spec-only machinery (forcing them
+    // across specs segfaults), and Deathmark's debuff is a no-op outside
+    // Assassination. There is nothing here that can be modelled honestly.
+  }
+
+  void last_tick( dot_t* d ) override
+  {
+    rogue_attack_t::last_tick( d );
+    // The free stealth ability the dot's expiry granted is not modelled.
+    burst->execute_on_target( d->target );
+  }
+};
 
 struct kidney_shot_t : public rogue_attack_t
 {
@@ -7319,6 +8485,9 @@ struct stealth_like_buff_t : public BuffBase
       if ( rogue->talent.subtlety.shot_in_the_dark->ok() )
         rogue->buffs.shot_in_the_dark->trigger();
     }
+
+    if ( rogue->legendary.master_assassins_mark && rogue->stealthed( STEALTH_BASIC ) )
+      rogue->buffs.master_assassins_mark_aura->trigger();
   }
 
   void expire_override( int expiration_stacks, timespan_t remaining_duration ) override
@@ -7329,6 +8498,7 @@ struct stealth_like_buff_t : public BuffBase
     if ( !rogue->stealthed( STEALTH_BASIC ) )
     {
       rogue->buffs.improved_garrote_aura->expire();
+      rogue->buffs.master_assassins_mark_aura->expire();
 
       // 2023-10-21 -- Premeditation does not persist into Subterfuge when Stealth expires
       if ( rogue->bugs )
@@ -7371,15 +8541,42 @@ struct stealth_t : public stealth_like_buff_t<buff_t>
 // Vanish now acts like "stealth like abilities".
 struct vanish_t : public stealth_like_buff_t<buff_t>
 {
+  std::vector<cooldown_t*> shadowdust_cooldowns;
+  const timespan_t shadowdust_reduction;
+
   vanish_t( rogue_t* r ) :
-    base_t( r, "vanish", r->spell.vanish_buff )
+    base_t( r, "vanish", r->spell.vanish_buff ),
+    shadowdust_reduction( timespan_t::from_seconds( r->find_spell( 340080 )->effectN( 1 ).base_value() ) )
   {
+    if ( r->legendary.invigorating_shadowdust )
+    {
+      shadowdust_cooldowns = {
+        r->cooldowns.adrenaline_rush, r->cooldowns.between_the_eyes, r->cooldowns.blade_flurry,
+        r->cooldowns.blade_rush, r->cooldowns.blind, r->cooldowns.cloak_of_shadows,
+        r->cooldowns.deathmark, r->cooldowns.evasion, r->cooldowns.feint, r->cooldowns.garrote,
+        r->cooldowns.goremaws_bite, r->cooldowns.gouge, r->cooldowns.grappling_hook,
+        r->cooldowns.keep_it_rolling, r->cooldowns.killing_spree, r->cooldowns.kingsbane,
+        r->cooldowns.roll_the_bones, r->cooldowns.secret_technique, r->cooldowns.shadow_blades,
+        r->cooldowns.shadow_dance, r->cooldowns.shadowstep, r->cooldowns.shiv, r->cooldowns.sprint,
+        r->cooldowns.thistle_tea
+      };
+    }
   }
 
   void execute( int stacks, double value, timespan_t duration ) override
   {
     base_t::execute( stacks, value, duration );
     rogue->cancel_auto_attacks();
+
+    if ( rogue->legendary.invigorating_shadowdust )
+    {
+      for ( cooldown_t* cooldown : shadowdust_cooldowns )
+      {
+        if ( cooldown && cooldown->down() )
+          cooldown->adjust( -shadowdust_reduction, false );
+      }
+      rogue->procs.invigorating_shadowdust->occur();
+    }
 
     // Vanish drops combat if in combat with non-bosses, relevant for some trinket effects
     if ( !rogue->in_boss_encounter )
@@ -7492,6 +8689,10 @@ struct slice_and_dice_t : public rogue_buff_t
       may_crit = false;
       dot_duration = timespan_t::zero();
       base_pct_heal = p->talent.rogue.recuperator->effectN( 1 ).percent();
+
+      // BracketSim legacy compatibility: the conduit Recuperator (231) adds to
+      // the talent's share rather than replacing it.
+      base_pct_heal += p->legacy_conduits.percent( 231 );
       base_dd_min = base_dd_max = 1; // HAX: Make it always heal as this procs things in-game even with 0 value
     }
 
@@ -7512,13 +8713,30 @@ struct slice_and_dice_t : public rogue_buff_t
     add_invalidate( CACHE_AUTO_ATTACK_SPEED );
     set_constant_behavior( buff_constant_behavior::NEVER_CONSTANT );
 
-    if ( p->talent.rogue.recuperator->ok() )
+    if ( p->talent.rogue.recuperator->ok() || p->legendary.celerity ||
+         p->legacy_conduits.has( 231 ) )
     {
-      set_period( p->spell.recuperator_heal->effectN( 1 ).period() );
+      set_period( p->find_spell( 426605 )->effectN( 1 ).period() );
+    }
+
+    // BracketSim legacy compatibility: the conduit Recuperator (231) heals off
+    // the same tick as the modern talent of the same name, and works without
+    // it - so the action must be BUILT when either is present or the tick
+    // callback below has nothing to call.
+    if ( p->talent.rogue.recuperator->ok() || p->legacy_conduits.has( 231 ) )
+    {
       recuperator = p->get_background_action<recuperator_t>( "recuperator" );
     }
 
     set_tick_callback( [ this ]( buff_t*, int, timespan_t ) {
+      if ( rogue->legendary.celerity && rogue->specialization() == ROGUE_OUTLAW &&
+           rng().roll( rogue->find_spell( 340087 )->effectN( 2 ).percent() ) )
+      {
+        const timespan_t duration = timespan_t::from_seconds(
+          rogue->find_spell( 340087 )->effectN( 3 ).base_value() );
+        rogue->buffs.adrenaline_rush->extend_duration_or_trigger( duration );
+      }
+
       if ( recuperator )
       {
         recuperator->set_target( rogue );
@@ -7611,6 +8829,34 @@ struct roll_the_bones_t : public buff_t
     }
   }
 
+  // BracketSim legacy compatibility: Count the Odds (conduit 244) hands out a
+  // single spare Roll the Bones buff for a few seconds. Shadowlands rolled
+  // from six and Midnight has four, so this picks at random from whichever of
+  // the four are not already running - the same rule against a smaller set.
+  // A roll with nothing left to give is recorded rather than silently dropped.
+  void legacy_count_the_odds_trigger( timespan_t duration )
+  {
+    if ( !rogue->legacy_conduits.has( 244 ) )
+      return;
+
+    std::vector<buff_t*> inactive_buffs;
+    for ( buff_t* buff : buffs )
+    {
+      if ( !buff->check() )
+        inactive_buffs.push_back( buff );
+    }
+
+    if ( inactive_buffs.empty() )
+    {
+      rogue->procs.legacy_count_the_odds_capped->occur();
+      return;
+    }
+
+    unsigned idx = static_cast<unsigned>( rng().range( 0, as<double>( inactive_buffs.size() ) ) );
+    inactive_buffs[ idx ]->trigger( duration );
+    rogue->procs.legacy_count_the_odds->occur();
+  }
+
   unsigned random_roll( bool loaded_dice )
   {
     unsigned num_buffs = 0;
@@ -7620,6 +8866,17 @@ struct roll_the_bones_t : public buff_t
       // RtB uses hardcoded probabilities even after the redesign
       // Current beta testing appears to show 55%, 30%, 10%, 5% for the four states
       rogue->options.fixed_rtb_odds = { 55.0, 30.0, 10.0, 5.0 };
+
+      // BracketSim legacy compatibility: the conduit Sleight of Hand (243)
+      // moves probability off the single-buff roll and onto the two-buff one.
+      // value(), not percent() - the odds table is written in whole percentage
+      // points, so the raw twenty is what belongs here.
+      if ( rogue->legacy_conduits.has( 243 ) )
+      {
+        double shift = rogue->legacy_conduits.value( 243 );
+        rogue->options.fixed_rtb_odds[ 0 ] -= shift;
+        rogue->options.fixed_rtb_odds[ 1 ] += shift;
+      }
       rogue->sim->print_log( "{} {} odds set to {:.1f}% / {:.1f}% / {:.1f}% / {:.1f}% buffs",
                              *rogue, *this, rogue->options.fixed_rtb_odds[ 0 ], rogue->options.fixed_rtb_odds[ 1 ],
                              rogue->options.fixed_rtb_odds[ 2 ], rogue->options.fixed_rtb_odds[ 3 ] );
@@ -7798,6 +9055,33 @@ void actions::rogue_action_t<Base>::spend_combo_points( const action_state_t* st
   // Remove Supercharger Buffs
   consume_supercharger( state );
 
+  // BracketSim legacy compatibility: Flagellation lashes once per combo point
+  // spent, and each lash is worth another stack of its haste buff.
+  if ( p()->buffs.legacy_flagellation->check() && p()->active.legacy_flagellation_lash )
+  {
+    for ( int i = 0; i < as<int>( max_spend ); i++ )
+    {
+      p()->buffs.legacy_flagellation->bump();
+      p()->active.legacy_flagellation_lash->execute_on_target( state->target );
+    }
+
+    // BracketSim legacy compatibility: Obedience shortens Flagellation's own
+    // cooldown by effect 1 for every combo point spent into it.
+    if ( p()->legendary.obedience && p()->cooldowns.legacy_flagellation )
+    {
+      p()->cooldowns.legacy_flagellation->adjust(
+          -timespan_t::from_millis( p()->find_spell( 354703 )->effectN( 1 ).base_value() ) * max_spend );
+    }
+  }
+
+  // Legacy Azerite: Replicating Shadows. One roll per Combo Point spent to
+  // splash the finisher's damage and copy Rupture to a nearby target.
+  if ( p()->specialization() == ROGUE_SUBTLETY && p()->active.legacy_replicating_shadows &&
+       ab::rng().roll( max_spend * p()->azerite.replicating_shadows.spell_ref().effectN( 2 ).percent() ) )
+  {
+    p()->active.legacy_replicating_shadows->execute_on_target( state->target );
+  }
+
   if ( p()->talent.outlaw.deadly_pursuit->ok() )
   {
     if ( p()->buffs.deadly_pursuit_cdr->check() )
@@ -7917,6 +9201,11 @@ void actions::rogue_action_t<Base>::trigger_main_gauche( const action_state_t* s
   if ( p()->buffs.blade_flurry->check() )
   {
     proc_chance += p()->spec.blade_flurry->effectN( 5 ).percent();
+
+    // BracketSim legacy compatibility: the conduit Ambidexterity (242) adds to
+    // Main Gauche's chance, but only while Blade Flurry is up - which is why it
+    // sits inside this block rather than beside it.
+    proc_chance += p()->legacy_conduits.percent( 242 );
   }
 
   if ( !p()->rng().roll( proc_chance ) )
@@ -7945,10 +9234,27 @@ void actions::rogue_action_t<Base>::trigger_fatal_flourish( const action_state_t
 template <typename Base>
 void actions::rogue_action_t<Base>::trigger_doomblade( const action_state_t* state )
 {
-  if ( !p()->talent.assassination.doomblade->ok() || !ab::result_is_hit( state->result ) )
+  if ( !ab::result_is_hit( state->result ) || !p()->active.doomblade )
     return;
 
-  const double dot_damage = state->result_amount * p()->talent.assassination.doomblade->effectN( 1 ).percent();
+  // BracketSim legacy compatibility: the Doomblade runeforge (spell 340082) and
+  // the modern Assassination talent do the same thing - a share of the Mutilate
+  // strike left on the target as a bleed - so whichever is present supplies the
+  // share. The talent wins when both are somehow set, which cannot happen in
+  // game and only matters for a probe.
+  //
+  // The runeforge flag was DETECTED AND NEVER READ, and the talent of the same
+  // name being fully implemented is exactly why it read as ported.
+  double pct = 0.0;
+  if ( p()->talent.assassination.doomblade->ok() )
+    pct = p()->talent.assassination.doomblade->effectN( 1 ).percent();
+  else if ( p()->legendary.doomblade )
+    pct = p()->find_spell( 340082 )->effectN( 1 ).percent();
+
+  if ( pct <= 0.0 )
+    return;
+
+  const double dot_damage = state->result_amount * pct;
   residual_action::trigger( p()->active.doomblade, state->target, dot_damage );
 }
 
@@ -8079,6 +9385,29 @@ void actions::rogue_action_t<Base>::trigger_ruthlessness_cp( const action_state_
   }
 }
 
+// BracketSim legacy compatibility: Count the Odds (conduit 244).
+template <typename Base>
+void actions::rogue_action_t<Base>::trigger_legacy_count_the_odds( const action_state_t* state )
+{
+  if ( !ab::result_is_hit( state->result ) || !p()->legacy_conduits.has( 244 ) )
+    return;
+
+  // Effect 3 is a whole-percent bonus applied to BOTH the chance and the
+  // duration while stealthed; effect 2 is the base duration in seconds. Both
+  // sit on the conduit's own spell, which Midnight ships.
+  const spell_data_t* cd = p()->find_spell( 341546 );
+  const double stealth_bonus =
+      p()->stealthed( STEALTH_BASIC | STEALTH_SHADOWMELD ) ? 1.0 + cd->effectN( 3 ).percent() : 1.0;
+
+  if ( !p()->rng().roll( p()->legacy_conduits.percent( 244 ) * stealth_bonus ) )
+    return;
+
+  const timespan_t duration =
+      timespan_t::from_seconds( cd->effectN( 2 ).base_value() ) * stealth_bonus;
+  debug_cast<buffs::roll_the_bones_t*>( p()->buffs.roll_the_bones )
+      ->legacy_count_the_odds_trigger( duration );
+}
+
 template <typename Base>
 void actions::rogue_action_t<Base>::trigger_shadow_techniques( const action_state_t* state )
 {
@@ -8103,6 +9432,14 @@ void actions::rogue_action_t<Base>::trigger_shadow_techniques( const action_stat
 
     trigger_shadow_techniques_buff( state );
     p()->sim->print_debug( "{} trigger_shadow_techniques proc'd at {}, resetting counter to 0", *p(), p()->shadow_techniques_counter );
+
+    // BracketSim legacy compatibility: Stiletto Staccato (conduit 247) pulls
+    // Shadow Blades forward on every Shadow Techniques proc. The rank table
+    // holds the value in SECONDS, which is why this reads value() rather than
+    // the millisecond-shaped time_value() the cooldown conduits use.
+    if ( p()->legacy_conduits.has( 247 ) )
+      p()->cooldowns.shadow_blades->adjust(
+          -timespan_t::from_seconds( p()->legacy_conduits.value( 247 ) ), true );
 
     p()->shadow_techniques_counter = 0;
     p()->cooldowns.shadow_techniques_icd->start();
@@ -8229,7 +9566,61 @@ void actions::rogue_action_t<Base>::trigger_opportunity( const action_state_t* s
     if ( action )
     {
       action->trigger_secondary_action( state->target, 300_ms );
+      if ( p()->active.concealed_blunderbuss )
+      {
+        p()->buffs.concealed_blunderbuss->trigger();
+      }
     }
+  }
+}
+
+template <typename Base>
+void actions::rogue_action_t<Base>::trigger_bloodfang( const action_state_t* state )
+{
+  if ( !p()->legendary.essence_of_bloodfang || !p()->active.bloodfang ||
+       !ab::result_is_hit( state->result ) )
+    return;
+
+  if ( ab::energize_type == action_energize::NONE || ab::energize_resource != RESOURCE_COMBO_POINT )
+    return;
+
+  if ( p()->active.bloodfang->internal_cooldown->down() )
+    return;
+
+  if ( !p()->rng().roll( p()->find_spell( 340079 )->proc_chance() ) )
+    return;
+
+  p()->active.bloodfang->execute_on_target( state->target );
+  p()->active.bloodfang->internal_cooldown->start();
+}
+
+template <typename Base>
+void actions::rogue_action_t<Base>::trigger_legacy_guile_charm( const action_state_t* state )
+{
+  if ( !p()->legendary.guile_charm || !ab::result_is_hit( state->result ) ||
+       p()->buffs.guile_charm_insight_3->check() )
+  {
+    return;
+  }
+
+  const bool trigger_next_insight = ++p()->legendary.guile_charm_counter >= 6;
+  if ( p()->buffs.guile_charm_insight_1->check() )
+  {
+    if ( trigger_next_insight )
+      p()->buffs.guile_charm_insight_2->trigger();
+    else
+      p()->buffs.guile_charm_insight_1->trigger();
+  }
+  else if ( p()->buffs.guile_charm_insight_2->check() )
+  {
+    if ( trigger_next_insight )
+      p()->buffs.guile_charm_insight_3->trigger();
+    else
+      p()->buffs.guile_charm_insight_2->trigger();
+  }
+  else if ( trigger_next_insight )
+  {
+    p()->buffs.guile_charm_insight_1->trigger();
   }
 }
 
@@ -8456,7 +9847,18 @@ void actions::rogue_action_t<Base>::trigger_shadow_blades_attack( const action_s
   if ( !p()->buffs.shadow_blades->check() || state->result_total <= 0 || !ab::result_is_hit( state->result ) || !procs_shadow_blades_damage() )
     return;
 
-  p()->active.shadow_blades_attack->trigger_residual_action( state, p()->buffs.shadow_blades->check_value(),
+  // BracketSim legacy compatibility: Deeper Daggers (conduit 245) raises the
+  // Shadow Blades bonus as well. Shadowlands applied it here by hand, with an
+  // explicit exclusion for Gloomblade: Shadow Blades carries the "disable
+  // player multipliers" flag, so the automatic path never reaches it.
+  double sb_value = p()->buffs.shadow_blades->check_value();
+  if ( p()->buffs.legacy_deeper_daggers->check() &&
+       ab::data().id() != p()->talent.subtlety.gloomblade->id() )
+  {
+    sb_value *= p()->buffs.legacy_deeper_daggers->value_direct();
+  }
+
+  p()->active.shadow_blades_attack->trigger_residual_action( state, sb_value,
                                                              false, true, nullptr, false );
 }
 
@@ -8547,6 +9949,19 @@ void actions::rogue_action_t<Base>::trigger_danse_macabre( const action_state_t*
 template <typename Base>
 void actions::rogue_action_t<Base>::trigger_scent_of_blood()
 {
+  // Legacy Azerite: Scent of Blood keeps one stack per Rupture, on its own buff,
+  // so it stacks with the modern talent of the same name.
+  if ( p()->azerite.scent_of_blood.ok() )
+  {
+    const int legacy_current = p()->buffs.legacy_scent_of_blood->check();
+    const int legacy_desired = std::min<int>( p()->buffs.legacy_scent_of_blood->max_stack(),
+                                              as<int>( p()->get_active_dots( td( this->target )->dots.rupture ) ) );
+    if ( legacy_desired > legacy_current )
+      p()->buffs.legacy_scent_of_blood->increment( legacy_desired - legacy_current );
+    else if ( legacy_desired < legacy_current )
+      p()->buffs.legacy_scent_of_blood->decrement( legacy_current - legacy_desired );
+  }
+
   if ( !p()->talent.assassination.scent_of_blood->ok() )
     return;
 
@@ -8854,11 +10269,31 @@ void actions::rogue_action_t<Base>::trigger_palmed_bullets( const action_state_t
   }
 }
 
+// BracketSim legacy compatibility: charge N combo points from a legacy source.
+// It reuses the Supercharger buffs rather than a parallel set, so everything
+// downstream - current_effective_cp, consume_supercharger, the procs - already
+// understands them.
+void rogue_t::trigger_legacy_animacharge( int count )
+{
+  for ( buff_t* b : buffs.supercharger )
+  {
+    if ( count <= 0 )
+      return;
+
+    if ( !b->check() )
+    {
+      b->trigger();
+      count--;
+    }
+  }
+}
+
 template <typename Base>
 void actions::rogue_action_t<Base>::trigger_supercharger()
 {
   if ( !p()->talent.rogue.supercharger->ok() )
     return;
+
 
   double trigger_buffs = p()->talent.rogue.supercharger->effectN( 1 ).base_value();
   for ( buff_t* b : p()->buffs.supercharger )
@@ -8882,7 +10317,10 @@ void actions::rogue_action_t<Base>::trigger_supercharger()
 template <typename Base>
 void actions::rogue_action_t<Base>::consume_supercharger( const action_state_t* state )
 {
-  if ( !p()->talent.rogue.supercharger->ok() || !consumes_supercharger() )
+  // BracketSim legacy compatibility: a point charged by legacy Echoing
+  // Reprimand has to be consumable too, and that rogue may have no talent.
+  if ( ( !p()->talent.rogue.supercharger->ok() && !p()->legacy_covenant.echoing_reprimand->ok() ) ||
+       !consumes_supercharger() )
     return;
 
   const auto rs = cast_state( state );
@@ -9003,6 +10441,9 @@ rogue_td_t::rogue_td_t( player_t* target, rogue_t* source ) :
   debuffs.numbing_poison        = new buffs::numbing_poison_t( *this );
 
   debuffs.amplifying_poison = make_buff( *this, "amplifying_poison", source->spec.amplifying_poison_debuff );
+  debuffs.banshees_blight = source->legacy_banshees_blight.strike
+    ? make_buff( *this, "banshees_blight", source->find_spell( 358090 ) )
+    : make_buff( *this, "banshees_blight" )->set_quiet( true );
   
   debuffs.deathmark = make_buff<damage_buff_t>( *this, "deathmark", source->talent.assassination.deathmark, false )
     ->set_direct_mod( source->talent.assassination.deathmark, 2 );
@@ -9198,6 +10639,18 @@ double rogue_t::composite_player_multiplier( school_e school ) const
     {
       m *= 1.0 + buffs.lingering_darkness->value();
     }
+  }
+
+  if ( legendary.guile_charm )
+  {
+    m *= 1.0 + buffs.guile_charm_insight_1->value();
+    m *= 1.0 + buffs.guile_charm_insight_2->value();
+    m *= 1.0 + buffs.guile_charm_insight_3->value();
+  }
+
+  if ( legendary.celerity && buffs.adrenaline_rush->check() )
+  {
+    m *= 1.0 + find_spell( 340087 )->effectN( 1 ).percent();
   }
 
   return m;
@@ -9448,6 +10901,16 @@ void rogue_t::init_blizzard_action_list()
 action_t* rogue_t::create_action( util::string_view name, util::string_view options_str )
 {
   using namespace actions;
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  if ( name == "echoing_reprimand" && legacy_covenant.echoing_reprimand->ok() )
+    return new legacy_echoing_reprimand_t( name, this, options_str );
+  if ( name == "flagellation" && legacy_covenant.flagellation->ok() )
+    return new legacy_flagellation_t( name, this, options_str );
+  if ( name == "serrated_bone_spike" && legacy_covenant.serrated_bone_spike->ok() )
+    return new legacy_serrated_bone_spike_t( name, this, options_str );
+  if ( name == "sepsis" && legacy_covenant.sepsis->ok() )
+    return new legacy_sepsis_t( name, this, options_str );
 
   if ( name == "adrenaline_rush"        ) return new adrenaline_rush_t        ( name, this, options_str );
   if ( name == "ambush"                 ) return new ambush_t                 ( name, this, options_str );
@@ -9904,6 +11367,102 @@ void rogue_t::init_spells()
 {
   player_t::init_spells();
 
+  auto has_bonus_id = [ this ]( int bonus_id )
+  {
+    return range::any_of( items, [ bonus_id ]( const item_t& item )
+    { return range::contains( item.parsed.bonus_id, bonus_id ); } );
+  };
+
+  legendary.master_assassins_mark = options.legacy_shadowlands_enabled && has_bonus_id( 7111 );
+  legendary.tiny_toxic_blade = options.legacy_shadowlands_enabled && has_bonus_id( 7112 );
+  legendary.essence_of_bloodfang = options.legacy_shadowlands_enabled && has_bonus_id( 7113 );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  auto covenant = [ this ]( std::string_view name, unsigned id ) {
+    return ( options.legacy_shadowlands_enabled &&
+             util::str_compare_ci( legacy_covenant.chosen, name ) )
+               ? find_spell( id )
+               : spell_data_t::not_found();
+  };
+
+  legacy_covenant.echoing_reprimand       = covenant( "kyrian", 323547 );
+  legacy_covenant.flagellation            = covenant( "venthyr", 323654 );
+  legacy_covenant.serrated_bone_spike     = covenant( "necrolord", 328547 );
+  legacy_covenant.sepsis                  = covenant( "night_fae", 328305 );
+
+  // BracketSim legacy compatibility: turn the id:rank option string into
+  // ranks. Without this the option parses as a string and is then silently
+  // ignored - has() returns false for everything and the conduits do nothing.
+  legacy_conduits.parse();
+
+  // BracketSim legacy compatibility: report the covenant abilities this
+  // actor can cast, so player_t::init_actions() can put them into the
+  // rotation. SimulationCraft's own action lists never press them.
+  if ( legacy_covenant.echoing_reprimand->ok() )
+    legacy_apl_actions.emplace_back( "echoing_reprimand" );
+  if ( legacy_covenant.flagellation->ok() )
+    legacy_apl_actions.emplace_back( "flagellation" );
+  if ( legacy_covenant.serrated_bone_spike->ok() )
+    legacy_apl_actions.emplace_back( "serrated_bone_spike" );
+  if ( legacy_covenant.sepsis->ok() )
+    legacy_apl_actions.emplace_back( "sepsis" );
+  legacy_covenant.flagellation_lash       =
+      legacy_covenant.flagellation->ok() ? find_spell( 345316 ) : spell_data_t::not_found();
+  legacy_covenant.serrated_bone_spike_dot =
+      legacy_covenant.serrated_bone_spike->ok() ? find_spell( 324073 ) : spell_data_t::not_found();
+  legacy_covenant.sepsis_burst            =
+      legacy_covenant.sepsis->ok() ? find_spell( 328306 ) : spell_data_t::not_found();
+  legendary.invigorating_shadowdust = options.legacy_shadowlands_enabled && has_bonus_id( 7114 );
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+  azerite.double_dose          = find_azerite_spell( "Double Dose" );
+  azerite.echoing_blades       = find_azerite_spell( "Echoing Blades" );
+  azerite.nothing_personal     = find_azerite_spell( "Nothing Personal" );
+  azerite.scent_of_blood       = find_azerite_spell( "Scent of Blood" );
+  azerite.shrouded_suffocation = find_azerite_spell( "Shrouded Suffocation" );
+  azerite.twist_the_knife      = find_azerite_spell( "Twist the Knife" );
+  azerite.ace_up_your_sleeve   = find_azerite_spell( "Ace Up Your Sleeve" );
+  azerite.brigands_blitz       = find_azerite_spell( "Brigand's Blitz" );
+  azerite.deadshot             = find_azerite_spell( "Deadshot" );
+  azerite.keep_your_wits_about_you = find_azerite_spell( "Keep Your Wits About You" );
+  azerite.paradise_lost        = find_azerite_spell( "Paradise Lost" );
+  azerite.snake_eyes           = find_azerite_spell( "Snake Eyes" );
+  azerite.blade_in_the_shadows = find_azerite_spell( "Blade In The Shadows" );
+  azerite.inevitability        = find_azerite_spell( "Inevitability" );
+  azerite.nights_vengeance     = find_azerite_spell( "Night's Vengeance" );
+  azerite.perforate            = find_azerite_spell( "Perforate" );
+  azerite.replicating_shadows  = find_azerite_spell( "Replicating Shadows" );
+  azerite.the_first_dance      = find_azerite_spell( "The First Dance" );
+
+  legendary.zoldyck_insignia = options.legacy_shadowlands_enabled && has_bonus_id( 7117 );
+  // BracketSim legacy compatibility: Unity (bonus 8127), the 9.2 legendary whose
+  // effect is whichever covenant legendary matches the covenant you are in. A
+  // real Unity item carries 8127 and NOT the legendary's own bonus id, so a
+  // power keyed only off its own id misses every Unity wearer. Both routes are
+  // checked here, and Unity opens only the one door its covenant names.
+  auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
+  {
+    return options.legacy_shadowlands_enabled &&
+           ( has_bonus_id( bonus_id ) ||
+             ( has_bonus_id( 8127 ) &&
+               util::str_compare_ci( legacy_covenant.chosen, covenant_name ) ) );
+  };
+
+  legendary.obedience        = legacy_unity( 7572, "venthyr" );
+  legendary.toxic_onslaught  = options.legacy_shadowlands_enabled && has_bonus_id( 7478 );
+  legendary.deathspike       = legacy_unity( 7573, "necrolord" );
+  legendary.duskwalkers_patch = options.legacy_shadowlands_enabled && has_bonus_id( 7118 );
+  legendary.greenskins_wickers = options.legacy_shadowlands_enabled && has_bonus_id( 7119 );
+  legendary.guile_charm = options.legacy_shadowlands_enabled && has_bonus_id( 7120 );
+  legendary.celerity = options.legacy_shadowlands_enabled && has_bonus_id( 7121 );
+  legendary.concealed_blunderbuss = options.legacy_shadowlands_enabled && has_bonus_id( 7122 );
+
+  legendary.akaaris_soul_fragment = options.legacy_shadowlands_enabled && has_bonus_id( 7124 );
+  legendary.dashing_scoundrel     = options.legacy_shadowlands_enabled && has_bonus_id( 7115 );
+  legendary.deathly_shadows       = options.legacy_shadowlands_enabled && has_bonus_id( 7126 );
+  legendary.doomblade             = options.legacy_shadowlands_enabled && has_bonus_id( 7116 );
+  legendary.finality              = options.legacy_shadowlands_enabled && has_bonus_id( 7123 );
+  legendary.resounding_clarity    = legacy_unity( 7577, "kyrian" );
+
   // Core Class Spells
   spell.ambush = find_class_spell( "Ambush" );
   spell.cheap_shot = find_class_spell( "Cheap Shot" );
@@ -10284,7 +11843,14 @@ void rogue_t::init_spells()
   spec.caustic_spatter_damage = talent.assassination.caustic_spatter->ok() ? find_spell( 421979 ) : spell_data_t::not_found();
   spec.dashing_scoundrel_gain = talent.assassination.dashing_scoundrel->ok() ? talent.assassination.dashing_scoundrel->effectN( 2 ).resource( RESOURCE_ENERGY ) : 0.0;
   spec.deadly_poison_instant = talent.assassination.deadly_poison->ok() ? find_spell( 113780 ) : spell_data_t::not_found();
-  spec.doomblade_debuff = talent.assassination.doomblade->ok() ? find_spell( 394021 ) : spell_data_t::not_found();
+  // BracketSim legacy compatibility: the Doomblade RUNEFORGE (7116) drives the
+  // same bleed as the modern talent of the same name, so the spell lookup is
+  // widened rather than a second one added. Without this the runeforge's copy
+  // has no spell data and the actor does nothing - the documented trap that
+  // already caught Superstrain, Burning Wound and Collective Anguish.
+  spec.doomblade_debuff = ( talent.assassination.doomblade->ok() || legendary.doomblade )
+                              ? find_spell( 394021 )
+                              : spell_data_t::not_found();
   spec.finish_the_job_buff = talent.assassination.finish_the_job->ok() ? find_spell( 1249810 ) : spell_data_t::not_found();
   spec.improved_garrote_buff = talent.assassination.improved_garrote->ok() ? find_spell( 392401 ) : spell_data_t::not_found();
   spec.implacable_damage = talent.assassination.implacable_3->ok() ? find_spell( 1265787 ) : spell_data_t::not_found();
@@ -10423,6 +11989,14 @@ void rogue_t::init_spells()
 
   auto_attack = new actions::auto_melee_attack_t( this, "" );
 
+  if ( legendary.essence_of_bloodfang )
+    active.bloodfang = get_background_action<actions::bloodfang_t>( "bloodfang" );
+
+  // BracketSim legacy compatibility: Flagellation's per-combo-point lash.
+  if ( legacy_covenant.flagellation->ok() )
+    active.legacy_flagellation_lash =
+        get_background_action<actions::legacy_flagellation_lash_t>( "flagellation_lash" );
+
   if ( talent.rogue.echoing_reprimand->ok() )
   {
     active.echoing_reprimand = get_background_action<actions::echoing_reprimand_t>( "echoing_reprimand" );
@@ -10431,6 +12005,27 @@ void rogue_t::init_spells()
   if ( talent.rogue.thistle_tea_auto->ok() )
   {
     active.thistle_tea_auto = get_background_action<actions::thistle_tea_t>( "thistle_tea_auto" );
+  }
+
+  // Legacy Azerite
+  if ( azerite.double_dose.ok() )
+  {
+    active.legacy_double_dose = get_background_action<actions::legacy_double_dose_t>( "legacy_double_dose" );
+  }
+
+  if ( azerite.nothing_personal.ok() )
+  {
+    active.legacy_nothing_personal =
+      get_background_action<actions::legacy_nothing_personal_t>( "legacy_nothing_personal" );
+  }
+
+  if ( azerite.replicating_shadows.ok() && specialization() == ROGUE_SUBTLETY )
+  {
+    active.legacy_replicating_shadows =
+      get_background_action<actions::legacy_replicating_shadows_t>( "legacy_replicating_shadows" );
+    // The Rupture copy it spreads, registered so the action can look it up.
+    get_secondary_trigger_action<actions::rupture_t>(
+      secondary_trigger::LEGACY_REPLICATING_SHADOWS, "legacy_replicating_shadows_rupture", spec.rupture );
   }
 
   // Assassination
@@ -10445,7 +12040,7 @@ void rogue_t::init_spells()
     active.caustic_spatter = get_background_action<actions::caustic_spatter_t>( "caustic_spatter" );
   }
 
-  if ( talent.assassination.doomblade->ok() )
+  if ( talent.assassination.doomblade->ok() || legendary.doomblade )
   {
     active.doomblade = get_background_action<actions::doomblade_t>( "mutilated_flesh" );
   }
@@ -10478,6 +12073,12 @@ void rogue_t::init_spells()
       secondary_trigger::FAN_THE_HAMMER, "pistol_shot_fan_the_hammer" );
     active.fan_the_hammer->not_a_proc = true; // Scripted foreground cast, can trigger cast procs
     active.fan_the_hammer->energize_type = action_energize::NONE; // Fan the Hammer itself does not generate CPs, only from Quick Draw
+  }
+
+  if ( legendary.concealed_blunderbuss )
+  {
+    active.concealed_blunderbuss = get_secondary_trigger_action<actions::pistol_shot_t>(
+      secondary_trigger::CONCEALED_BLUNDERBUSS, "pistol_shot_concealed_blunderbuss" );
   }
 
   if ( talent.outlaw.gravedigger_2->ok() )
@@ -10629,7 +12230,15 @@ void rogue_t::init_gains()
 {
   player_t::init_gains();
 
+  gains.legacy_deathly_shadows          = get_gain( "Deathly Shadows" );
   gains.ace_up_your_sleeve              = get_gain( "Ace Up Your Sleeve" );
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. The
+  // modern talents of the same name already own the unprefixed symbols, so the
+  // Azerite versions are kept separate and labelled in the report.
+  gains.legacy_ace_up_your_sleeve       = get_gain( "Ace Up Your Sleeve (Azerite)" );
+  gains.legacy_shrouded_suffocation     = get_gain( "Shrouded Suffocation (Azerite)" );
+  gains.legacy_the_first_dance          = get_gain( "The First Dance (Azerite)" );
+
   gains.adrenaline_rush                 = get_gain( "Adrenaline Rush" );
   gains.adrenaline_rush_expiry          = get_gain( "Adrenaline Rush (Expiry)" );
   gains.blade_rush                      = get_gain( "Blade Rush" );
@@ -10679,6 +12288,8 @@ void rogue_t::init_procs()
     roll_the_bones->loss_procs[ i ] = get_proc( "Roll the Bones Lost: " + roll_the_bones->buffs[ i ]->name_str );
   }
 
+  procs.invigorating_shadowdust               = get_proc( "Invigorating Shadowdust" );
+  procs.duskwalkers_patch                     = get_proc( "Duskwalker's Patch" );
   procs.supercharger_wasted                   = get_proc( "Supercharger Wasted" );
 
   procs.weaponmaster                          = get_proc( "Weaponmaster" );
@@ -10687,6 +12298,9 @@ void rogue_t::init_procs()
   procs.rapid_injection_applied               = get_proc( "Rapid Injection Applied" );
 
   procs.controlled_chaos                      = get_proc( "Controlled Chaos" );
+
+  procs.legacy_count_the_odds                 = get_proc( "Count the Odds" );
+  procs.legacy_count_the_odds_capped          = get_proc( "Count the Odds Capped" );
 }
 
 // rogue_t::init_scaling ====================================================
@@ -10777,8 +12391,92 @@ void rogue_t::create_buffs()
     ->add_invalidate( CACHE_RUN_SPEED );
 
   buffs.slice_and_dice = new buffs::slice_and_dice_t( this );
+
+  const spell_data_t* master_assassins_mark = legendary.master_assassins_mark ?
+    find_spell( 340094 ) : spell_data_t::not_found();
+  buffs.master_assassins_mark = make_buff( this, "master_assassins_mark", master_assassins_mark )
+    ->set_default_value_from_effect_type( A_ADD_FLAT_MODIFIER, P_CRIT )
+    ->set_duration( timespan_t::from_seconds( find_spell( 340076 )->effectN( 1 ).base_value() ) )
+    ->set_trigger_spell( find_spell( 340076 ) );
+  buffs.master_assassins_mark_aura = make_buff( this, "master_assassins_mark_aura", master_assassins_mark )
+    ->set_default_value_from_effect_type( A_ADD_FLAT_MODIFIER, P_CRIT )
+    ->set_constant_behavior( buff_constant_behavior::NEVER_CONSTANT )
+    ->set_duration( sim->max_time / 2 )
+    ->set_stack_change_callback( [ this ]( buff_t*, int, int new_ ) {
+      if ( new_ == 0 )
+        buffs.master_assassins_mark->trigger();
+      else
+        buffs.master_assassins_mark->expire();
+    } );
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite trait buffs.
+  buffs.blade_in_the_shadows     = make_buff( this, "blade_in_the_shadows", find_spell( 279754 ) )
+    ->set_trigger_spell( azerite.blade_in_the_shadows.spell_ref().effectN( 1 ).trigger() )
+    ->set_default_value( azerite.blade_in_the_shadows.value() );
+  buffs.brigands_blitz           = make_buff<stat_buff_t>( this, "brigands_blitz", find_spell( 277724 ) )
+    ->add_stat( STAT_HASTE_RATING, azerite.brigands_blitz.value() )
+    ->set_refresh_behavior( buff_refresh_behavior::DURATION );
+  buffs.brigands_blitz_driver    = make_buff( this, "brigands_blitz_driver", find_spell( 277725 ) )
+    ->set_trigger_spell( azerite.brigands_blitz.spell_ref().effectN( 1 ).trigger() )
+    ->set_quiet( true )
+    ->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) { buffs.brigands_blitz->trigger(); } );
+  buffs.deadshot                 = make_buff( this, "deadshot", find_spell( 272940 ) )
+    ->set_trigger_spell( azerite.deadshot.spell_ref().effectN( 1 ).trigger() )
+    ->set_default_value( azerite.deadshot.value() );
+  buffs.double_dose              = make_buff( this, "double_dose", find_spell( 273009 ) )
+    ->set_quiet( true );
+  buffs.keep_your_wits_about_you = make_buff( this, "keep_your_wits_about_you", find_spell( 288988 ) )
+    ->set_trigger_spell( azerite.keep_your_wits_about_you.spell_ref().effectN( 1 ).trigger() )
+    ->set_default_value( find_spell( 288988 )->effectN( 1 ).percent() );
+  buffs.nights_vengeance         = make_buff( this, "nights_vengeance", find_spell( 273424 ) )
+    ->set_trigger_spell( azerite.nights_vengeance.spell_ref().effectN( 1 ).trigger() )
+    ->set_default_value( azerite.nights_vengeance.value() );
+  buffs.nothing_personal         = make_buff( this, "nothing_personal", find_spell( 289467 ) )
+    ->set_trigger_spell( azerite.nothing_personal.spell_ref().effectN( 1 ).trigger() )
+    ->set_affects_regen( true )
+    ->set_default_value( find_spell( 289467 )->effectN( 2 ).base_value() / 5.0 );
+  buffs.paradise_lost            = make_buff<stat_buff_t>( this, "paradise_lost", find_spell( 278962 ) )
+    ->add_stat( STAT_AGILITY, azerite.paradise_lost.value() )
+    ->set_refresh_behavior( buff_refresh_behavior::DURATION );
+  buffs.perforate                = make_buff( this, "perforate", find_spell( 277720 ) )
+    ->set_trigger_spell( azerite.perforate.spell_ref().effectN( 1 ).trigger() )
+    ->set_default_value( azerite.perforate.value() );
+  buffs.legacy_scent_of_blood    = make_buff<stat_buff_t>( this, "legacy_scent_of_blood", find_spell( 277731 ) )
+    ->add_stat( STAT_AGILITY, azerite.scent_of_blood.value() )
+    ->set_duration( timespan_t::zero() ); // Infinite aura
+  buffs.snake_eyes               = make_buff( this, "snake_eyes", find_spell( 275863 ) )
+    ->set_trigger_spell( azerite.snake_eyes.spell_ref().effectN( 1 ).trigger() )
+    ->set_default_value( azerite.snake_eyes.value() );
+  buffs.legacy_the_first_dance   = make_buff<stat_buff_t>( this, "legacy_the_first_dance", find_spell( 278981 ) )
+    ->add_stat( STAT_HASTE_RATING, azerite.the_first_dance.value() );
+  // Counts the poison procs from one Mutilate; two means both daggers landed one.
+  buffs.legacy_double_dose        = make_buff( this, "legacy_double_dose", find_spell( 273009 ) )
+    ->set_quiet( true )
+    ->set_max_stack( 2 )
+    ->set_duration( timespan_t::zero() );
+
   buffs.stealth = new buffs::stealth_t( this );
   buffs.vanish = new buffs::vanish_t( this );
+
+  // BracketSim legacy compatibility: second wave of Shadowlands runeforges.
+  buffs.legacy_deathly_shadows =
+      make_buff<damage_buff_t>( this, "legacy_deathly_shadows", find_spell( 350964 ) );
+  buffs.legacy_deathly_shadows->set_chance( legendary.deathly_shadows ? 1.0 : 0.0 );
+  buffs.legacy_finality_eviscerate =
+      make_buff<damage_buff_t>( this, "legacy_finality_eviscerate", find_spell( 340600 ) );
+  buffs.legacy_finality_eviscerate->set_chance( legendary.finality ? 1.0 : 0.0 );
+  buffs.legacy_finality_rupture = make_buff( this, "legacy_finality_rupture", find_spell( 340601 ) )
+                                      ->set_default_value_from_effect( 1 )
+                                      ->set_chance( legendary.finality ? 1.0 : 0.0 );
+  buffs.legacy_finality_black_powder =
+      make_buff<damage_buff_t>( this, "legacy_finality_black_powder", find_spell( 340603 ) );
+  buffs.legacy_finality_black_powder->set_chance( legendary.finality ? 1.0 : 0.0 );
+  // The legendary's own crit bonus; the energy half rides the poison crits.
+  buffs.legacy_dashing_scoundrel =
+      make_buff( this, "legacy_dashing_scoundrel", find_spell( 340081 ) )
+          ->set_default_value( find_spell( 340081 )->effectN( 1 ).percent() )
+          ->set_duration( find_spell( 32645 )->duration() )
+          ->set_chance( legendary.dashing_scoundrel ? 1.0 : 0.0 );
 
   // Assassination ==========================================================
 
@@ -10805,6 +12503,18 @@ void rogue_t::create_buffs()
   buffs.between_the_eyes
     ->set_cooldown( timespan_t::zero() )
     ->set_stack_behavior( buff_stack_behavior::ASYNCHRONOUS );
+
+  // BracketSim legacy compatibility: Flagellation's own effect 3 is the 1% haste
+  // each stack is worth; the stacks come from combo points spent.
+  buffs.legacy_flagellation =
+      make_buff( this, "flagellation", legacy_covenant.flagellation )
+          // The spell's 90s cooldown belongs to the ability, not the buff. Left
+          // on the buff it becomes a second gate, and Obedience's cooldown
+          // reduction then makes the ability fire while the buff still refuses.
+          ->set_cooldown( timespan_t::zero() )
+          ->set_default_value_from_effect( 3, 0.01 )
+          ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+          ->set_chance( legacy_covenant.flagellation->ok() ? 1.0 : 0.0 );
 
   buffs.adrenaline_rush = new buffs::adrenaline_rush_t( this );
   buffs.blade_flurry = new buffs::blade_flurry_t( this );
@@ -10879,6 +12589,55 @@ void rogue_t::create_buffs()
 
   buffs.roll_the_bones = new buffs::roll_the_bones_t( this );
 
+  // BracketSim legacy compatibility: Deeper Daggers (conduit 245). Spell
+  // 341550 IS in Midnight's data and still carries the family flags that pick
+  // out Shadow damage, so the buff needs no hand-written affected-spell list -
+  // only its value, which lives in the conduit rank table.
+  //
+  // The fourth argument is damage_buff_t's value override. 341550 has exactly
+  // one effect, so overriding "all effects" and overriding "the conduit's
+  // first effect" are the same override here.
+  buffs.legacy_deeper_daggers =
+      make_buff<damage_buff_t>( this, "deeper_daggers", find_spell( 341550 ),
+                                legacy_conduits.percent( 245 ) );
+  buffs.legacy_deeper_daggers->set_chance( legacy_conduits.has( 245 ) ? 1.0 : 0.0 );
+
+  // BracketSim legacy compatibility: original Shadowlands Outlaw
+  // Runecarving effects, enabled only by their exact item bonus IDs.
+  buffs.concealed_blunderbuss = make_buff( this, "concealed_blunderbuss", find_spell( 340587 ) )
+    ->set_chance( legendary.concealed_blunderbuss ? find_spell( 340088 )->effectN( 1 ).percent() : 0.0 )
+    ->set_default_value( find_spell( 340088 )->effectN( 2 ).base_value() )
+    ->set_trigger_spell( find_spell( 340088 ) );
+
+  buffs.greenskins_wickers = make_buff( this, "greenskins_wickers", find_spell( 340573 ) )
+    ->set_default_value_from_effect_type( A_ADD_PCT_MODIFIER, P_GENERIC )
+    ->set_chance( legendary.greenskins_wickers )
+    ->set_trigger_spell( find_spell( 340085 ) );
+
+  buffs.guile_charm_insight_1 = make_buff( this, "shallow_insight", find_spell( 340582 ) )
+    ->set_default_value_from_effect( 1 )
+    ->set_chance( legendary.guile_charm )
+    ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
+    ->set_stack_change_callback( [ this ]( buff_t*, int, int ) {
+      legendary.guile_charm_counter = 0;
+    } );
+  buffs.guile_charm_insight_2 = make_buff( this, "moderate_insight", find_spell( 340583 ) )
+    ->set_default_value_from_effect( 1 )
+    ->set_chance( legendary.guile_charm )
+    ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
+    ->set_stack_change_callback( [ this ]( buff_t*, int, int ) {
+      buffs.guile_charm_insight_1->expire();
+      legendary.guile_charm_counter = 0;
+    } );
+  buffs.guile_charm_insight_3 = make_buff( this, "deep_insight", find_spell( 340584 ) )
+    ->set_default_value_from_effect( 1 )
+    ->set_chance( legendary.guile_charm )
+    ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
+    ->set_stack_change_callback( [ this ]( buff_t*, int, int ) {
+      buffs.guile_charm_insight_2->expire();
+      legendary.guile_charm_counter = 0;
+    } );
+
   // Subtlety ===============================================================
 
   buffs.ancient_arts = make_buff( this, "ancient_arts", spec.ancient_arts_buff );
@@ -10923,7 +12682,12 @@ void rogue_t::create_buffs()
   std::array<unsigned int, 7> supercharger_ids = { 470398, 470406, 470409, 470412, 470414, 470415, 470416 };
   for ( size_t i = 0; i < supercharger_ids.size(); i++ )
   {
-    buffs.supercharger.emplace_back( make_buff( this, fmt::format( "supercharge_{}", i + 1 ), talent.rogue.supercharger->ok() ?
+    // BracketSim legacy compatibility: legacy Echoing Reprimand charges these
+    // same buffs, so they have to exist for a rogue who took the covenant and
+    // not the talent. Built from not_found() they can never trigger, and the
+    // Animacharged combo point silently does nothing.
+    bool have = talent.rogue.supercharger->ok() || legacy_covenant.echoing_reprimand->ok();
+    buffs.supercharger.emplace_back( make_buff( this, fmt::format( "supercharge_{}", i + 1 ), have ?
                                                 find_spell( supercharger_ids[ i ] ) : spell_data_t::not_found() )
                                      ->set_constant_behavior( buff_constant_behavior::NEVER_CONSTANT ) );
   }
@@ -11307,6 +13071,10 @@ void rogue_t::create_options()
   add_option( opt_func( "fixed_rtb_odds", parse_fixed_rtb_odds ) );
   add_option( opt_bool( "priority_rotation", options.priority_rotation ) );
   add_option( opt_float( "the_first_dance_trigger_rate", options.the_first_dance_trigger_rate, 0, 1 ) );
+  add_option( opt_string( "rogue.legacy_covenant", legacy_covenant.chosen ) );
+  add_option( opt_string( "rogue.legacy_conduits", legacy_conduits.option ) );
+  add_option( opt_bool( "rogue.legacy_shadowlands_enabled", options.legacy_shadowlands_enabled ) );
+  add_option( opt_bool( "rogue.legacy_talent_overrides_legendary", options.legacy_talent_overrides_legendary ) );
 }
 
 // rogue_t::copy_from =======================================================
@@ -11338,6 +13106,8 @@ void rogue_t::copy_from( player_t* source )
   options.priority_rotation = rogue->options.priority_rotation;
 
   options.the_first_dance_trigger_rate = rogue->options.the_first_dance_trigger_rate;
+  options.legacy_shadowlands_enabled = rogue->options.legacy_shadowlands_enabled;
+  options.legacy_talent_overrides_legendary = rogue->options.legacy_talent_overrides_legendary;
 }
 
 // rogue_t::create_profile  =================================================
@@ -11470,6 +13240,70 @@ void rogue_t::init_special_effects()
     }
   }
 
+  // BracketSim legacy compatibility: Edge of Night (186398). Max Aura Level 60 - the game switches
+  // the effect off above 60, and the dagger requires 60, so this is a level 60 item only.
+  {
+    const spell_data_t* driver = find_spell( 357595 );
+    const item_t* dagger = nullptr;
+    double damage = 0.0;
+    for ( const auto& it : items )
+    {
+      if ( it.parsed.data.id != 186398 || !driver->ok() )
+        continue;
+      damage += driver->effectN( 1 ).average( &it );
+      if ( !dagger )
+        dagger = &it;
+    }
+    if ( dagger && damage > 0 && ( !driver->max_level() || true_level <= as<int>( driver->max_level() ) ) )
+    {
+      struct strike_t : public unique_gear::proc_spell_t
+      {
+        double amount;
+        strike_t( rogue_t* p, const item_t* item, double a )
+          : proc_spell_t( "banshees_blight", p, p->find_spell( 358126 ), item ), amount( a )
+        {
+          base_dd_min = base_dd_max = a;
+        }
+        double base_da_min( const action_state_t* ) const override { return amount; }
+        double base_da_max( const action_state_t* ) const override { return amount; }
+      };
+
+      legacy_banshees_blight.driver = driver;
+      legacy_banshees_blight.damage = damage;
+      legacy_banshees_blight.strike = new strike_t( this, dagger, damage );
+
+      auto const blight_driver = new special_effect_t( this );
+      blight_driver->name_str = "banshees_blight_driver";
+      blight_driver->spell_id = driver->id();
+      blight_driver->item = const_cast<item_t*>( dagger );
+      blight_driver->proc_flags_ = driver->proc_flags();
+      blight_driver->proc_flags2_ = PF2_ALL_HIT;
+      special_effects.push_back( blight_driver );
+
+      struct blight_cb_t : public dbc_proc_callback_t
+      {
+        rogue_t* rogue;
+        blight_cb_t( rogue_t* p, const special_effect_t& e ) : dbc_proc_callback_t( p, e ), rogue( p ) {}
+
+        void execute( const spell_data_t*, player_t* t, action_state_t* s ) override
+        {
+          player_t* target = s && s->target ? s->target : t;
+          if ( !target || !target->is_enemy() )
+            return;
+          auto td = rogue->get_target_data( target );
+          const double hp = target->health_percentage();
+          const int want = hp < 25 ? 4 : hp < 50 ? 3 : hp < 75 ? 2 : 1;
+          const int have = td->debuffs.banshees_blight->check();
+          // Upstream: a target that heals never loses a stack.
+          if ( have < want )
+            td->debuffs.banshees_blight->trigger( want - have );
+        }
+      };
+      auto cb = new blight_cb_t( this, *blight_driver );
+      cb->initialize();
+    }
+  }
+
   if ( talent.trickster.thousand_cuts->ok() )
   {
     auto const thousand_cuts_driver = new special_effect_t( this );
@@ -11554,6 +13388,42 @@ void rogue_t::init_finished()
 
 // rogue_t::reset ===========================================================
 
+
+// BracketSim legacy compatibility: Vision of Perfection (Heart of Azeroth major
+// essence). The engine procs it and calls this; each spec fires its signature
+// cooldown early, at the fraction of its duration the essence grants.
+void rogue_t::vision_of_perfection_proc()
+{
+  auto essence = find_azerite_essence( "Vision of Perfection" );
+  if ( !essence.enabled() )
+    return;
+
+  double mult = essence.spell( 1u )->effectN( 1 ).percent() +
+                essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
+
+  buff_t* window = nullptr;
+  switch ( specialization() )
+  {
+    case ROGUE_OUTLAW:
+      window = buffs.adrenaline_rush;
+      break;
+    case ROGUE_SUBTLETY:
+      window = buffs.shadow_blades;
+      break;
+    default:
+      break;
+  }
+
+  if ( !window || mult <= 0 )
+    return;
+
+  timespan_t dur = window->buff_duration() * mult;
+  if ( window->check() )
+    window->extend_duration( dur );
+  else
+    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+}
+
 void rogue_t::reset()
 {
   player_t::reset();
@@ -11569,6 +13439,12 @@ void rogue_t::reset()
 
   danse_macabre_tracker.clear();
   deathstalkers_mark_debuff = nullptr;
+  legacy_last_rupture_target = nullptr;
+
+  // BracketSim legacy compatibility: these runeforge counters are combat state
+  // and must not carry over into the next iteration.
+  legendary.guile_charm_counter = 0;
+  legendary.duskwalkers_patch_counter = 0.0;
 
   restealth_allowed = false;
 

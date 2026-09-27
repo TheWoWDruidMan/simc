@@ -73,6 +73,16 @@ warlock_td_t::warlock_td_t( player_t* target, warlock_t& p )
   debuffs.dark_titans_mark = make_buff( *this, "dark_titans_mark", p.tier.dark_titans_mark_debuff )
                                  ->set_default_value_from_effect( 1 );
 
+  // BracketSim legacy compatibility: the conduit Combusting Engine (212).
+  // There is no spell for this debuff - Shadowlands said as much in a comment
+  // and hand-wrote the duration and cap, so those numbers are copied rather
+  // than read. That is also why this conduit is portable at all when most of
+  // its neighbours are not.
+  debuffs.legacy_combusting_engine = make_buff( *this, "legacy_combusting_engine" )
+                                         ->set_duration( 30_s )
+                                         ->set_max_stack( 40 )
+                                         ->set_default_value( p.legacy_conduits.percent( 212 ) );
+
   // Use havoc_debuff where we need the data but don't have the active talent
   // Mayhem proc chance follows a Flat % RNG model, but has ICD
   debuffs.havoc = make_buff( *this, "havoc", p.talents.havoc_debuff )
@@ -477,6 +487,50 @@ void warlock_t::invalidate_cache( cache_e c )
     default:
       break;
   }
+}
+
+// BracketSim legacy compatibility: the conduit Tyrant's Soul (206). The
+// Demonic Tyrant leaves behind a window in which every pet hits harder.
+//
+// IT MUST CALL parse_player_effects_t, NOT player_t - and calling the wrong one
+// killed Demonology's mastery outright.
+//
+// `Mastery: Master Demonologist` (77219) is effect 1 "Modify Pet Damage Done%"
+// and effect 3 "Modify Guardian Damage Done%", and `parse_effects` files both
+// into `pet_multiplier_effects`, which only
+// parse_player_effects_t::composite_player_pet_damage_multiplier reads. Jumping
+// straight to player_t skipped that list, so the mastery percentage was computed
+// and then applied to nothing.
+//
+// Measured on the level 60 Demonology build, 18 September 2026: raising
+// gear_mastery_rating from 0 to 2000 moved mastery from 45.9% to 200.1% and DPS
+// from 12,852 to 12,857 - FIVE DPS out of twelve thousand, against a measured
+// stat weight of -0.11. the author, on a max-level Raidbots report reading Mastery
+// 26.69 against Intellect 51.03: *"i still think that mastery is way to low, it
+// feels sus ... idk i feel like something is bugged"*. He was right, and this
+// override is where it broke.
+double warlock_t::composite_player_pet_damage_multiplier( const action_state_t* s,
+                                                          bool guardian ) const
+{
+  double m = parse_player_effects_t::composite_player_pet_damage_multiplier( s, guardian );
+
+  if ( buffs.legacy_tyrants_soul->check() )
+    m *= 1.0 + buffs.legacy_tyrants_soul->check_value();
+
+  return m;
+}
+
+// BracketSim legacy compatibility: Relic of Demonic Synergy (7027). Effect 1 of
+// buff 337060 is "Modify Damage Done%"; the warlock wears this one when the
+// primary demon's damage procs the driver.
+double warlock_t::composite_player_multiplier( school_e school ) const
+{
+  double m = parse_player_effects_t::composite_player_multiplier( school );
+
+  if ( buffs.legacy_demonic_synergy->check() )
+    m *= 1.0 + buffs.legacy_demonic_synergy->check_value();
+
+  return m;
 }
 
 double warlock_t::composite_mastery() const
@@ -1197,7 +1251,18 @@ void warlock_t::parse_player_effects()
 
 double warlock_t::resource_gain( resource_e resource_type, double amount, gain_t* source, action_t* action )
 {
+  // Legacy Azerite: Chaos Shards fires when a whole Soul Shard is filled, so the
+  // check has to straddle the gain.
+  double shards_before = resource_type == RESOURCE_SOUL_SHARD ? resources.current[ RESOURCE_SOUL_SHARD ] : 0.0;
+
   double actual_amount = player_t::resource_gain( resource_type, amount, source, action );
+
+  if ( resource_type == RESOURCE_SOUL_SHARD && legacy_azerite.chaos_shards.ok() &&
+       std::floor( shards_before ) < std::floor( resources.current[ RESOURCE_SOUL_SHARD ] ) )
+  {
+    if ( rng().roll( legacy_azerite.chaos_shards.spell_ref().effectN( 1 ).percent() / 10.0 ) )
+      buffs.legacy_chaos_shards->trigger();
+  }
 
   // Succulent Soul proc from Demonic Soul talent can only occur from a effective soul shard gain (not overflow)
   if ( resource_type == RESOURCE_SOUL_SHARD && actual_amount > 0.0 && hero.demonic_soul.ok() )

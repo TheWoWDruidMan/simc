@@ -2234,11 +2234,113 @@ bool item_t::download_item( item_t& item )
 
 // item_t::init_special_effects =============================================
 
+/**
+ * The legacy chance-on-hit drivers this engine actually implements.
+ *
+ * Upstream SimulationCraft only scans ON_USE and ON_EQUIP ItemEffect entries,
+ * so a weapon whose effect is recorded with the historical CHANCE_ON_HIT
+ * trigger type never gets a special effect at all - the item equips, the
+ * tooltip reads correctly, and nothing happens. These are the drivers that have
+ * a verified implementation in unique_gear.cpp, listed explicitly so enabling
+ * one never implicitly enables every unmodelled chance-on-hit item in the game.
+ */
+static bool is_restored_chance_on_hit( unsigned spell_id )
+{
+  switch ( spell_id )
+  {
+    case 13533:  // The Jackhammer
+    case 19260:  // Chillpike - Frost Blast, 1.0 PPM from wowsims/classic
+    case 21153:  // Nightfall / Vengeance
+    case 22640:  // Eskhandar's Right Claw
+    case 21992:  // Thunderfury, Blessed Blade of the Windseeker
+    case 71903:  // Shadowmourne
+    case 71845:  // Nibelung
+    case 71846:  // Nibelung, heroic
+    case 21162:  // Sulfuras, Hand of Ragnaros - Fireball, 1.0 PPM from wowsims
+    case 107895: // Souldrinker, normal  77193
+    case 109832: // Souldrinker, heroic  78479
+    case 109829: // Souldrinker, LFR     78488
+    case 107810: // Gurthalak, normal    77191
+    case 109841: // Gurthalak, heroic    78478
+    case 109839: // Gurthalak, LFR       78487
+    // 23 September 2026 - rates cited in unique_gear.cpp (wowsims tbc / classic).
+    case 36041:  // Heartrazor           29962, 1.0 PPM
+    case 23719:  // The Untamed Blade    19334, Untamed Fury, 1.0 PPM
+    case 36111:  // World Breaker        30090, 3.7/60 per hit, spent by the next attack
+    case 33489:  // Blackout Truncheon   27901, Blinding Speed, 0.8 PPM
+    case 34580:  // Despair              28573, Impale, 0.5 PPM
+      return true;
+    default:
+      return false;
+  }
+}
+
 void item_t::init_special_effects()
 {
   if ( !active() )
   {
     return;
+  }
+
+  /*
+   * BracketSim legacy compatibility: Ashjra'kamas, Shroud of Resolve.
+   *
+   * The cloak has NO ItemEffect row in the client data at all - checked against
+   * item_effect.inc and against this project's own 1,637-item effect register -
+   * so upstream creates no special effect for it and its proc does nothing.
+   * The spells both exist and carry everything needed:
+   *
+   *   317860  driver, Real PPM 1.25, proc flags "Cast Successful",
+   *           Max Aura Level 50
+   *   317859  the buff it triggers: primary stat, 15 seconds, and it renders
+   *           105.1979 against the author's tooltip of 105
+   *
+   * IT WAS GIVEN THE WRONG DRIVER UNTIL 18 SEPTEMBER 2026, and a combat log is
+   * what caught it.
+   *
+   * The original choice was 315793 "Titanic Empowerment", picked because its
+   * proc flags read like "your spells and abilities", with a note recording that
+   * its Real PPM of 1 was "read from the game's own spell data" rather than
+   * invented. Reasonable, and wrong twice over: 315793 is registered in
+   * unique_gear_bfa.cpp as `set_bonus::titanic_empowerment` - it is the Ny'alotha
+   * SET bonus - so the cloak was borrowing another item's driver.
+   *
+   * the author tested the cloak and his log shows the game casting 317859 Draconic
+   * Empowerment, five times in 117.8 seconds. Not Titanic Empowerment, once.
+   *
+   *   given        315793 -> 315858   PPM 1.00, flags include PERIODIC,
+   *                                   Max Scaling Level 32
+   *   correct      317860 -> 317859   PPM 1.25, flags "Cast Successful",
+   *                                   Max Aura Level 50
+   *
+   * The rate was 20% low, periodic ticks were rolling a proc the game rolls once
+   * per cast, and the level cap came from an unrelated spell. The VALUE was right
+   * either way - both render 105 primary at item level 67 - which is exactly why
+   * nothing looked wrong until somebody logged it.
+   *
+   * the author's rank 15 tooltip is still the authority for the conditions: "Equip:
+   * Your spells and abilities have a chance to increase your Strength by 105 for
+   * 15 sec. (Requires the Heart of Azeroth. Requires level 50 or below)". Both
+   * are enforced in the handler, not here, because this only supplies the driver.
+   */
+  if ( parsed.data.id == 169223 )
+  {
+    bool has_driver = false;
+    for ( const item_effect_t& effect : parsed.data.effects )
+    {
+      if ( effect.spell_id == 317860 )
+      {
+        has_driver = true;
+        break;
+      }
+    }
+
+    if ( !has_driver )
+    {
+      parsed.data.add_effect( 317860, ITEM_SPELLTRIGGER_ON_EQUIP );
+      player->sim->print_debug( "Player {} item '{}' restoring Draconic Empowerment driver 317860",
+                                player->name(), name() );
+    }
   }
 
   // Select the used temporary enchant for this slot
@@ -2296,6 +2398,50 @@ void item_t::init_special_effects()
     unique_gear::initialize_special_effect( proxy_effect, effect.spell_id );
 
     // First-phase special effect initialize decided it's a usable special effect, so add it
+    if ( proxy_effect.type != SPECIAL_EFFECT_NONE )
+    {
+      parsed.special_effects.push_back( new special_effect_t( proxy_effect ) );
+    }
+  }
+
+  // BracketSim legacy compatibility: these weapon effects are represented by
+  // ItemEffect historical CHANCE_ON_HIT trigger type. Upstream only scans
+  // ON_USE and ON_EQUIP entries, so initialize the explicitly verified legacy
+  // drivers without implicitly enabling every unmodelled chance-on-hit item.
+  for ( const item_effect_t& effect : parsed.data.effects )
+  {
+    if ( effect.spell_id == 0 || effect.type != ITEM_SPELLTRIGGER_CHANCE_ON_HIT ||
+         !is_restored_chance_on_hit( effect.spell_id ) )
+    {
+      continue;
+    }
+
+    // One driver, one special effect. The Jackhammer was reaching this loop
+    // with its driver listed more than once and ended up with TWO
+    // jackhammer_haste buffs and two proc callbacks - which the report showed
+    // plainly, as "jackhammer_haste/jackhammer_haste" in the CONSTANT buff list
+    // on a Fury warrior, i.e. permanent haste from a ten second proc. Every
+    // special effect here is created from a spell id, so the spell id is the
+    // identity to check.
+    bool already = false;
+    for ( const special_effect_t* existing : parsed.special_effects )
+    {
+      if ( existing->spell_id == effect.spell_id )
+      {
+        already = true;
+        break;
+      }
+    }
+    if ( already )
+    {
+      continue;
+    }
+
+    proxy_effect.reset();
+    proxy_effect.type = SPECIAL_EFFECT_EQUIP;
+    proxy_effect.source = SPECIAL_EFFECT_SOURCE_ITEM;
+    unique_gear::initialize_special_effect( proxy_effect, effect.spell_id );
+
     if ( proxy_effect.type != SPECIAL_EFFECT_NONE )
     {
       parsed.special_effects.push_back( new special_effect_t( proxy_effect ) );

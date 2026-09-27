@@ -8,6 +8,13 @@
 #include "action/action.hpp"
 #include "action/action_state.hpp"
 #include "action/attack.hpp"
+// BracketSim legacy compatibility: needed for the restored Azerite traits.
+#include "player/azerite_data.hpp"
+// BracketSim legacy compatibility: Shadowlands conduits. Values live in
+// legacy_conduits.hpp because Midnight ships neither the ConduitRank table nor
+// most conduit spells, and the client's own conduit tooltips are stale - a live
+// in-game test proved the archived 9.2.7 numbers are what the game runs.
+#include "player/legacy_conduits.hpp"
 #include "action/dot.hpp"
 #include "action/heal.hpp"
 #include "action/residual_action.hpp"
@@ -1151,6 +1158,9 @@ namespace pet
 {
 struct base_wolf_t;
 struct primal_elemental_t;
+// Legacy Azerite: Echo of the Elementals leaves a small elemental behind.
+struct legacy_ember_elemental_t;
+struct legacy_spark_elemental_t;
 }
 
 struct shaman_td_t : public actor_target_data_t
@@ -1171,6 +1181,10 @@ struct shaman_td_t : public actor_target_data_t
 
     // Set bonus
     buff_t* mid2_enh_2pc; // Enhancement MID2 2PC
+
+    // Legacy Azerite (Battle for Azeroth)
+    buff_t* legacy_lightning_conduit;
+    buff_t* legacy_primal_primer;
   } debuff;
 
   struct heals
@@ -1226,6 +1240,9 @@ public:
   /// Maelstrom generator/spender tracking
   std::vector<std::pair<simple_sample_data_t, simple_sample_data_t>> mw_source_list;
   std::vector<std::array<simple_sample_data_t, 11>> mw_spend_list;
+  // BracketSim legacy compatibility: Legacy of the Frost Witch counts Maelstrom
+  // Weapon stacks spent and pays out every fifth one.
+  unsigned legacy_lotfw_counter = 0;
 
   /// Deeply Rooted Elements tracking
   extended_sample_data_t dre_samples;
@@ -1268,6 +1285,10 @@ public:
     action_t* flame_shock_asc;
     action_t* flame_shock_vb;
     action_t* flame_shock;
+    // BracketSim legacy compatibility: Vesper Totem's damage pulse.
+    action_t* legacy_vesper_totem_damage = nullptr;
+    // BracketSim legacy compatibility: Raging Vesper Vortex's detonation.
+    action_t* legacy_raging_vesper_vortex = nullptr;
     action_t* elemental_blast;
     action_t* lava_burst_pf;
 
@@ -1281,6 +1302,11 @@ public:
 
     // Legendaries
     action_t* dre_ascendance; // Deeply Rooted Elements
+    // BracketSim legacy compatibility: Deeptremor Stone (6986). Owned by
+    // the shaman, not the elemental, exactly as Shadowlands had it - and
+    // this module's own earthquake_damage_base_t still carries the
+    // parent == nullptr path for it, with a comment naming Deeptremor.
+    action_t* legacy_deeptremor_eq;
 
     // Cached action pointers
     action_t* feral_spirits; // MW Tracking
@@ -1324,6 +1350,12 @@ public:
     action_t* tww3_primordial_storm;
     action_t* tww3_lava_lash;
     action_t* tww3_fire_nova;
+
+    // Legacy Azerite (Battle for Azeroth)
+    action_t* legacy_lightning_conduit;
+    action_t* legacy_tectonic_thunder;
+    // BracketSim legacy compatibility: the conduit Shake the Foundations (103).
+    action_t* legacy_shake_the_foundations;
   } action;
 
   // Set of dummy actions for reporting (stats collection) purposes
@@ -1345,6 +1377,10 @@ public:
     spawner::pet_spawner_t<pet::primal_elemental_t, shaman_t> earth_elemental;
 
     spawner::pet_spawner_t<pet_t, shaman_t> ancestor;
+
+    // Legacy Azerite: Echo of the Elementals.
+    spawner::pet_spawner_t<pet::legacy_ember_elemental_t, shaman_t> legacy_ember_elemental;
+    spawner::pet_spawner_t<pet::legacy_spark_elemental_t, shaman_t> legacy_spark_elemental;
 
     spawner::pet_spawner_t<pet::base_wolf_t, shaman_t> fire_wolves;
     spawner::pet_spawner_t<pet::base_wolf_t, shaman_t> lightning_wolves;
@@ -1369,6 +1405,13 @@ public:
   // Buffs
   struct
   {
+    // BracketSim legacy compatibility: Shadowlands covenant abilities.
+    buff_t* legacy_vesper_totem;
+    // BracketSim legacy compatibility: Splintered Elements.
+    buff_t* legacy_splintered_elements;
+    // BracketSim legacy: Seeds of Rampant Growth's crit buff (358945, 15 s, 10 stacks).
+    buff_t* legacy_seeds_of_rampant_growth = nullptr;
+
     // shared between all three specs
     buff_t* ascendance;
     buff_t* ghost_wolf;
@@ -1453,7 +1496,99 @@ public:
     // PvP
     buff_t* thundercharge;
 
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+    buff_t* lava_shock;
+    buff_t* synapse_shock;
+    buff_t* legacy_ancestral_resonance;
+    buff_t* legacy_natural_harmony_fire;    // crit
+    buff_t* legacy_natural_harmony_frost;   // mastery
+    buff_t* legacy_natural_harmony_nature;  // haste
+    buff_t* legacy_roiling_storm_driver;
+    buff_t* tectonic_thunder;
+
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    buff_t* legacy_chains_of_devastation_chain_lightning;
+    buff_t* legacy_chains_of_devastation_chain_heal;
+    buff_t* legacy_echoes_of_great_sundering;
+    buff_t* legacy_elemental_equilibrium;
+    // BracketSim legacy compatibility: Elemental Equilibrium (6990) needs one
+    // tracking buff per school plus a lockout, or it would fire every tick.
+    buff_t* legacy_elemental_equilibrium_fire;
+    buff_t* legacy_elemental_equilibrium_frost;
+    buff_t* legacy_elemental_equilibrium_nature;
+    buff_t* legacy_elemental_equilibrium_debuff;
+    buff_t* legacy_of_the_frost_witch;
+    buff_t* legacy_primal_lava_actuators;
+    buff_t* legacy_windspeakers_lava_resurgence;
   } buff;
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. Named
+  // legacy_azerite because player_t already owns an "azerite" member, and two
+  // of the trait names collide with modern Shaman symbols.
+  struct legacy_azerite_t
+  {
+    azerite_power_t ancestral_resonance;
+    azerite_power_t legacy_echo_of_the_elementals;
+    azerite_power_t igneous_potential;
+    azerite_power_t lava_shock;
+    azerite_power_t lightning_conduit;
+    azerite_power_t natural_harmony;
+    azerite_power_t primal_primer;
+    azerite_power_t roiling_storm;
+    azerite_power_t legacy_storms_eye;
+    azerite_power_t strength_of_earth;
+    azerite_power_t synapse_shock;
+    azerite_power_t tectonic_thunder;
+    azerite_power_t thunderaans_fury;
+  } legacy_azerite;
+
+  // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
+  // has no runeforge DBC, so each one is switched on by the bonus id its
+  // original legendary item carried and is inert on any other character. Two of
+  // these share a name with a current talent, so those carry a legacy_ prefix
+  // and both sources can be active at once.
+  // BracketSim legacy compatibility: Shadowlands covenant abilities. Midnight
+  // has no covenant DBC, but every covenant spell still resolves, so they are
+  // looked up by id and gated on the chosen covenant.
+  // BracketSim legacy compatibility: Shadowlands conduits, as id:rank pairs.
+  legacy_conduit::set_t legacy_conduits;
+
+  struct legacy_covenant_t
+  {
+    std::string chosen = "none";
+    const spell_data_t* vesper_totem = spell_data_t::not_found();
+    const spell_data_t* vesper_totem_damage = spell_data_t::not_found();
+    const spell_data_t* chain_harvest = spell_data_t::not_found();
+    const spell_data_t* chain_harvest_damage = spell_data_t::not_found();
+    const spell_data_t* primordial_wave = spell_data_t::not_found();
+    const spell_data_t* primordial_wave_damage = spell_data_t::not_found();
+    const spell_data_t* fae_transfusion = spell_data_t::not_found();
+    const spell_data_t* fae_transfusion_damage = spell_data_t::not_found();
+  } legacy_covenant;
+
+  struct shadowlands_legacy_t
+  {
+    bool legacy_shadowlands_enabled = true;
+    // These four ride a covenant ability, so they only do anything when the
+    // matching covenant is chosen as well.
+    bool elemental_conduit = false;
+    bool raging_vesper_vortex = false;
+    bool seeds_of_rampant_growth = false;
+    bool splintered_elements = false;
+
+    bool ancestral_reminder = false;
+    bool chains_of_devastation = false;
+    bool deeply_rooted_elements = false;
+    bool deeptremor_stone = false;
+    bool doom_winds = false;
+    bool echoes_of_great_sundering = false;
+    bool elemental_equilibrium = false;
+    bool legacy_of_the_frost_witch = false;
+    bool primal_lava_actuators = false;
+    bool skybreakers_fiery_demise = false;
+    bool windspeakers_lava_resurgence = false;
+    bool witch_doctors_wolf_bones = false;
+  } shadowlands_legacy;
 
   // Options
   struct options_t
@@ -1972,6 +2107,7 @@ public:
     cooldown.ascendance         = get_cooldown( "ascendance" );
     cooldown.crash_lightning    = get_cooldown( "crash_lightning" );
     cooldown.crash_lightning_su = get_cooldown( "crash_lighting_su" );
+    cooldown.feral_spirits      = get_cooldown( "feral_spirit" );
     cooldown.fire_elemental     = get_cooldown( "fire_elemental" );
     cooldown.flame_shock        = get_cooldown( "flame_shock" );
     cooldown.frost_shock        = get_cooldown( "frost_shock" );
@@ -2060,6 +2196,9 @@ public:
 
   // triggers
   void trigger_maelstrom_gain( double maelstrom_gain, gain_t* gain = nullptr );
+  // Legacy Azerite (Battle for Azeroth)
+  void trigger_legacy_natural_harmony( const action_state_t* state );
+  void trigger_legacy_ancestral_resonance( const action_state_t* state );
   void trigger_windfury_weapon( const action_state_t*, double override_chance = -1.0 );
   void trigger_flametongue_weapon( const action_state_t* );
   void trigger_hot_hand( const action_state_t* state );
@@ -2106,6 +2245,8 @@ public:
 
 
   // Character Definition
+  // BracketSim legacy compatibility: Vision of Perfection.
+  void vision_of_perfection_proc() override;
   void init_spells() override;
   void init_base_stats() override;
   void init_scaling() override;
@@ -2116,6 +2257,8 @@ public:
   void init_procs() override;
   void init_uptimes() override;
   void init_assessors() override;
+  // BracketSim legacy compatibility: Elemental Equilibrium (runeforge 6990).
+  void trigger_legacy_elemental_equilibrium( const action_state_t* state );
   void init_rng() override;
   bool validate_fight_style( fight_style_e style ) const override;
   void init_special_effects() override;
@@ -2238,6 +2381,14 @@ shaman_td_t::shaman_td_t( player_t* target, shaman_t* p ) : actor_target_data_t(
   heal.earthliving = nullptr;
   // Shared
   dot.flame_shock = target->get_dot( "flame_shock", p );
+
+  // Legacy Azerite
+  debuff.legacy_lightning_conduit =
+      make_buff( *this, "legacy_lightning_conduit", p->find_spell( 275391 ) )
+          ->set_duration( p->find_spell( 275391 )->duration() )
+          ->set_chance( 1.0 );
+  debuff.legacy_primal_primer = make_buff( *this, "legacy_primal_primer", p->find_spell( 273006 ) )
+                                    ->set_default_value( p->legacy_azerite.primal_primer.value() );
 
   // Elemental
   debuff.lightning_rod = make_buff( *this, "lightning_rod", p->find_spell( 197209 ) )
@@ -2671,8 +2822,12 @@ public:
 
     if ( mw_affected_stacks && affected_by_maelstrom_weapon )
     {
-      mw_multiplier = this->p()->talent.maelstrom_weapon->effectN( 3 ).percent() *
-        mw_affected_stacks;
+      // BracketSim legacy compatibility: Focused Lightning adds to what each
+      // Maelstrom Weapon stack is worth, so it multiplies with the stack count
+      // exactly as the talent's own value does rather than being a flat bonus.
+      double per_stack = this->p()->talent.maelstrom_weapon->effectN( 3 ).percent() +
+                         this->p()->legacy_conduits.percent( 110 );
+      mw_multiplier = per_stack * mw_affected_stacks;
     }
 
     if ( this->sim->debug && mw_multiplier )
@@ -2917,6 +3072,24 @@ public:
   {
     ab::execute();
 
+    // BracketSim legacy compatibility: each damaging cast spends one of Vesper
+    // Totem's charges and pulses its damage.
+    if ( ab::harmful && !ab::background && this->p()->buff.legacy_vesper_totem->check() &&
+         this->p()->action.legacy_vesper_totem_damage )
+    {
+      this->p()->action.legacy_vesper_totem_damage->execute_on_target( this->target );
+      this->p()->buff.legacy_vesper_totem->decrement();
+
+      // BracketSim legacy compatibility: Raging Vesper Vortex detonates once
+      // the runeforge's effect 1 worth of charges have been spent.
+      if ( this->p()->shadowlands_legacy.raging_vesper_vortex &&
+           this->p()->action.legacy_raging_vesper_vortex &&
+           !this->p()->buff.legacy_vesper_totem->check() )
+      {
+        this->p()->action.legacy_raging_vesper_vortex->execute_on_target( this->target );
+      }
+    }
+
     // Main hand swing timer resets if the MW-affected spell is not instant cast
     // Need to check this before spending the MW or autos will be lost.
     if ( affected_by_maelstrom_weapon && mw_affected_stacks < 5 )
@@ -3099,6 +3272,10 @@ public:
     p()->trigger_windfury_weapon( state );
     p()->trigger_flametongue_weapon( state );
     p()->trigger_hot_hand( state );
+
+    // Legacy Azerite
+    p()->trigger_legacy_natural_harmony( state );
+    p()->trigger_legacy_ancestral_resonance( state );
   }
 };
 
@@ -3155,6 +3332,11 @@ public:
   void impact( action_state_t* s ) override
   {
     ab::impact( s );
+
+    // Legacy Azerite
+    this->p()->trigger_legacy_natural_harmony( s );
+    this->p()->trigger_legacy_ancestral_resonance( s );
+
     if ( ( this->is_variant( spell_variant::NORMAL ) && !this->background && s->chain_target == 0 )
       || this->id == 188389)
     {
@@ -4050,13 +4232,42 @@ struct primal_elemental_t : public shaman_pet_t
 
 struct earth_elemental_t : public primal_elemental_t
 {
+  // BracketSim legacy compatibility: Deeptremor Stone (6986). The elemental
+  // rumbles an Earthquake once a second for as long as it is out.
+  buff_t* legacy_deeptremor;
+
   earth_elemental_t( shaman_t* owner, elemental type_ ) :
-    primal_elemental_t( owner, type_ )
+    primal_elemental_t( owner, type_ ), legacy_deeptremor( nullptr )
   {
     main_hand_weapon.swing_time = timespan_t::from_seconds( 2.0 );
     owner_coeff.ap_from_sp      = 0.25;
 
     npc_id = type_ == elemental::GREATER_EARTH ? 95072 : 187322;
+  }
+
+  void create_buffs() override
+  {
+    primal_elemental_t::create_buffs();
+
+    if ( !o()->shadowlands_legacy.deeptremor_stone )
+      return;
+
+    // Unhasted, as Shadowlands had it - the rumble is one a second flat.
+    legacy_deeptremor = make_buff( this, "deeptremor_stone", o()->find_spell( 336739 ) )
+        ->set_period( 1_s )
+        ->set_tick_time_behavior( buff_tick_time_behavior::UNHASTED )
+        ->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) {
+            if ( o()->action.legacy_deeptremor_eq && target )
+              o()->action.legacy_deeptremor_eq->execute_on_target( target );
+          } );
+  }
+
+  void arise() override
+  {
+    primal_elemental_t::arise();
+
+    if ( legacy_deeptremor )
+      legacy_deeptremor->trigger();
   }
 };
 
@@ -4158,6 +4369,23 @@ struct fire_elemental_t : public primal_elemental_t
     primal_elemental_t::dismiss( expired );
 
     o()->buff.fire_elemental->expire();
+
+    // Legacy Azerite: Echo of the Elementals. Battle for Azeroth stretched this
+    // duration with the Vision of Perfection essence; essences are not part of
+    // this port, so the echo lasts its own summon duration and no longer.
+    //
+    // The spawn is deferred by an event rather than done inline. Spawning a pet
+    // from inside another pet's dismiss() segfaulted the engine the first time
+    // the Fire Elemental actually expired - the spawner is mid-teardown at that
+    // point. A zero-delay event runs it once the dismissal has finished.
+    if ( o()->legacy_azerite.legacy_echo_of_the_elementals.ok() )
+    {
+      shaman_t* owner = o();
+      timespan_t echo = owner->find_spell( 275385 )->duration();
+      make_event( *sim, 0_ms, [ owner, echo ] {
+        owner->pet.legacy_ember_elemental.spawn( echo );
+      } );
+    }
   }
 };
 
@@ -4332,6 +4560,17 @@ struct storm_elemental_t : public primal_elemental_t
 
     o()->buff.storm_elemental->expire();
     o()->buff.wind_gust->expire();
+
+    // Legacy Azerite: Echo of the Elementals, the Storm Elemental's half.
+    // Deferred by an event for the same reason as the Fire Elemental's.
+    if ( o()->legacy_azerite.legacy_echo_of_the_elementals.ok() )
+    {
+      shaman_t* owner = o();
+      timespan_t echo = owner->find_spell( 275386 )->duration();
+      make_event( *sim, 0_ms, [ owner, echo ] {
+        owner->pet.legacy_spark_elemental.spawn( echo );
+      } );
+    }
   }
 };
 
@@ -4440,6 +4679,100 @@ struct ancestor_t : public shaman_pet_t
     }
   }
 };
+// ==========================================================================
+// Legacy Azerite: Echo of the Elementals
+// ==========================================================================
+
+// The echoes are plain guardians with one spell and no auto attack, which is
+// how Battle for Azeroth built them too. Their damage is the trait's value, so
+// they are worth nothing at all when the trait is absent - they are only ever
+// spawned when it is present.
+
+struct legacy_ember_elemental_t : public shaman_pet_t
+{
+  struct ember_blast_t : public pet_spell_t<legacy_ember_elemental_t>
+  {
+    ember_blast_t( legacy_ember_elemental_t* player, util::string_view options )
+      : super( player, "ember_blast", player->find_spell( 275382 ), options )
+    {
+      may_crit = true;
+    }
+
+    // The trait's value is read in init(), NOT in the constructor. These pets
+    // are built by the spawner's creation callback, which can run before the
+    // owner's azerite lookup has happened - reading it early gave an ember
+    // elemental that spawned, cast, and dealt exactly zero.
+    void init() override
+    {
+      super::init();
+      base_dd_min = base_dd_max =
+          this->o()->legacy_azerite.legacy_echo_of_the_elementals.value();
+    }
+
+    bool usable_moving() const override
+    { return true; }
+  };
+
+  legacy_ember_elemental_t( shaman_t* owner )
+    : shaman_pet_t( owner, "ember_elemental", true, false )
+  { }
+
+  void create_default_apl() override
+  {
+    shaman_pet_t::create_default_apl();
+    get_action_priority_list( "default" )->add_action( "ember_blast" );
+  }
+
+  action_t* create_action( util::string_view name, util::string_view options_str ) override
+  {
+    if ( name == "ember_blast" )
+      return new ember_blast_t( this, options_str );
+
+    return shaman_pet_t::create_action( name, options_str );
+  }
+};
+
+struct legacy_spark_elemental_t : public shaman_pet_t
+{
+  struct shocking_blast_t : public pet_spell_t<legacy_spark_elemental_t>
+  {
+    shocking_blast_t( legacy_spark_elemental_t* player, util::string_view options )
+      : super( player, "shocking_blast", player->find_spell( 275384 ), options )
+    {
+      may_crit = true;
+    }
+
+    // Read in init() for the same reason as Ember Blast above.
+    void init() override
+    {
+      super::init();
+      base_dd_min = base_dd_max =
+          this->o()->legacy_azerite.legacy_echo_of_the_elementals.value();
+    }
+
+    bool usable_moving() const override
+    { return true; }
+  };
+
+  legacy_spark_elemental_t( shaman_t* owner )
+    : shaman_pet_t( owner, "spark_elemental", true, false )
+  { }
+
+  void create_default_apl() override
+  {
+    shaman_pet_t::create_default_apl();
+    get_action_priority_list( "default" )->add_action( "shocking_blast" );
+  }
+
+  action_t* create_action( util::string_view name, util::string_view options_str ) override
+  {
+    if ( name == "shocking_blast" )
+      return new shocking_blast_t( this, options_str );
+
+    return shaman_pet_t::create_action( name, options_str );
+  }
+};
+
 }  // end namespace pet
 
 // ==========================================================================
@@ -4513,6 +4846,21 @@ struct windfury_attack_t : public shaman_attack_t
 
     // Windfury can not proc itself
     may_proc_windfury = false;
+  }
+
+  // Legacy Azerite: Thunderaan's Fury
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = shaman_attack_t::bonus_da( s );
+
+    if ( p()->legacy_azerite.thunderaans_fury.ok() )
+    {
+      // Battle for Azeroth applied two thirds of the value to each hit rather
+      // than the split the tooltip described.
+      b += ( 2.0 / 3.0 ) * p()->legacy_azerite.thunderaans_fury.value( 2 );
+    }
+
+    return b;
   }
 };
 
@@ -4665,6 +5013,27 @@ struct stormstrike_attack_t : public shaman_attack_t
     }
   }
 
+  // Legacy Azerite: Roiling Storm. Battle for Azeroth applied two thirds of
+  // the tooltip value to the main hand and half of that again to the off hand.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = shaman_attack_t::bonus_da( s );
+
+    // buff.stormsurge is Midnight's name for what Battle for Azeroth called
+    // buff.stormbringer. Both are spell 201846, so this is the same proc.
+    if ( p()->legacy_azerite.roiling_storm.ok() && p()->buff.stormsurge->check() )
+    {
+      double rs_bonus = ( 2.0 / 3.0 ) * p()->legacy_azerite.roiling_storm.value( 1 );
+      if ( weapon && weapon->slot == SLOT_OFF_HAND )
+      {
+        rs_bonus *= 0.5;
+      }
+      b += rs_bonus;
+    }
+
+    return b;
+  }
+
   virtual double stormsurge_proc_chance() const
   {
     double base_mul = p()->mastery.enhanced_elements->effectN( 3 ).mastery_value() *
@@ -4682,6 +5051,9 @@ struct stormstrike_attack_t : public shaman_attack_t
   double action_multiplier() const override
   {
     double m = shaman_attack_t::action_multiplier();
+
+    // BracketSim legacy compatibility: Legacy of the Frost Witch.
+    m *= 1.0 + p()->buff.legacy_of_the_frost_witch->stack_value();
 
     if ( strike_type == strike_variant::STORMFLURRY )
     {
@@ -5155,10 +5527,49 @@ struct molten_weapon_dot_t : public residual_action::residual_periodic_action_t<
   }
 };
 
+// Legacy Azerite: Lightning Conduit ========================================
+
+struct legacy_lightning_conduit_zap_t : public shaman_spell_t
+{
+  legacy_lightning_conduit_zap_t( shaman_t* player ) :
+    shaman_spell_t( "legacy_lightning_conduit", player, player->find_spell( 275394 ) )
+  {
+    background  = true;
+    may_crit    = true;
+    base_dd_min = base_dd_max = player->legacy_azerite.lightning_conduit.value();
+  }
+};
+
+// Legacy Azerite: Tectonic Thunder =========================================
+
+struct legacy_tectonic_thunder_damage_t : public shaman_spell_t
+{
+  legacy_tectonic_thunder_damage_t( shaman_t* player ) :
+    shaman_spell_t( "legacy_tectonic_thunder", player, player->find_spell( 286949 ) )
+  {
+    aoe        = -1;
+    ground_aoe = background = true;
+    school     = SCHOOL_PHYSICAL;
+    base_dd_min = base_dd_max = player->legacy_azerite.tectonic_thunder.value( 1 );
+  }
+};
+
 // Lava Lash Attack =========================================================
 
 struct lava_lash_t : public shaman_attack_t
 {
+  // BracketSim legacy compatibility: Magma Fist. Shadowlands added the rank
+  // value to Lava Lash's crit chance against anything carrying Flame Shock.
+  double composite_target_crit_chance( player_t* target ) const override
+  {
+    double tc = shaman_attack_t::composite_target_crit_chance( target );
+
+    if ( p()->legacy_conduits.has( 111 ) && td( target )->dot.flame_shock->is_ticking() )
+      tc += p()->legacy_conduits.percent( 111 );
+
+    return tc;
+  }
+
   molten_weapon_dot_t* mw_dot;
   unsigned max_spread_targets;
 
@@ -5185,6 +5596,17 @@ struct lava_lash_t : public shaman_attack_t
       cooldown = player->get_cooldown( "lava_lash_tww3" );
       base_multiplier *= player->buff.elemental_overflow->data().effectN( 1 ).percent();
     }
+  }
+
+  // Legacy Azerite: Primal Primer is consumed by Lava Lash.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = shaman_attack_t::bonus_da( s );
+
+    if ( s->target && p()->legacy_azerite.primal_primer.enabled() )
+      b += td( s->target )->debuff.legacy_primal_primer->stack_value();
+
+    return b;
   }
 
   void init() override
@@ -5221,6 +5643,10 @@ struct lava_lash_t : public shaman_attack_t
   void execute() override
   {
     shaman_attack_t::execute();
+
+    // BracketSim legacy compatibility: Primal Lava Actuators is spent by the
+    // Lava Lash it was stacked for.
+    p()->buff.legacy_primal_lava_actuators->expire();
 
     p()->trigger_elemental_assault( execute_state );
 
@@ -5276,6 +5702,9 @@ struct lava_lash_t : public shaman_attack_t
     }
 
     p()->trigger_ride_the_lightning( state, p()->action.chain_lightning_ll_rtl );
+
+    // Legacy Azerite: Primal Primer is spent on impact.
+    td( state->target )->debuff.legacy_primal_primer->expire();
   }
 
   void move_random_target( std::vector<player_t*>& in, std::vector<player_t*>& out ) const
@@ -5582,6 +6011,11 @@ struct stormstrike_base_t : public shaman_attack_t
       p()->buff.stormblast->consume( this, 1 );
     }
 
+    // BracketSim legacy compatibility: Legacy of the Frost Witch is spent by
+    // the Stormstrike it empowers. Without this it never expired and sat at
+    // 99% uptime as a permanent 30% - the same trap Brutal Projectiles hit.
+    p()->buff.legacy_of_the_frost_witch->expire();
+
     if ( result_is_hit( execute_state->result ) )
     {
       auto ss = debug_cast<const stormstrike_state_t*>( execute_state );
@@ -5613,6 +6047,19 @@ struct stormstrike_base_t : public shaman_attack_t
     {
       p()->generate_maelstrom_weapon( this, 1 );
       p()->buff.lightning_strikes->decrement();
+    }
+
+    // Legacy Azerite: Lightning Conduit zaps every already-marked target, then
+    // marks the one just struck.
+    if ( p()->legacy_azerite.lightning_conduit.ok() && p()->action.legacy_lightning_conduit && execute_state )
+    {
+      for ( auto* t : sim->target_non_sleeping_list )
+      {
+        if ( p()->get_target_data( t )->debuff.legacy_lightning_conduit->up() )
+          p()->action.legacy_lightning_conduit->execute_on_target( t );
+      }
+
+      td( execute_state->target )->debuff.legacy_lightning_conduit->trigger();
     }
   }
 };
@@ -6450,9 +6897,261 @@ struct chained_base_t : public shaman_spell_t
     }
   }
 
+  // BracketSim legacy compatibility: Synapse Shock stacks a primary stat buff
+  // on every Chain Lightning hit.
+  void impact( action_state_t* state ) override
+  {
+    shaman_spell_t::impact( state );
+
+    if ( p()->legacy_azerite.synapse_shock.ok() )
+      p()->buff.synapse_shock->trigger();
+  }
+
   std::vector<player_t*>& check_distance_targeting( std::vector<player_t*>& tl ) const override
   {
     return __check_distance_targeting( this, tl );
+  }
+};
+
+// BracketSim legacy compatibility: Shadowlands covenant abilities ==========
+// Cast time, cooldown, duration, target caps and damage all come from the
+// covenant spells themselves, which still resolve in current client data.
+
+struct legacy_vesper_totem_damage_t : public shaman_spell_t
+{
+  legacy_vesper_totem_damage_t( shaman_t* p )
+    : shaman_spell_t( "vesper_totem_damage", p, p->legacy_covenant.vesper_totem_damage )
+  {
+    background = true;
+    aoe = as<int>( p->legacy_covenant.vesper_totem->effectN( 6 ).base_value() );
+
+    // BracketSim legacy compatibility: Elysian Dirge (conduit 146) raises what
+    // the totem's damage pulses hit for.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 146 );
+  }
+};
+
+struct legacy_raging_vesper_vortex_t : public shaman_spell_t
+{
+  legacy_raging_vesper_vortex_t( shaman_t* p )
+    : shaman_spell_t( "raging_vesper_vortex", p, p->find_spell( 356790 ) )
+  {
+    background = true;
+    aoe = -1;
+  }
+};
+
+struct legacy_vesper_totem_t : public shaman_spell_t
+{
+  legacy_vesper_totem_t( shaman_t* p, util::string_view options_str )
+    : shaman_spell_t( "vesper_totem", p, p->legacy_covenant.vesper_totem )
+  {
+    parse_options( options_str );
+    harmful = may_miss = false;
+    // The totem itself is not summoned as a pet: its three damage charges are
+    // held on a buff and spent by the shaman's own casts. The healing charges
+    // are not modelled.
+    if ( p->action.legacy_vesper_totem_damage )
+      add_child( p->action.legacy_vesper_totem_damage );
+  }
+
+  void execute() override
+  {
+    shaman_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_KYRIAN,
+                                            cooldown );
+    p()->buff.legacy_vesper_totem->trigger( p()->buff.legacy_vesper_totem->max_stack() );
+  }
+};
+
+struct legacy_chain_harvest_damage_t : public shaman_spell_t
+{
+  legacy_chain_harvest_damage_t( shaman_t* p )
+    : shaman_spell_t( "chain_harvest_damage", p, p->legacy_covenant.chain_harvest_damage )
+  {
+    background = true;
+    // Five enemies, as the driver's own description states.
+    aoe = 5;
+
+    // BracketSim legacy compatibility: Lavish Harvest (conduit 149) adds
+    // critical strike chance to Chain Harvest, not damage.
+    base_crit += p->legacy_conduits.percent( 149 );
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    shaman_spell_t::impact( s );
+
+    // BracketSim legacy compatibility: Elemental Conduit. A critical harvest
+    // leaves Flame Shock on what it hit.
+    if ( p()->shadowlands_legacy.elemental_conduit && s->result == RESULT_CRIT &&
+         p()->action.flame_shock )
+      p()->action.flame_shock->execute_on_target( s->target );
+  }
+};
+
+struct legacy_chain_harvest_t : public shaman_spell_t
+{
+  action_t* damage;
+
+  legacy_chain_harvest_t( shaman_t* p, util::string_view options_str )
+    : shaman_spell_t( "chain_harvest", p, p->legacy_covenant.chain_harvest ),
+      damage( new legacy_chain_harvest_damage_t( p ) )
+  {
+    parse_options( options_str );
+    may_miss = false;
+    add_child( damage );
+  }
+
+  void execute() override
+  {
+    shaman_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_VENTHYR,
+                                            cooldown );
+    damage->execute_on_target( target );
+  }
+};
+
+struct legacy_primordial_wave_damage_t : public shaman_spell_t
+{
+  legacy_primordial_wave_damage_t( shaman_t* p )
+    : shaman_spell_t( "primordial_wave_damage", p, p->legacy_covenant.primordial_wave_damage )
+  {
+    background = true;
+  }
+};
+
+struct legacy_primordial_wave_t : public shaman_spell_t
+{
+  action_t* damage;
+
+  legacy_primordial_wave_t( shaman_t* p, util::string_view options_str )
+    : shaman_spell_t( "primordial_wave", p, p->legacy_covenant.primordial_wave ),
+      damage( new legacy_primordial_wave_damage_t( p ) )
+  {
+    parse_options( options_str );
+    may_miss = false;
+    add_child( damage );
+  }
+
+  void execute() override
+  {
+    shaman_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NECROLORD,
+                                            cooldown );
+    damage->execute_on_target( target );
+
+    // The wave applies Flame Shock to the struck enemy. The Lava Burst and
+    // Lightning Bolt echoes it granted are not modelled.
+    if ( p()->action.flame_shock )
+      p()->action.flame_shock->execute_on_target( target );
+
+    // BracketSim legacy compatibility: Splintered Elements. One stack per Flame
+    // Shock the wave spreads, which on a single target is one.
+    p()->buff.legacy_splintered_elements->trigger();
+
+    // BracketSim legacy compatibility: the conduit Tumbling Waves (147) can
+    // reset Primordial Wave outright. Note the divide by a THOUSAND, not a
+    // hundred - the rank value is in tenths of a percent here, and Shadowlands
+    // divided the same way. percent() alone would make this near-certain.
+    if ( p()->legacy_conduits.has( 147 ) &&
+         rng().roll( p()->legacy_conduits.value( 147 ) / 1000.0 ) )
+    {
+      cooldown->reset( true );
+    }
+  }
+};
+
+struct legacy_fae_transfusion_damage_t : public shaman_spell_t
+{
+  legacy_fae_transfusion_damage_t( shaman_t* p )
+    : shaman_spell_t( "fae_transfusion_damage", p, p->legacy_covenant.fae_transfusion_damage )
+  {
+    background = true;
+    aoe = as<int>( p->legacy_covenant.fae_transfusion_damage->max_targets() );
+    if ( aoe < 1 )
+      aoe = 1;
+  }
+};
+
+struct legacy_fae_transfusion_t : public shaman_spell_t
+{
+  action_t* damage;
+
+  legacy_fae_transfusion_t( shaman_t* p, util::string_view options_str )
+    : shaman_spell_t( "fae_transfusion", p, p->legacy_covenant.fae_transfusion ),
+      damage( new legacy_fae_transfusion_damage_t( p ) )
+  {
+    parse_options( options_str );
+    channeled = true;
+    may_miss = harmful = false;
+
+    // BracketSim legacy compatibility: Essential Extraction shortens this
+    // cooldown. time_value() reads the rank value straight from the rank
+    // table - -36 seconds at rank 11 - so no conduit spell is needed.
+    if ( p->legacy_conduits.has( 148 ) )
+      cooldown->duration += timespan_t::from_millis( p->legacy_conduits.value( 148 ) );
+
+    // Effect 2 is the channel's own 0.5s tick period.
+    base_tick_time = data().effectN( 2 ).period();
+    dot_duration = data().duration();
+    add_child( damage );
+  }
+
+  void execute() override
+  {
+    shaman_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NIGHT_FAE,
+                                            cooldown );
+
+    // Seeds of Rampant Growth works per damage PULSE - see tick().
+  }
+
+  void tick( dot_t* d ) override
+  {
+    shaman_spell_t::tick( d );
+    // The healing half of the transfusion is not modelled.
+    damage->execute_on_target( d->target );
+
+    // BracketSim legacy (27 Sep 2026): Seeds of Rampant Growth - "Each pulse of Fae Transfusion's damage effect
+    // reduces the cooldown of Feral Spirit by 9.0 sec and increases your critical strike chance by 4% for 15 sec"
+    // (Enhancement; 356218 effects 1/2/3 = Restoration 5 s / Elemental 6 s / Enhancement 9 s). The old port took one
+    // cooldown cut per CAST, with Elemental's number for every spec, and had no crit buff - it read as worth nothing.
+    if ( p()->shadowlands_legacy.seeds_of_rampant_growth )
+    {
+      const spell_data_t* seeds = p()->find_spell( 356218 );
+      switch ( p()->specialization() )
+      {
+        case SHAMAN_ENHANCEMENT:
+          if ( p()->cooldown.feral_spirits )
+            p()->cooldown.feral_spirits->adjust( -seeds->effectN( 3 ).time_value() );
+          break;
+        case SHAMAN_ELEMENTAL:
+          for ( auto cd : { p()->cooldown.fire_elemental, p()->cooldown.storm_elemental } )
+            if ( cd )
+              cd->adjust( -seeds->effectN( 2 ).time_value() );
+          break;
+        default:
+          break;  // Restoration's is Healing Stream Totem - healing, not modelled
+      }
+      p()->buff.legacy_seeds_of_rampant_growth->trigger();
+    }
   }
 };
 
@@ -6602,6 +7301,11 @@ struct chain_lightning_t : public chained_base_t
   {
     double m = shaman_spell_t::action_multiplier();
 
+    // BracketSim legacy compatibility: Chains of Devastation (runeforge 6988).
+    // Effect 2 of buff spell 336736 is the damage half.
+    if ( p()->buff.legacy_chains_of_devastation_chain_lightning->up() )
+      m *= 1.0 + p()->buff.legacy_chains_of_devastation_chain_lightning->data().effectN( 2 ).percent();
+
     if ( is_variant( spell_variant::PRIMORDIAL_STORM ) )
     {
       m *= p()->talent.primordial_storm->effectN( 2 ).percent();
@@ -6643,6 +7347,19 @@ struct chain_lightning_t : public chained_base_t
     return shaman_spell_t::consume_maelstrom_weapon();
   }
 
+  timespan_t execute_time() const override
+  {
+    timespan_t t = chained_base_t::execute_time();
+
+    // BracketSim legacy compatibility: Chains of Devastation (runeforge 6988).
+    // Effect 1 of buff spell 336736 is -100% cast time, so the armed Chain
+    // Lightning is instant.
+    if ( p()->buff.legacy_chains_of_devastation_chain_lightning->up() )
+      t *= 1.0 + p()->buff.legacy_chains_of_devastation_chain_lightning->data().effectN( 1 ).percent();
+
+    return t;
+  }
+
   void execute() override
   {
     if ( is_variant( spell_variant::NORMAL ) )
@@ -6650,6 +7367,15 @@ struct chain_lightning_t : public chained_base_t
       p()->buff.mid2_ele_4pc_builder->decrement();
     }
     chained_base_t::execute();
+
+    // BracketSim legacy compatibility: Chains of Devastation (runeforge 6988).
+    // Casting Chain Lightning spends its own half of the pair and arms the
+    // Chain Heal half.
+    if ( p()->shadowlands_legacy.chains_of_devastation )
+    {
+      p()->buff.legacy_chains_of_devastation_chain_heal->trigger();
+      p()->buff.legacy_chains_of_devastation_chain_lightning->expire();
+    }
 
     if ( is_variant( spell_variant::NORMAL ) && p()->specialization() == SHAMAN_ELEMENTAL )
     {
@@ -7083,6 +7809,20 @@ struct lava_burst_t : public shaman_spell_t
 {
   unsigned impact_flags;
 
+  // Legacy Azerite: Igneous Potential
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = shaman_spell_t::bonus_da( s );
+
+    if ( p()->legacy_azerite.igneous_potential.ok() )
+      b += p()->legacy_azerite.igneous_potential.value( 2 );
+
+    // Legacy Azerite: Lava Shock is spent on the next Lava Burst.
+    b += p()->buff.lava_shock->stack_value();
+
+    return b;
+  }
+
   lava_burst_t( shaman_t* player, unsigned type_, util::string_view options_str = {} )
     : shaman_spell_t( ::action_name( "lava_burst", type_ ), player, player->talent.lava_burst, type_ ),
       impact_flags()
@@ -7238,6 +7978,9 @@ struct lava_burst_t : public shaman_spell_t
 
   void execute() override
   {
+    // Legacy Azerite: Lava Shock.
+    p()->buff.lava_shock->expire();
+
     bool had_ancestral_swiftness_buff = p()->buff.ancestral_swiftness->check();
     shaman_spell_t::execute();
     bool ancestral_swiftness_consumed = had_ancestral_swiftness_buff && !p()->buff.ancestral_swiftness->check();
@@ -7394,6 +8137,18 @@ struct lightning_bolt_t : public shaman_spell_t
         ps_action->add_child( this );
       }
     }
+  }
+
+  // BracketSim legacy compatibility: High Voltage. The rank value is the CHANCE
+  // that Lightning Bolt's Maelstrom gain is doubled, not an amount.
+  double composite_maelstrom_gain_coefficient( const action_state_t* state ) const override
+  {
+    double c = shaman_spell_t::composite_maelstrom_gain_coefficient( state );
+
+    if ( p()->legacy_conduits.has( 102 ) && rng().roll( p()->legacy_conduits.percent( 102 ) ) )
+      c *= 2.0;
+
+    return c;
   }
 
   double action_multiplier() const override
@@ -7706,6 +8461,16 @@ struct elemental_blast_t : public shaman_spell_t
     if ( is_variant( spell_variant::NORMAL ) )
     {
       p()->buff.mid2_ele_4pc_spender->decrement();
+
+      // BracketSim legacy compatibility: Echoes of Great Sundering and
+      // Windspeaker's Lava Resurgence both hung off Earth Shock, which
+      // Elemental Blast replaced as the Maelstrom spender.
+      p()->buff.legacy_echoes_of_great_sundering->trigger();
+      if ( p()->shadowlands_legacy.windspeakers_lava_resurgence )
+      {
+        p()->buff.legacy_windspeakers_lava_resurgence->trigger();
+        p()->buff.lava_surge->trigger();
+      }
     }
 
     // [BUG] 2024-08-23 Supercharge works on Elemental Blast in-game
@@ -7891,6 +8656,30 @@ struct earthquake_base_t : public shaman_spell_t
           .target( execute_state->target )
           .duration( eq_duration )
           .action( rumble ) );
+
+    // BracketSim legacy compatibility: the conduit Shake the Foundations (103).
+    // Shadowlands picked a random target from the rumble's list; on the single
+    // target this harness measures that is the same target either way.
+    if ( p()->action.legacy_shake_the_foundations &&
+         rng().roll( p()->legacy_conduits.percent( 103 ) ) )
+    {
+      p()->action.legacy_shake_the_foundations->execute_on_target( execute_state->target );
+    }
+
+    // Legacy Azerite: Tectonic Thunder adds a one second physical pulse and can
+    // make the next Chain Lightning free.
+    if ( p()->legacy_azerite.tectonic_thunder.ok() && p()->action.legacy_tectonic_thunder )
+    {
+      make_event<ground_aoe_event_t>(
+          *sim, p(),
+          ground_aoe_params_t()
+            .target( execute_state->target )
+            .duration( 1_s )
+            .action( p()->action.legacy_tectonic_thunder ) );
+
+      if ( rng().roll( p()->legacy_azerite.tectonic_thunder.spell()->effectN( 2 ).percent() ) )
+        p()->buff.tectonic_thunder->trigger();
+    }
   }
 };
 
@@ -8233,6 +9022,27 @@ struct earth_shock_t : public shaman_spell_t
   {
       shaman_spell_t::execute();
       p()->buff.mid2_ele_4pc_spender->decrement();
+
+      // BracketSim legacy compatibility: Echoes of Great Sundering arms the next
+      // Earthquake, and Windspeaker's Lava Resurgence arms the next Lava Burst.
+      p()->buff.legacy_echoes_of_great_sundering->trigger();
+      if ( p()->shadowlands_legacy.windspeakers_lava_resurgence )
+      {
+        p()->buff.legacy_windspeakers_lava_resurgence->trigger();
+        p()->buff.lava_surge->trigger();
+      }
+
+      // BracketSim legacy compatibility: Pyroclastic Shock rolls to extend
+      // Flame Shock. The chance is rank scaled; the 12 second extension is
+      // effect 2 of spell 345594, absent from Midnight and read from the
+      // archived 9.2.7 client data.
+      if ( p()->legacy_conduits.has( 100 ) &&
+           rng().roll( p()->legacy_conduits.percent( 100 ) ) )
+      {
+        dot_t* fs = td( target )->dot.flame_shock;
+        if ( fs->is_ticking() )
+          fs->adjust_duration( timespan_t::from_millis( 12000 ) );
+      }
   }
 
   void impact( action_state_t* state ) override
@@ -8349,6 +9159,16 @@ public:
     parse_options( options_str );
     affected_by_master_of_the_elements = true;
 
+    // BracketSim legacy compatibility: Skybreaker's Fiery Demise (6989) has TWO
+    // halves and only the cooldown one was written. Effect 3 of 336734 is a
+    // flat critical strike bonus on Flame Shock itself - an Add Flat Modifier
+    // whose own affected-spell list names Flame Shock 188389 and 470411 - and
+    // it is the half that does damage. Without it the runeforge read flat on
+    // any character that does not summon an elemental for the other half to
+    // shorten.
+    if ( player->shadowlands_legacy.skybreakers_fiery_demise )
+      base_crit += player->find_spell( 336734 )->effectN( 3 ).percent();
+
     cooldown->duration = player->find_class_spell( "Flame Shock" )->cooldown();
     trigger_gcd = player->find_class_spell( "Flame Shock" )->gcd();
 
@@ -8420,6 +9240,28 @@ public:
   {
     shaman_spell_t::tick( d );
 
+    // Legacy Azerite: Lava Shock.
+    if ( p()->legacy_azerite.lava_shock.ok() )
+      p()->buff.lava_shock->trigger();
+
+    // BracketSim legacy compatibility: Skybreaker's Fiery Demise. Only the
+    // critical Flame Shock ticks count.
+    if ( p()->shadowlands_legacy.skybreakers_fiery_demise && d->state->result == RESULT_CRIT )
+    {
+      const spell_data_t* sfd = p()->find_spell( 336734 );
+      p()->cooldown.fire_elemental->adjust( -timespan_t::from_millis( sfd->effectN( 1 ).base_value() ), false );
+      p()->cooldown.storm_elemental->adjust( -timespan_t::from_millis( sfd->effectN( 2 ).base_value() ), false );
+    }
+
+    // BracketSim legacy compatibility: Primal Lava Actuators. Every Flame Shock
+    // tick sharpens the next Lava Lash and pulls its cooldown forward.
+    if ( p()->shadowlands_legacy.primal_lava_actuators )
+    {
+      p()->buff.legacy_primal_lava_actuators->trigger();
+      p()->cooldown.lava_lash->adjust(
+          -timespan_t::from_seconds( p()->find_spell( 335895 )->effectN( 2 ).base_value() ), false );
+    }
+
     if ( p()->spec.lava_surge->ok() )
     {
       double active_flame_shocks = p()->get_active_dots( d );
@@ -8432,6 +9274,18 @@ public:
       if ( p()->spec.restoration_shaman->ok() )
       {
         proc_chance += p()->spec.restoration_shaman->effectN( 7 ).percent();
+      }
+
+      // Legacy Azerite: Igneous Potential sets a floor under the Lava Surge
+      // chance. Battle for Azeroth replaced the chance outright, but Midnight's
+      // ramping chance already climbs past this trait's 18%, and the tooltip
+      // reads "increased to", so the higher of the two is used.
+      if ( p()->legacy_azerite.igneous_potential.ok() )
+      {
+        double floor_chance = p()->specialization() == SHAMAN_RESTORATION
+                                  ? p()->legacy_azerite.igneous_potential.spell_ref().effectN( 4 ).percent()
+                                  : p()->legacy_azerite.igneous_potential.spell_ref().effectN( 3 ).percent();
+        proc_chance = std::max( proc_chance, floor_chance );
       }
 
       if ( rng().roll( proc_chance ) )
@@ -8498,6 +9352,19 @@ struct frost_shock_t : public shaman_spell_t
     {
       track_cd_waste = true;
     }
+  }
+
+  // BracketSim legacy compatibility: Chilled to the Core. The rank value is the
+  // CHANCE for Frost Shock to grant Maelstrom Weapon, not a damage figure. The
+  // number of stacks lives in effect 2 of the conduit spell, which is absent
+  // from current data, so Shadowlands' own value of 4 is used and marked here
+  // rather than being silently invented.
+  void impact( action_state_t* s ) override
+  {
+    shaman_spell_t::impact( s );
+
+    if ( p()->legacy_conduits.has( 112 ) && rng().roll( p()->legacy_conduits.percent( 112 ) ) )
+      p()->buff.maelstrom_weapon->trigger( 4 );
   }
 };
 
@@ -8958,6 +9825,31 @@ struct chain_heal_t : public shaman_heal_t
       m *= 1.0 + p()->spec.riptide->effectN( 3 ).percent();
 
     return m;
+  }
+
+  // BracketSim legacy compatibility: Chains of Devastation (runeforge 6988).
+  // This is the half a damage harness can see: Chain Heal arms the next Chain
+  // Lightning. The healing half of the pair is modelled too, for symmetry, but
+  // nothing here measures it.
+  timespan_t execute_time() const override
+  {
+    timespan_t t = shaman_heal_t::execute_time();
+
+    if ( p()->buff.legacy_chains_of_devastation_chain_heal->up() )
+      t *= 1.0 + p()->buff.legacy_chains_of_devastation_chain_heal->data().effectN( 1 ).percent();
+
+    return t;
+  }
+
+  void execute() override
+  {
+    shaman_heal_t::execute();
+
+    if ( p()->shadowlands_legacy.chains_of_devastation )
+    {
+      p()->buff.legacy_chains_of_devastation_chain_lightning->trigger();
+      p()->buff.legacy_chains_of_devastation_chain_heal->expire();
+    }
   }
 };
 
@@ -10342,6 +11234,16 @@ action_t* shaman_t::create_action( util::string_view name, util::string_view opt
     return new ascendance_t( this, "ascendance", options_str );
   if ( name == "auto_attack" )
     return new auto_attack_t( this, options_str );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  if ( name == "vesper_totem" && legacy_covenant.vesper_totem->ok() )
+    return new legacy_vesper_totem_t( this, options_str );
+  if ( name == "chain_harvest" && legacy_covenant.chain_harvest->ok() )
+    return new legacy_chain_harvest_t( this, options_str );
+  if ( name == "primordial_wave" && legacy_covenant.primordial_wave->ok() )
+    return new legacy_primordial_wave_t( this, options_str );
+  if ( name == "fae_transfusion" && legacy_covenant.fae_transfusion->ok() )
+    return new legacy_fae_transfusion_t( this, options_str );
   if ( name == "bloodlust" )
     return new bloodlust_t( this, options_str );
   if ( name == "capacitor_totem" )
@@ -10683,6 +11585,10 @@ void shaman_t::create_actions()
       variant_flag( spell_variant::DEEPLY_ROOTED_ELEMENTS ) );
   }
 
+  // BracketSim legacy compatibility: Deeptremor Stone (6986).
+  if ( shadowlands_legacy.deeptremor_stone )
+    action.legacy_deeptremor_eq = new earthquake_damage_t( this );
+
   if ( spell.tww3_stormbringer_2pc->ok() )
   {
     action.set_ascendance = new ascendance_dre_t( this, variant_flag( spell_variant::TWW3_SPELL ) );
@@ -10705,6 +11611,26 @@ void shaman_t::create_actions()
   {
     action.stormflurry_ss = new stormstrike_t( this, "", strike_variant::STORMFLURRY );
     action.stormflurry_ws = new windstrike_t( this, "", strike_variant::STORMFLURRY );
+  }
+
+  // Legacy Azerite
+  if ( legacy_azerite.lightning_conduit.ok() )
+    action.legacy_lightning_conduit = new legacy_lightning_conduit_zap_t( this );
+
+  if ( legacy_azerite.tectonic_thunder.ok() )
+    action.legacy_tectonic_thunder = new legacy_tectonic_thunder_damage_t( this );
+
+  // BracketSim legacy compatibility: the conduit Shake the Foundations (103)
+  // gives Earthquake a chance to throw a free Chain Lightning. Shadowlands also
+  // had a Lava Beam version for Ascendance; only the Chain Lightning half is
+  // ported, because that is the one every Elemental shaman actually sees.
+  if ( legacy_conduits.has( 103 ) )
+  {
+    auto stf = new chain_lightning_t( this, "shake_the_foundations", talent.chain_lightning,
+                                      variant_flag( spell_variant::NORMAL ), "" );
+    stf->background = true;
+    stf->base_costs[ RESOURCE_MANA ] = 0;
+    action.legacy_shake_the_foundations = stf;
   }
 
   if ( talent.fusion_of_elements.ok() )
@@ -10771,6 +11697,15 @@ void shaman_t::create_actions()
 
   // Generic Actions
   action.flame_shock = new flame_shock_t( this, variant_flag( spell_variant::NORMAL ) );
+
+  // BracketSim legacy compatibility: Vesper Totem's damage pulse.
+  if ( legacy_covenant.vesper_totem->ok() )
+  {
+    action.legacy_vesper_totem_damage = new legacy_vesper_totem_damage_t( this );
+
+    if ( shadowlands_legacy.raging_vesper_vortex )
+      action.legacy_raging_vesper_vortex = new legacy_raging_vesper_vortex_t( this );
+  }
   action.flame_shock->background = true;
   action.flame_shock->cooldown = get_cooldown( "flame_shock_secondary" );
   action.flame_shock->base_costs[ RESOURCE_MANA ] = 0;
@@ -10823,6 +11758,14 @@ void shaman_t::create_options()
     return true;
   } ) );
 
+  // Shaman was the only class without this option: a profile setting
+  // shaman.legacy_shadowlands_enabled got a "Trivial: Unknown option"
+  // warning and nothing else. The flag itself defaults to true, so
+  // nothing was broken, but it could not be turned OFF either.
+  add_option( opt_bool( "shaman.legacy_shadowlands_enabled",
+                        shadowlands_legacy.legacy_shadowlands_enabled ) );
+  add_option( opt_string( "shaman.legacy_covenant", legacy_covenant.chosen ) );
+  add_option( opt_string( "shaman.legacy_conduits", legacy_conduits.option ) );
   add_option( opt_obsoleted( "shaman.chain_harvest_allies" ) );
   add_option( opt_obsoleted( "shaman.dre_flat_chance" ) );
   add_option( opt_obsoleted( "shaman.dre_forced_failures" ) );
@@ -11101,6 +12044,97 @@ const spell_data_t* shaman_t::conditional_spell_lookup( bool fn, int id )
 
 void shaman_t::init_spells()
 {
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+  legacy_azerite.legacy_echo_of_the_elementals = find_azerite_spell( "Echo of the Elementals" );
+  legacy_azerite.igneous_potential   = find_azerite_spell( "Igneous Potential" );
+  legacy_azerite.lava_shock          = find_azerite_spell( "Lava Shock" );
+
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
+  // off the bonus id the original legendary item carried.
+  auto legacy = [ this ]( int bonus_id ) {
+    return shadowlands_legacy.legacy_shadowlands_enabled &&
+           range::any_of( items, [ bonus_id ]( const item_t& item ) {
+             return range::contains( item.parsed.bonus_id, bonus_id );
+           } );
+  };
+
+  shadowlands_legacy.ancestral_reminder           = legacy( 6985 );
+  shadowlands_legacy.chains_of_devastation        = legacy( 6988 );
+  shadowlands_legacy.deeply_rooted_elements       = legacy( 6987 );
+  shadowlands_legacy.deeptremor_stone             = legacy( 6986 );
+  shadowlands_legacy.doom_winds                   = legacy( 6993 );
+  shadowlands_legacy.echoes_of_great_sundering    = legacy( 6991 );
+  shadowlands_legacy.elemental_equilibrium        = legacy( 6990 );
+  shadowlands_legacy.legacy_of_the_frost_witch    = legacy( 6994 );
+  shadowlands_legacy.primal_lava_actuators        = legacy( 6996 );
+  shadowlands_legacy.skybreakers_fiery_demise     = legacy( 6989 );
+  shadowlands_legacy.windspeakers_lava_resurgence = legacy( 6992 );
+  shadowlands_legacy.witch_doctors_wolf_bones     = legacy( 6995 );
+  // BracketSim legacy compatibility: Unity (bonus 8128), the 9.2 legendary whose
+  // effect is whichever covenant legendary matches the covenant you are in. A
+  // real Unity item carries 8128 and NOT the legendary's own bonus id, so a
+  // power keyed only off its own id misses every Unity wearer. Both routes are
+  // checked here, and Unity opens only the one door its covenant names.
+  auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
+  {
+    return legacy( bonus_id ) ||
+           ( legacy( 8128 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
+  };
+
+  shadowlands_legacy.elemental_conduit            = legacy_unity( 7709, "venthyr" );
+  shadowlands_legacy.raging_vesper_vortex         = legacy_unity( 7722, "kyrian" );
+  shadowlands_legacy.seeds_of_rampant_growth      = legacy_unity( 7708, "night_fae" );
+  shadowlands_legacy.splintered_elements          = legacy_unity( 7570, "necrolord" );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  auto covenant = [ this ]( std::string_view name, unsigned id ) {
+    return ( shadowlands_legacy.legacy_shadowlands_enabled &&
+             util::str_compare_ci( legacy_covenant.chosen, name ) )
+               ? find_spell( id )
+               : spell_data_t::not_found();
+  };
+
+  legacy_covenant.vesper_totem    = covenant( "kyrian", 324386 );
+  legacy_covenant.chain_harvest   = covenant( "venthyr", 320674 );
+  legacy_covenant.primordial_wave = covenant( "necrolord", 326059 );
+  legacy_covenant.fae_transfusion = covenant( "night_fae", 328923 );
+
+  // BracketSim legacy compatibility: turn the id:rank option string into
+  // ranks. Without this the option parses as a string and is then silently
+  // ignored - has() returns false for everything and the conduits do nothing.
+  legacy_conduits.parse();
+
+  // BracketSim legacy compatibility: report the covenant abilities this
+  // actor can cast, so player_t::init_actions() can put them into the
+  // rotation. SimulationCraft's own action lists never press them.
+  if ( legacy_covenant.vesper_totem->ok() )
+    legacy_apl_actions.emplace_back( "vesper_totem" );
+  if ( legacy_covenant.chain_harvest->ok() )
+    legacy_apl_actions.emplace_back( "chain_harvest" );
+  if ( legacy_covenant.primordial_wave->ok() )
+    legacy_apl_actions.emplace_back( "primordial_wave" );
+  if ( legacy_covenant.fae_transfusion->ok() )
+    legacy_apl_actions.emplace_back( "fae_transfusion" );
+
+  legacy_covenant.vesper_totem_damage =
+      legacy_covenant.vesper_totem->ok() ? find_spell( 324520 ) : spell_data_t::not_found();
+  legacy_covenant.chain_harvest_damage =
+      legacy_covenant.chain_harvest->ok() ? find_spell( 320752 ) : spell_data_t::not_found();
+  legacy_covenant.primordial_wave_damage =
+      legacy_covenant.primordial_wave->ok() ? find_spell( 327162 ) : spell_data_t::not_found();
+  legacy_covenant.fae_transfusion_damage =
+      legacy_covenant.fae_transfusion->ok() ? find_spell( 328928 ) : spell_data_t::not_found();
+  legacy_azerite.tectonic_thunder    = find_azerite_spell( "Tectonic Thunder" );
+  legacy_azerite.lightning_conduit   = find_azerite_spell( "Lightning Conduit" );
+  legacy_azerite.primal_primer       = find_azerite_spell( "Primal Primer" );
+  legacy_azerite.roiling_storm       = find_azerite_spell( "Roiling Storm" );
+  legacy_azerite.legacy_storms_eye   = find_azerite_spell( "Storm's Eye" );
+  legacy_azerite.strength_of_earth   = find_azerite_spell( "Strength of Earth" );
+  legacy_azerite.thunderaans_fury    = find_azerite_spell( "Thunderaan's Fury" );
+  legacy_azerite.ancestral_resonance = find_azerite_spell( "Ancestral Resonance" );
+  legacy_azerite.natural_harmony     = find_azerite_spell( "Natural Harmony" );
+  legacy_azerite.synapse_shock       = find_azerite_spell( "Synapse Shock" );
+
   //
   // Generic spells
   //
@@ -11552,12 +12586,30 @@ void shaman_t::summon_elemental( elemental type, timespan_t override_duration )
       break;
   }
 
+  timespan_t duration = override_duration > 0_ms ? override_duration
+                                                 : elemental_buff->buff_duration();
+
+  // BracketSim legacy compatibility: the conduit Call of Flame (104) lengthens
+  // the Fire and Storm Elementals. Shadowlands did NOT lengthen the Earth
+  // Elemental, so neither does this - including it would make the conduit worth
+  // more than it ever was.
+  //
+  // Call of Flame's other half, a Lava Burst modifier, went through
+  // apply_affecting_conduit and reads the conduit spell's own effects. Those
+  // are not in this build, so that half is not ported and cannot be.
+  if ( legacy_conduits.has( 104 ) &&
+       ( type == elemental::GREATER_FIRE || type == elemental::PRIMAL_FIRE ||
+         type == elemental::GREATER_STORM || type == elemental::PRIMAL_STORM ) )
+  {
+    duration *= 1.0 + legacy_conduits.percent( 104 );
+  }
+
   if ( spawner_ptr->n_active_pets() > 0 )
   {
     timespan_t new_duration = spawner_ptr->active_pet()->expiration->remains();
-    new_duration += override_duration > 0_ms ? override_duration : elemental_buff->buff_duration();
+    new_duration += duration;
 
-    elemental_buff->extend_duration( override_duration > 0_ms ? override_duration : elemental_buff->buff_duration() );
+    elemental_buff->extend_duration( duration );
     spawner_ptr->active_pet()->expiration->reschedule( new_duration );
     for (auto action : spawner_ptr->active_pet()->action_list)
     {
@@ -11566,8 +12618,8 @@ void shaman_t::summon_elemental( elemental type, timespan_t override_duration )
   }
   else
   {
-    elemental_buff->trigger( override_duration > 0_ms ? override_duration : elemental_buff->buff_duration() );
-    spawner_ptr->spawn( override_duration > 0_ms ? override_duration : elemental_buff->buff_duration() );
+    elemental_buff->trigger( duration );
+    spawner_ptr->spawn( duration );
   }
 }
 
@@ -11767,6 +12819,21 @@ void shaman_t::consume_maelstrom_weapon( const action_state_t* state, int stacks
   {
     buff.maelstrom_weapon->decrement( stacks );
 
+    // BracketSim legacy compatibility: Legacy of the Frost Witch. Effect 1 of
+    // runeforge spell 335899 is the five-stack threshold; it is absent from
+    // Midnight and read from the archived 9.2.7 client data.
+    if ( shadowlands_legacy.legacy_of_the_frost_witch )
+    {
+      legacy_lotfw_counter += as<unsigned>( stacks );
+      const unsigned threshold = 5;
+      if ( legacy_lotfw_counter >= threshold )
+      {
+        legacy_lotfw_counter -= threshold;
+        buff.legacy_of_the_frost_witch->trigger();
+        cooldown.strike->reset( false );
+      }
+    }
+
     trigger_tempest( stacks );
 
     if ( talent.unlimited_power.ok() )
@@ -11855,6 +12922,40 @@ void shaman_t::consume_maelstrom_weapon( const action_state_t* state, int stacks
   }
 }
 
+// Legacy Azerite: Natural Harmony gives a stat buff per damage school used.
+void shaman_t::trigger_legacy_natural_harmony( const action_state_t* state )
+{
+  if ( !legacy_azerite.natural_harmony.ok() )
+    return;
+
+  if ( !state->action->harmful || state->result_amount <= 0 )
+    return;
+
+  auto school = state->action->get_school();
+
+  if ( dbc::is_school( school, SCHOOL_FIRE ) )
+    buff.legacy_natural_harmony_fire->trigger();
+
+  if ( dbc::is_school( school, SCHOOL_NATURE ) )
+    buff.legacy_natural_harmony_nature->trigger();
+
+  if ( dbc::is_school( school, SCHOOL_FROST ) )
+    buff.legacy_natural_harmony_frost->trigger();
+}
+
+// Legacy Azerite: Ancestral Resonance is an RPPM Mastery buff that procs far
+// more often while Bloodlust is up.
+void shaman_t::trigger_legacy_ancestral_resonance( const action_state_t* state )
+{
+  if ( !legacy_azerite.ancestral_resonance.ok() )
+    return;
+
+  if ( state->action->background || !state->action->harmful || state->result_amount <= 0 )
+    return;
+
+  buff.legacy_ancestral_resonance->trigger();
+}
+
 void shaman_t::trigger_maelstrom_gain( double maelstrom_gain, gain_t* gain )
 {
   if ( maelstrom_gain <= 0 )
@@ -11894,6 +12995,26 @@ void shaman_t::generate_maelstrom_weapon( const action_t* action, int stacks )
   }
 
   buff.maelstrom_weapon->trigger( stacks );
+
+  // BracketSim legacy compatibility: Witch Doctor's Wolf Bones. Every Maelstrom
+  // Weapon stack gained pulls Feral Spirit forward.
+  //
+  // Two things were wrong here and each hid the other. cooldown.feral_spirits
+  // was never assigned, so the guard below was false and this never ran; and
+  // the 2000 in effect 2 is MILLISECONDS - the spell's own description reads
+  // ${$m2/1000} sec - so from_seconds() would have taken 2000 seconds off per
+  // stack once the guard opened. time_value() is the reading that matches the
+  // description.
+  //
+  // The runeforge's other half, three flat points of Maelstrom Weapon proc
+  // chance, is deliberately not ported: Midnight grants Maelstrom Weapon a
+  // fixed number of stacks per ability instead of rolling for it, so there is
+  // no proc chance in this build to add to.
+  if ( shadowlands_legacy.witch_doctors_wolf_bones && stacks > 0 && cooldown.feral_spirits )
+  {
+    cooldown.feral_spirits->adjust(
+        -find_spell( 335897 )->effectN( 2 ).time_value() * stacks, false );
+  }
 }
 
 void shaman_t::generate_maelstrom_weapon( const action_state_t* state, int stacks )
@@ -11948,7 +13069,11 @@ void shaman_t::trigger_windfury_weapon( const action_state_t* state, double over
 
     trigger_secondary_ability( state, a );
 
-    double chance = talent.unruly_winds->effectN( 1 ).percent();
+    // BracketSim legacy compatibility: Unruly Winds survived as a talent, and
+    // the conduit of the same name adds to the same third-attack chance. They
+    // stack rather than replace, which is what having both meant in game.
+    double chance = talent.unruly_winds->effectN( 1 ).percent() +
+                    legacy_conduits.percent( 109 );
 
     if ( rng().roll( chance ) )
     {
@@ -11979,6 +13104,12 @@ void shaman_t::trigger_flametongue_weapon( const action_state_t* state )
   if ( buff.ghost_wolf->check() )
   {
     return;
+  }
+
+  // Legacy Azerite: Primal Primer stacks on the same hits Flametongue procs from.
+  if ( legacy_azerite.primal_primer.enabled() && state->result_amount > 0 )
+  {
+    get_target_data( state->target )->debuff.legacy_primal_primer->trigger();
   }
 
   flametongue->set_target( state->target );
@@ -12595,9 +13726,122 @@ void shaman_t::create_buffs()
 {
   parse_player_effects_t::create_buffs();
 
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite trait buffs.
+  buff.synapse_shock = make_buff<stat_buff_t>( this, "synapse_shock", find_spell( 277960 ) )
+    ->add_stat( STAT_INTELLECT, legacy_azerite.synapse_shock.value() )
+    ->add_stat( STAT_AGILITY, legacy_azerite.synapse_shock.value() )
+    ->set_trigger_spell( legacy_azerite.synapse_shock );
+  buff.legacy_natural_harmony_fire = make_buff<stat_buff_t>( this, "legacy_natural_harmony_fire", find_spell( 279028 ) )
+                                         ->add_stat( STAT_CRIT_RATING, legacy_azerite.natural_harmony.value() );
+  buff.legacy_natural_harmony_frost = make_buff<stat_buff_t>( this, "legacy_natural_harmony_frost", find_spell( 279029 ) )
+                                          ->add_stat( STAT_MASTERY_RATING, legacy_azerite.natural_harmony.value() );
+  buff.legacy_natural_harmony_nature = make_buff<stat_buff_t>( this, "legacy_natural_harmony_nature", find_spell( 279033 ) )
+                                           ->add_stat( STAT_HASTE_RATING, legacy_azerite.natural_harmony.value() );
+  // Ancestral Resonance procs on RPPM, at a much higher rate under Bloodlust.
+  buff.legacy_ancestral_resonance = make_buff<stat_buff_t>( this, "legacy_ancestral_resonance", find_spell( 277943 ) )
+                                        ->add_stat( STAT_MASTERY_RATING, legacy_azerite.ancestral_resonance.value( 1 ) )
+                                        ->add_invalidate( CACHE_MASTERY )
+                                        ->set_rppm( rppm_scale_e::RPPM_HASTE, 1.0 );
+
+  // Roiling Storm hands out a free Stormbringer proc on a fixed timer. Spell
+  // 279513 is the hidden driver and carries the twenty second period.
+  {
+    const spell_data_t* rs_driver = find_spell( 279513 );
+    buff.legacy_roiling_storm_driver =
+        make_buff( this, "legacy_roiling_storm_driver", rs_driver )
+            ->set_period( rs_driver->internal_cooldown() )
+            ->set_quiet( true );
+
+    if ( legacy_azerite.roiling_storm.ok() )
+    {
+      buff.legacy_roiling_storm_driver->set_tick_callback(
+          [ this ]( buff_t*, int, timespan_t ) {
+            buff.stormsurge->trigger( buff.stormsurge->max_stack() );
+            cooldown.strike->reset( true );
+          } );
+
+      register_combat_begin( [ this ]( player_t* ) {
+        buff.legacy_roiling_storm_driver->trigger();
+        buff.stormsurge->trigger( buff.stormsurge->max_stack() );
+      } );
+    }
+  }
+
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+  buff.legacy_chains_of_devastation_chain_lightning =
+      make_buff( this, "legacy_chains_of_devastation_chain_lightning", find_spell( 336736 ) )
+          ->set_chance( shadowlands_legacy.chains_of_devastation ? 1.0 : 0.0 );
+  buff.legacy_chains_of_devastation_chain_heal =
+      make_buff( this, "legacy_chains_of_devastation_chain_heal", find_spell( 336737 ) )
+          ->set_chance( shadowlands_legacy.chains_of_devastation ? 1.0 : 0.0 );
+  buff.legacy_echoes_of_great_sundering =
+      make_buff( this, "legacy_echoes_of_great_sundering", find_spell( 336217 ) )
+          ->set_default_value_from_effect( 2 )
+          ->set_chance( shadowlands_legacy.echoes_of_great_sundering ? 1.0 : 0.0 );
+  buff.legacy_elemental_equilibrium =
+      make_buff( this, "legacy_elemental_equilibrium", find_spell( 347348 ) )
+          ->set_default_value_from_effect( 1 )
+          ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
+          ->set_chance( shadowlands_legacy.elemental_equilibrium ? 1.0 : 0.0 );
+  // The three school trackers and the 30 second lockout. All four spells are
+  // in Midnight's data with their Shadowlands durations intact.
+  buff.legacy_elemental_equilibrium_fire =
+      make_buff( this, "legacy_elemental_equilibrium_fire", find_spell( 336733 ) )
+          ->set_chance( shadowlands_legacy.elemental_equilibrium ? 1.0 : 0.0 );
+  buff.legacy_elemental_equilibrium_frost =
+      make_buff( this, "legacy_elemental_equilibrium_frost", find_spell( 336731 ) )
+          ->set_chance( shadowlands_legacy.elemental_equilibrium ? 1.0 : 0.0 );
+  buff.legacy_elemental_equilibrium_nature =
+      make_buff( this, "legacy_elemental_equilibrium_nature", find_spell( 336732 ) )
+          ->set_chance( shadowlands_legacy.elemental_equilibrium ? 1.0 : 0.0 );
+  buff.legacy_elemental_equilibrium_debuff =
+      make_buff( this, "legacy_elemental_equilibrium_debuff", find_spell( 347349 ) )
+          ->set_chance( shadowlands_legacy.elemental_equilibrium ? 1.0 : 0.0 );
+  buff.legacy_of_the_frost_witch =
+      make_buff( this, "legacy_of_the_frost_witch", find_spell( 335901 ) )
+          ->set_default_value_from_effect( 1 )
+          ->set_chance( shadowlands_legacy.legacy_of_the_frost_witch ? 1.0 : 0.0 );
+  buff.legacy_primal_lava_actuators =
+      make_buff( this, "legacy_primal_lava_actuators", find_spell( 335896 ) )
+          ->set_default_value_from_effect( 1 )
+          ->set_chance( shadowlands_legacy.primal_lava_actuators ? 1.0 : 0.0 );
+  buff.legacy_windspeakers_lava_resurgence =
+      make_buff( this, "legacy_windspeakers_lava_resurgence", find_spell( 336065 ) )
+          ->set_default_value_from_effect( 1 )
+          ->set_chance( shadowlands_legacy.windspeakers_lava_resurgence ? 1.0 : 0.0 );
+
+  buff.lava_shock = make_buff( this, "lava_shock", legacy_azerite.lava_shock )
+    ->set_default_value( legacy_azerite.lava_shock.value() )
+    ->set_trigger_spell( find_spell( 273453 ) )
+    ->set_max_stack( std::max( 1, as<int>( find_spell( 273453 )->max_stacks() ) ) )
+    ->set_duration( find_spell( 273453 )->duration() );
+  buff.tectonic_thunder = make_buff( this, "tectonic_thunder", find_spell( 286976 ) )
+    ->set_default_value( find_spell( 286976 )->effectN( 1 ).percent() );
+
   //
   // Shared
   //
+  // BracketSim legacy compatibility: Vesper Totem stands for 30s and holds the
+  // three damage charges in its own effect 2; each charge is spent by a cast.
+  // BracketSim legacy compatibility: Splintered Elements. The haste is in the
+  // runeforge's own effect 1 and the window is the 12s on spell 354648.
+  buff.legacy_splintered_elements =
+      make_buff( this, "splintered_elements", find_spell( 354648 ) )
+          ->set_default_value( find_spell( 354647 )->effectN( 1 ).percent() )
+          ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+          ->set_chance( shadowlands_legacy.splintered_elements ? 1.0 : 0.0 );
+
+  buff.legacy_seeds_of_rampant_growth =
+      make_buff( this, "seeds_of_rampant_growth", find_spell( 358945 ) )
+          ->set_default_value_from_effect( 1 )
+          ->set_pct_buff_type( STAT_PCT_BUFF_CRIT )
+          ->set_chance( shadowlands_legacy.seeds_of_rampant_growth ? 1.0 : 0.0 );
+
+  buff.legacy_vesper_totem =
+      make_buff( this, "vesper_totem", legacy_covenant.vesper_totem )
+          ->set_max_stack( std::max( 1, as<int>( legacy_covenant.vesper_totem->effectN( 2 ).base_value() ) ) )
+          ->set_chance( legacy_covenant.vesper_totem->ok() ? 1.0 : 0.0 );
+
   buff.ascendance = new ascendance_buff_t( this );
   buff.ascendance->set_stack_change_callback( [ this ]( buff_t*, int, int new_ ) {
     if ( new_ == 0 )
@@ -12998,9 +14242,60 @@ void shaman_t::init_uptimes()
 
 // shaman_t::init_assessors =================================================
 
+// BracketSim legacy compatibility: Elemental Equilibrium (runeforge 6990).
+// Every direct hit of Fire, Frost or Nature arms that school; once all three
+// are armed the buff goes up and a thirty second lockout starts. Flametongue
+// (10444) is excluded, which is the one exception Shadowlands recorded.
+void shaman_t::trigger_legacy_elemental_equilibrium( const action_state_t* state )
+{
+  if ( state->action->id == 10444 )
+    return;
+
+  auto school = state->action->get_school();
+
+  if ( !dbc::is_school( school, SCHOOL_FIRE ) && !dbc::is_school( school, SCHOOL_NATURE ) &&
+       !dbc::is_school( school, SCHOOL_FROST ) )
+    return;
+
+  if ( buff.legacy_elemental_equilibrium_debuff->check() )
+    return;
+
+  if ( dbc::is_school( school, SCHOOL_FIRE ) )
+    buff.legacy_elemental_equilibrium_fire->trigger();
+
+  if ( dbc::is_school( school, SCHOOL_FROST ) )
+    buff.legacy_elemental_equilibrium_frost->trigger();
+
+  if ( dbc::is_school( school, SCHOOL_NATURE ) )
+    buff.legacy_elemental_equilibrium_nature->trigger();
+
+  if ( buff.legacy_elemental_equilibrium_fire->up() &&
+       buff.legacy_elemental_equilibrium_frost->up() &&
+       buff.legacy_elemental_equilibrium_nature->up() )
+  {
+    buff.legacy_elemental_equilibrium->trigger();
+    buff.legacy_elemental_equilibrium_debuff->trigger();
+    buff.legacy_elemental_equilibrium_fire->expire();
+    buff.legacy_elemental_equilibrium_frost->expire();
+    buff.legacy_elemental_equilibrium_nature->expire();
+  }
+}
+
 void shaman_t::init_assessors()
 {
   parse_player_effects_t::init_assessors();
+
+  // BracketSim legacy compatibility: Elemental Equilibrium watches every direct
+  // hit, which is why it hangs off an assessor rather than off any one action.
+  if ( shadowlands_legacy.elemental_equilibrium )
+  {
+    assessor_out_damage.add( assessor::LEECH + 10,
+      [ this ]( result_amount_type type, action_state_t* state ) {
+        if ( type == result_amount_type::DMG_DIRECT && state->result_amount > 0 )
+          trigger_legacy_elemental_equilibrium( state );
+        return assessor::CONTINUE;
+      } );
+  }
 }
 
 // shaman_t::init_rng =======================================================
@@ -13132,6 +14427,21 @@ void shaman_t::init_finished()
   parse_player_effects_t::init_finished();
 
   apply_player_effects();
+
+  // BracketSim legacy compatibility: Ancestral Reminder (6985). Effect 1 of
+  // 336741 is the extra duration and effect 2 the extra haste, both read here.
+  //
+  // This has to happen in init_finished, NOT in create_buffs. buffs.bloodlust
+  // belongs to player_t and is built after the class module's create_buffs, so
+  // the first version of this guarded on the pointer being non-null and then
+  // silently did nothing - bloodlust uptime read 13.52 identically with and
+  // without the runeforge.
+  if ( shadowlands_legacy.ancestral_reminder && buffs.bloodlust )
+  {
+    auto rune = find_spell( 336741 );
+    buffs.bloodlust->modify_duration( rune->effectN( 1 ).time_value() );
+    buffs.bloodlust->modify_default_value( rune->effectN( 2 ).percent() );
+  }
 }
 
 bool shaman_t::validate_actor()
@@ -13849,6 +15159,42 @@ void shaman_t::invalidate_cache( cache_e c )
 
 // shaman_t::reset ==========================================================
 
+
+// BracketSim legacy compatibility: Vision of Perfection (Heart of Azeroth major
+// essence). The engine procs it and calls this; each spec fires its signature
+// cooldown early, at the fraction of its duration the essence grants.
+void shaman_t::vision_of_perfection_proc()
+{
+  auto essence = find_azerite_essence( "Vision of Perfection" );
+  if ( !essence.enabled() )
+    return;
+
+  double mult = essence.spell( 1u )->effectN( 1 ).percent() +
+                essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
+
+  buff_t* window = nullptr;
+  switch ( specialization() )
+  {
+    case SHAMAN_ELEMENTAL:
+      window = buff.ascendance;
+      break;
+    case SHAMAN_ENHANCEMENT:
+      window = buff.ascendance;
+      break;
+    default:
+      break;
+  }
+
+  if ( !window || mult <= 0 )
+    return;
+
+  timespan_t dur = window->buff_duration() * mult;
+  if ( window->check() )
+    window->extend_duration( dur );
+  else
+    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+}
+
 void shaman_t::reset()
 {
   parse_player_effects_t::reset();
@@ -14531,6 +15877,12 @@ shaman_t::pets_t::pets_t( shaman_t* s ) :
     } ),
 
     ancestor( "ancestor", s, []( shaman_t* s ) { return new pet::ancestor_t( s ); } ),
+
+    // Legacy Azerite: Echo of the Elementals.
+    legacy_ember_elemental( "ember_elemental", s,
+                            []( shaman_t* s ) { return new pet::legacy_ember_elemental_t( s ); } ),
+    legacy_spark_elemental( "spark_elemental", s,
+                            []( shaman_t* s ) { return new pet::legacy_spark_elemental_t( s ); } ),
 
     fire_wolves( "fiery_wolf", s, []( shaman_t* s ) { return new pet::fire_wolf_t( s ); } ),
     lightning_wolves( "lightning_wolf", s, []( shaman_t* s ) { return new pet::lightning_wolf_t( s ); } ),

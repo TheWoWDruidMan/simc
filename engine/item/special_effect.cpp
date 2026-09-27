@@ -304,11 +304,6 @@ int special_effect_t::max_stack() const
 
 stat_buff_t* special_effect_t::initialize_stat_buff() const
 {
-  if ( buff_t* b = buff_t::find( player, name() ) )
-  {
-    return debug_cast<stat_buff_t*>( b );
-  }
-
   const spell_data_t* spell_data = spell_data_t::nil();
   // Setup the spell for the stat buff
   if ( trigger()->id() > 0 )
@@ -316,8 +311,42 @@ stat_buff_t* special_effect_t::initialize_stat_buff() const
   else if ( spell_id > 0 )
     spell_data = driver();
 
+  // BracketSim: two DIFFERENT items can carry proc spells that share a NAME.
+  // Solace of the Defeated is item 47041 (normal, trigger 67696) and item 47059
+  // (heroic, trigger 67750), and both triggers are called "Energized", so
+  // name() tokenizes both to "energized" - the driver is Passive+Hidden, so
+  // name() falls through to the trigger's name. The lookup below then handed
+  // the second item the buff the first one had already made, and the report
+  // showed ONE energized buff whose refresh count was the sum of both trinkets.
+  // Worse, the surviving buff is whichever item initialized first, so wearing
+  // the normal copy alongside the heroic one DOWNGRADED the heroic proc.
+  //
+  // In game both auras apply: they are different spell ids, and the author's own
+  // combat log shows both on the player. Unique-equipped bars a second copy of
+  // one item id, not two ids that merely share a name - a situation that only
+  // arises on legacy gear, because modern difficulty versions share one id.
+  //
+  // So share a buff only when it is genuinely the SAME aura - same spell id,
+  // which is also what the game does - and give a different aura its own buff,
+  // named for the slot that carries it.
+  //
+  // initialize_absorb_buff() below has the same lookup and so the same flaw;
+  // it is left alone because no absorb case has been measured.
+  const unsigned aura_id = spell_data->ok() ? spell_data->id() : 0;
+  std::string buff_name = name();
+  if ( buff_t* b = buff_t::find( player, buff_name ) )
+  {
+    if ( !item || aura_id == 0 || b->data().id() == aura_id )
+      return debug_cast<stat_buff_t*>( b );
+
+    buff_name += "_";
+    buff_name += item->slot_name();
+    if ( buff_t* other = buff_t::find( player, buff_name ) )
+      return debug_cast<stat_buff_t*>( other );
+  }
+
   stat_buff_t* buff =
-      make_buff<stat_buff_t>( player, name(), spell_data, source == SPECIAL_EFFECT_SOURCE_ITEM ? item : nullptr );
+      make_buff<stat_buff_t>( player, buff_name, spell_data, source == SPECIAL_EFFECT_SOURCE_ITEM ? item : nullptr );
 
   // Setup user option overrides. Note that if there are no user set overrides,
   // the buff will automagically deduce correct options from the spell data,

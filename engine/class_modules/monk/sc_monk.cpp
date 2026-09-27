@@ -198,6 +198,15 @@ void monk_action_t<Base>::apply_debuff_effects()
 {
   parse_target_effects( td_fn( &monk_td_t::debuff_t::mid2_brm_4pc ), p()->tier.mid2.brm_4pc_debuff );
 
+  // BracketSim legacy compatibility: the Weapons of Order mark makes the target
+  // take more of the monk's damage, straight from the debuff's own effects.
+  parse_target_effects( td_fn( &monk_td_t::debuff_t::legacy_weapons_of_order ),
+                        p()->legacy_covenant.weapons_of_order_debuff );
+
+  // BracketSim legacy compatibility: Keefer's Skyreach.
+  parse_target_effects( td_fn( &monk_td_t::debuff_t::legacy_keefers_skyreach ),
+                        p()->find_spell( 344021 ) );
+
   parse_target_effects( td_fn( &monk_td_t::dots_t::aspect_of_harmony ),
                         p()->talent.master_of_harmony.aspect_of_harmony_damage );
 }
@@ -365,6 +374,28 @@ void monk_action_t<Base>::combo_strikes_trigger()
     p()->buff.combo_strikes->trigger();
 
     p()->buff.hit_combo->trigger();
+
+    // BracketSim legacy compatibility: Xuen's Bond pulls Invoke Xuen in on
+    // every combo strike. The 0.1 s is effect 2 of conduit spell 336616,
+    // absent from Midnight and read from the archived 9.2.7 client data.
+    if ( p()->legacy_conduits.has( 24 ) )
+      p()->get_cooldown( "invoke_xuen_the_white_tiger" )
+          ->adjust( timespan_t::from_millis( -100 ), true );
+
+    // Legacy Azerite: Fury of Xuen builds towards its proc on Combo Strikes.
+    if ( p()->legacy_azerite.fury_of_xuen.ok() )
+      p()->buff.legacy_fury_of_xuen_stacks->trigger();
+
+    // Legacy Azerite: Meridian Strikes pulls Touch of Death in on every combo
+    // strike. The value is stored in tenths of a second.
+    if ( p()->legacy_azerite.meridian_strikes.ok() )
+    {
+      auto tod_cd = p()->get_cooldown( "touch_of_death" );
+      if ( tod_cd->remains() > timespan_t::zero() )
+        tod_cd->adjust( timespan_t::from_seconds(
+                            -1 * p()->legacy_azerite.meridian_strikes.spell_ref().effectN( 2 ).base_value() / 100 ),
+                        true );
+    }
   }
   else
   {
@@ -389,6 +420,10 @@ void monk_action_t<Base>::consume_resource()
   {
     if ( p()->talent.windwalker.dance_of_chiji->ok() )
       p()->buff.dance_of_chiji->trigger();
+
+    // Legacy Azerite: Dance of Chi-Ji procs off spending Chi, Windwalker only.
+    if ( p()->specialization() == MONK_WINDWALKER && p()->legacy_azerite.dance_of_chiji.ok() )
+      p()->buff.legacy_dance_of_chiji->trigger();
 
     if ( p()->talent.windwalker.tigereye_brew_1->ok() )
     {
@@ -439,6 +474,75 @@ void monk_action_t<Base>::impact( action_state_t *state )
 {
   trigger_mystic_touch( state );
 
+  // BracketSim legacy compatibility: Keefer's Skyreach. Tiger Palm opens the
+  // crit window, and cannot open it again until the exhaustion runs out.
+  if ( p()->shadowlands_legacy.keefers_skyreach && state->result_amount > 0 &&
+       util::str_compare_ci( state->action->name_str, "tiger_palm" ) )
+  {
+    auto td = get_td( state->target );
+    if ( !td->debuff.legacy_skyreach_exhaustion->up() )
+    {
+      td->debuff.legacy_keefers_skyreach->trigger();
+      td->debuff.legacy_skyreach_exhaustion->trigger();
+    }
+  }
+
+  // BracketSim legacy compatibility: Bonedust Brew. Effect 2 is the chance for
+  // a struck target to be hit a second time, effect 1 the share of the damage
+  // that second hit is worth.
+  if ( p()->legacy_covenant.bonedust_brew->ok() && p()->action.legacy_bonedust_brew_damage &&
+       state->action != p()->action.legacy_bonedust_brew_damage && state->result_amount > 0 &&
+       get_td( state->target )->debuff.legacy_bonedust_brew->up() &&
+       Base::rng().roll( p()->legacy_covenant.bonedust_brew->effectN( 2 ).percent() ) )
+  {
+    auto bdb = p()->action.legacy_bonedust_brew_damage;
+    // BracketSim legacy compatibility: Bone Marrow Hops (conduit 60) raises the
+    // share of the original hit that the bonus hit is worth.
+    bdb->base_dd_min = bdb->base_dd_max =
+        state->result_amount * p()->legacy_covenant.bonedust_brew->effectN( 1 ).percent() *
+        ( 1.0 + p()->legacy_conduits.percent( 60 ) );
+    bdb->execute_on_target( state->target );
+  }
+
+  // BracketSim legacy compatibility: Bountiful Brew. A free Bonedust Brew on
+  // the struck target, paced by 356592's own RPPM and internal cooldown. This
+  // port has no player-side Bonedust Brew buff - only the target debuff - so
+  // that debuff is what gets extended.
+  if ( p()->shadowlands_legacy.bountiful_brew && state->result_amount > 0 &&
+       p()->legacy_covenant.bonedust_brew->ok() && p()->legacy_bountiful_brew_rppm &&
+       p()->legacy_bountiful_brew_rppm->trigger() )
+  {
+    get_td( state->target )
+        ->debuff.legacy_bonedust_brew->extend_duration_or_trigger(
+            p()->find_spell( 356592 )->effectN( 1 ).time_value() );
+  }
+
+  // BracketSim legacy compatibility: Sinister Teachings. A critical hit while
+  // the mystic portal is open shortens Fallen Order. Shadowlands checked a
+  // buff; this port models the portal as a dot, so the dot ticking IS the
+  // portal being open.
+  if ( p()->shadowlands_legacy.sinister_teachings && state->result == RESULT_CRIT &&
+       state->result_amount > 0 && p()->cooldown.legacy_sinister_teachings->up() &&
+       state->target->get_dot( "fallen_order", p() )->is_ticking() )
+  {
+    auto rune = p()->find_spell( 356818 );
+    // Effect 4 is Mistweaver's smaller cut, effect 3 everyone else's.
+    auto cut = p()->specialization() == MONK_MISTWEAVER ? rune->effectN( 4 ).time_value()
+                                                        : rune->effectN( 3 ).time_value();
+    p()->cooldown.legacy_fallen_order->adjust( -cut );
+    p()->cooldown.legacy_sinister_teachings->start( rune->internal_cooldown() );
+  }
+
+  // Legacy Azerite: Sunrise Technique fires off the next physical hit into a
+  // target Rising Sun Kick marked.
+  if ( p()->legacy_azerite.sunrise_technique.ok() && p()->action.legacy_sunrise_technique &&
+       state->action != p()->action.legacy_sunrise_technique &&  // must not retrigger itself
+       state->action->school == SCHOOL_PHYSICAL && state->result_amount > 0 &&
+       p()->buff.legacy_sunrise_technique->up() && get_td( state->target )->debuff.legacy_sunrise_technique->up() )
+  {
+    p()->action.legacy_sunrise_technique->execute_on_target( state->target );
+  }
+
   base_t::impact( state );
 }
 
@@ -453,6 +557,26 @@ void monk_action_t<Base>::trigger_mystic_touch( action_state_t *s )
 
   if ( s->target->debuffs.mystic_touch && p()->baseline.monk.mystic_touch->ok() )
     s->target->debuffs.mystic_touch->trigger();
+}
+
+// BracketSim legacy compatibility: Faeline Harmony (7721). Fae Exposure raises
+// the monk's damage on a marked target, and it does so with aura subtype 270 -
+// A_MOD_DAMAGE_FROM_CASTER, which applies by SCHOOL MASK. parse_target_effects
+// only handles 271, the whitelist-of-spells variant that Keefer's Skyreach uses,
+// so this one has to be applied here. The 8% is still read from the spell.
+template <class Base>
+double monk_action_t<Base>::composite_target_multiplier( player_t *t ) const
+{
+  double m = base_t::composite_target_multiplier( t );
+
+  if ( p()->shadowlands_legacy.faeline_harmony )
+  {
+    auto td = p()->find_target_data( t );
+    if ( td && td->debuff.legacy_fae_exposure->check() )
+      m *= 1.0 + p()->find_spell( 356773 )->effectN( 1 ).percent();
+  }
+
+  return m;
 }
 
 template <class Base>
@@ -843,6 +967,11 @@ struct tiger_palm_t : public harmonic_surge_t<overwhelming_force_t<monk_melee_at
     CAST_DURING( SPINNING_CRANE_KICK_IDS );
 
     parse_effects( player->buff.combat_wisdom );
+
+    // Legacy Azerite: Pressure Point. Battle for Azeroth hung this on a tier-set
+    // buff; the current tooltip is a flat Tiger Palm damage bonus plus a higher
+    // free-Blackout-Kick chance, and only the damage half has a host here.
+    base_dd_adder += player->legacy_azerite.pressure_point.value( 1 );
   }
 
   bool ready() override
@@ -948,6 +1077,27 @@ struct rising_sun_kick_t : monk_melee_attack_t
     {
       monk_melee_attack_t::impact( state );
 
+      // Legacy Azerite: Sunrise Technique marks the target and arms the player.
+      if ( p()->legacy_azerite.sunrise_technique.ok() )
+      {
+        p()->buff.legacy_sunrise_technique->trigger();
+        get_td( state->target )->debuff.legacy_sunrise_technique->trigger();
+      }
+
+      // BracketSim legacy compatibility: Xuen's Treasure pulls Fists of Fury
+      // forward on a Rising Sun Kick critical strike.
+      if ( p()->shadowlands_legacy.xuens_battlegear && state->result == RESULT_CRIT )
+        // Spell 337481 carries Max Aura Level 60, and player_t::find_spell REJECTS a
+        // spell whose max aura level is below the player's - it returns
+        // not_found, whose every effect reads zero. That is why this measured
+        // exactly nothing on a level 90 probe while the flag, the host and the
+        // cooldown were all correct. dbc::find_spell is the same lookup without
+        // the level gate. Only two sites in the whole engine hit this; both are
+        // fixed, and both were fine at level 60 and below.
+        p()->cooldown.fists_of_fury->adjust(
+            -timespan_t::from_millis(
+                dbc::find_spell( p(), 337481U )->effectN( 2 ).base_value() ), true );
+
       if ( p()->baseline.windwalker.combat_conditioning->ok() )
         state->target->debuffs.mortal_wounds->trigger();
 
@@ -995,6 +1145,18 @@ struct rising_sun_kick_t : monk_melee_attack_t
                       ( ( 1.0 / TBase::p()->composite_melee_haste() ) - 1.0 );
       if ( TBase::rng().roll( chance ) )
         damage->execute();
+
+      // Legacy Azerite: Glory of the Dawn rolls separately from the modern
+      // talent, at a flat chance and for a flat amount.
+      auto *p = TBase::p();
+      if ( p->legacy_azerite.glory_of_the_dawn.ok() && p->action.legacy_glory_of_the_dawn &&
+           TBase::rng().roll( p->legacy_azerite.glory_of_the_dawn.spell_ref().effectN( 3 ).percent() ) )
+      {
+        double raw = p->legacy_azerite.glory_of_the_dawn.value();
+        p->action.legacy_glory_of_the_dawn->base_dd_min = raw;
+        p->action.legacy_glory_of_the_dawn->base_dd_max = raw;
+        p->action.legacy_glory_of_the_dawn->execute_on_target( TBase::target );
+      }
     }
   };
 
@@ -1381,6 +1543,11 @@ struct blackout_kick_t : overwhelming_force_t<charred_passions_t<teachings_of_th
   {
     base_t::execute();
 
+    // BracketSim legacy compatibility: Swift Roundhouse stacks off Blackout
+    // Kick and feeds the next Rising Sun Kick.
+    if ( p()->legacy_azerite.swift_roundhouse.ok() )
+      p()->buff.swift_roundhouse->trigger();
+
     if ( p()->buff.invoke_niuzao->check() )
       p()->pets.niuzao.active_pet()->stomp->execute();
 
@@ -1435,7 +1602,26 @@ struct blackout_kick_t : overwhelming_force_t<charred_passions_t<teachings_of_th
       eb_count += as<unsigned>( p()->talent.brewmaster.elusive_footwork->effectN( 2 ).base_value() );
       p()->proc.elusive_footwork_proc->occur();
     }
+
+    // Legacy Azerite: Elusive Footwork stacks with the modern talent of the same
+    // name - both grant extra Elusive Brawler stacks on a critical Blackout Kick.
+    if ( p()->legacy_azerite.elusive_footwork.ok() && s->result == RESULT_CRIT )
+      eb_count += as<unsigned>( p()->legacy_azerite.elusive_footwork.spell_ref().effectN( 2 ).base_value() );
+
     p()->buff.elusive_brawler->trigger( eb_count );
+
+    // Legacy Azerite: Staggering Strikes clears a flat amount of Stagger.
+    // BracketSim legacy compatibility: Staggering Strikes purifies Stagger, and
+    // Stagger is Brewmaster's. The find_stagger() null check below is not
+    // enough on its own - a Windwalker still took an access violation through
+    // this path - so the spec is checked too. Nothing is lost: the trait's
+    // purify half is meaningless without Stagger to purify.
+    if ( p()->legacy_azerite.staggering_strikes.ok() &&
+         p()->specialization() == MONK_BREWMASTER )
+    {
+      if ( auto* stagger = p()->find_stagger( "Stagger" ) )
+        stagger->purify_flat( p()->legacy_azerite.staggering_strikes.value(), "legacy_staggering_strikes" );
+    }
 
     if ( p()->talent.brewmaster.staggering_strikes->ok() )
     {
@@ -1534,6 +1720,18 @@ struct spinning_crane_kick_t : public monk_melee_attack_t
     result_amount_type report_amount_type( const action_state_t * ) const override
     {
       return result_amount_type::DMG_DIRECT;
+    }
+
+    // Legacy Azerite: Dance of Chi-Ji. The trait's value is the whole kick, so
+    // it is divided across the four ticks - Battle for Azeroth did the same.
+    double bonus_da( const action_state_t *s ) const override
+    {
+      double b = monk_melee_attack_t::bonus_da( s );
+
+      if ( p()->legacy_azerite.dance_of_chiji.ok() && p()->buff.legacy_dance_of_chiji->check() )
+        b += p()->legacy_azerite.dance_of_chiji.value() / 4;
+
+      return b;
     }
 
     void impact( action_state_t *state ) override
@@ -1668,11 +1866,29 @@ struct spinning_crane_kick_t : public monk_melee_attack_t
           p()->buff.combo_breaker->increment();  // increment is used to directly trigger without rolling chance
       }
 
+      // Legacy Azerite: Dance of Chi-Ji is spent by the kick it empowered.
+      if ( p()->buff.legacy_dance_of_chiji->up() )
+        p()->buff.legacy_dance_of_chiji->decrement();
+
       p()->action.flurry_strikes->execute( flurry_strikes_t::WISDOM_OF_THE_WALL );
     }
 
     if ( jade_ignition )
       jade_ignition->execute();
+  }
+
+  // Legacy Azerite: Dance of Chi-Ji also cheapens the kick. Effect 3 is stored
+  // as a negative number. Skipped while the modern buff is up, because that one
+  // already makes the kick free and two discounts would go negative.
+  double cost() const override
+  {
+    double c = monk_melee_attack_t::cost();
+
+    if ( p()->legacy_azerite.dance_of_chiji.ok() && p()->buff.legacy_dance_of_chiji->check() &&
+         !p()->buff.dance_of_chiji->check() )
+      c += p()->buff.legacy_dance_of_chiji->data().effectN( 3 ).base_value();
+
+    return std::max( 0.0, c );
   }
 
   void reset() override
@@ -1707,6 +1923,12 @@ struct fists_of_fury_t : monk_melee_attack_t
           .set_func( [] { return false; } )
           .set_note( "Secondary Target Damage Modifier" )
           .set_eff( &player->talent.windwalker.fists_of_fury->effectN( 6 ) );
+
+      // BracketSim legacy compatibility: the conduit Inner Fury (16) raises
+      // Fists of Fury's damage. All of that damage is in this tick, not in the
+      // channel that schedules it, so this is where Shadowlands'
+      // action_multiplier() lands in Midnight's split of the ability.
+      base_dd_multiplier *= 1.0 + player->legacy_conduits.percent( 16 );
     }
 
     double composite_aoe_multiplier( const action_state_t *state ) const override
@@ -1719,9 +1941,37 @@ struct fists_of_fury_t : monk_melee_attack_t
       return cam;
     }
 
+    // Legacy Azerite: Open Palm Strikes
+    double bonus_da( const action_state_t *s ) const override
+    {
+      double b = monk_melee_attack_t::bonus_da( s );
+
+      if ( p()->legacy_azerite.open_palm_strikes.ok() )
+        b += p()->legacy_azerite.open_palm_strikes.value( 4 );
+
+      return b;
+    }
+
     void execute() override
     {
       monk_melee_attack_t::execute();
+
+      // Legacy Azerite: Open Palm Strikes refunds Chi at random.
+      if ( p()->legacy_azerite.open_palm_strikes.ok() &&
+           rng().roll( p()->legacy_azerite.open_palm_strikes.spell_ref().effectN( 2 ).percent() ) )
+      {
+        p()->resource_gain( RESOURCE_CHI,
+                            p()->legacy_azerite.open_palm_strikes.spell_ref().effectN( 3 ).base_value(),
+                            p()->gain.legacy_open_palm_strikes );
+      }
+
+      // Legacy Azerite: Iron Fists rewards catching enough targets.
+      if ( p()->legacy_azerite.iron_fists.ok() &&
+           as<double>( sim->target_non_sleeping_list.size() ) >=
+               p()->legacy_azerite.iron_fists.spell_ref().effectN( 2 ).base_value() )
+      {
+        p()->buff.legacy_iron_fists->trigger();
+      }
 
       p()->buff.mid2_ww_4pc->trigger();
     }
@@ -1816,6 +2066,16 @@ struct fists_of_fury_t : monk_melee_attack_t
 
   void execute() override
   {
+    // Legacy Azerite: Fury of Xuen rolls BEFORE the strike, as it did in Battle
+    // for Azeroth, so the Haste applies to this cast rather than the next one.
+    if ( p()->legacy_azerite.fury_of_xuen.ok() && p()->buff.legacy_fury_of_xuen_stacks->up() &&
+         rng().roll( p()->buff.legacy_fury_of_xuen_stacks->stack_value() ) )
+    {
+      p()->buff.legacy_fury_of_xuen_haste->trigger();
+      p()->pets.legacy_fury_of_xuen.spawn( p()->find_spell( 287063 )->duration(), 1 );
+      p()->buff.legacy_fury_of_xuen_stacks->expire();
+    }
+
     monk_melee_attack_t::execute();
 
     if ( mid2_ww_tier )
@@ -2522,12 +2782,31 @@ struct keg_smash_t : monk_melee_attack_t
     reduced_aoe_targets = data().effectN( 7 ).base_value();
     aoe                 = -1;
 
+    // BracketSim legacy compatibility: Stormstout's Last Keg. Effect 1 of the
+    // runeforge is how much harder Keg Smash hits and effect 2 is the extra
+    // charge, both straight off spell 337288.
+    if ( player->shadowlands_legacy.stormstouts_last_keg )
+    {
+      auto rune = player->find_spell( 337288 );
+      base_multiplier *= 1.0 + rune->effectN( 1 ).percent();
+      cooldown->charges += as<int>( rune->effectN( 2 ).base_value() );
+    }
+
     // scalding brew is scripted
     if ( const auto &effect = player->talent.brewmaster.scalding_brew->effectN( 1 ); effect.ok() )
       add_parse_entry( target_multiplier_effects )
           .set_func( td_fn( &monk_td_t::dots_t::breath_of_fire ) )
           .set_value( effect.percent() )
           .set_eff( &effect );
+
+    // BracketSim legacy compatibility: the Scalding Brew conduit works on the
+    // same Breath of Fire window as the talent it later became, but it has to be
+    // its own entry - putting it inside the talent's ok() guard would silently
+    // require the talent to be taken as well.
+    if ( player->legacy_conduits.has( 46 ) )
+      add_parse_entry( target_multiplier_effects )
+          .set_func( td_fn( &monk_td_t::dots_t::breath_of_fire ) )
+          .set_value( player->legacy_conduits.percent( 46 ) );
 
     // increased damage to primary target
     if ( const auto &effect = data().effectN( 8 ); effect.ok() )
@@ -2593,6 +2872,17 @@ struct keg_smash_t : monk_melee_attack_t
 
     p()->action.flurry_strikes->execute( flurry_strikes_t::FLURRY_STRIKES );
     p()->buff.shuffle->trigger( timespan_t::from_seconds( data().effectN( 6 ).base_value() ) );
+
+    // BracketSim legacy compatibility: Walk with the Ox pulls Invoke Niuzao in
+    // whenever Shuffle is refreshed and Niuzao is on cooldown. The 0.5 s is
+    // effect 2 of conduit spell 337264, absent from Midnight and read from the
+    // archived 9.2.7 client data.
+    if ( p()->legacy_conduits.has( 57 ) )
+    {
+      cooldown_t* niuzao = p()->get_cooldown( "invoke_niuzao_the_black_ox" );
+      if ( niuzao->down() )
+        niuzao->adjust( timespan_t::from_millis( -500 ), true );
+    }
 
     timespan_t reduction = timespan_t::from_seconds( data().effectN( 4 ).base_value() );
     if ( p()->buff.blackout_combo->up() )
@@ -2662,6 +2952,11 @@ struct touch_of_death_t : public monk_melee_attack_t
     parse_options( options_str );
 
     cooldown->duration = data().cooldown();
+
+    // BracketSim legacy compatibility: Fatal Touch shortens Touch of Death.
+    if ( p()->shadowlands_legacy.fatal_touch )
+      cooldown->duration += timespan_t::from_millis(
+          p()->find_spell( 337296 )->effectN( 1 ).base_value() );
   }
 
   void init() override
@@ -3248,6 +3543,26 @@ struct breath_of_fire_t : public monk_spell_t
             .set_value( effect.percent() )
             .set_eff( &effect );
     }
+
+    // Legacy Azerite: Boiling Brew
+    double bonus_ta( const action_state_t *s ) const override
+    {
+      double b = monk_spell_t::bonus_ta( s );
+
+      if ( p()->legacy_azerite.boiling_brew.ok() )
+        b += p()->legacy_azerite.boiling_brew.value( 2 );
+
+      return b;
+    }
+
+    void impact( action_state_t *s ) override
+    {
+      monk_spell_t::impact( s );
+
+      // Legacy Azerite: Boiling Brew drops healing spheres on an RPPM roll.
+      if ( p()->legacy_boiling_brew_rppm && p()->legacy_boiling_brew_rppm->trigger() )
+        p()->buff.gift_of_the_ox->trigger();
+    }
   };
 
   struct dragonfire_brew_t : monk_spell_t
@@ -3507,6 +3822,22 @@ struct purifying_brew_t : public brew_t<monk_spell_t>
     brew_t<monk_spell_t>::execute();
 
     p()->buff.ox_stance->trigger();
+
+    // Legacy Azerite: Fit to Burst pays out when Purifying Brew is used out of
+    // Heavy Stagger. Level index 2 is the heavy band in the stagger table.
+    if ( p()->legacy_azerite.fit_to_burst.ok() && p()->find_stagger( "Stagger" )->level_index() >= 2 )
+      p()->buff.legacy_fit_to_burst->trigger( p()->buff.legacy_fit_to_burst->max_stack() );
+
+    // Legacy Azerite: Training of Niuzao follows the Stagger band, so purifying
+    // out of it drops the stacks with it.
+    if ( p()->legacy_azerite.training_of_niuzao.ok() )
+    {
+      int band = as<int>( p()->find_stagger( "Stagger" )->level_index() );
+      p()->buff.legacy_training_of_niuzao->expire();
+      if ( band > 0 )
+        p()->buff.legacy_training_of_niuzao->trigger( std::min( band, 3 ) );
+    }
+
     p()->buff.aspect_of_harmony.trigger_flat(
         p()->talent.master_of_harmony.clarity_of_purpose->effectN( 1 ).percent() *
         ( 1.0 + p()->composite_damage_versatility() ) *
@@ -3610,6 +3941,9 @@ struct xuen_summon_t : public monk_spell_t
   void execute() override
   {
     monk_spell_t::execute();
+
+    // BracketSim legacy compatibility: Invoker's Delight.
+    p()->buff.legacy_invokers_delight->trigger();
 
     if ( p()->bugs )
       for ( auto target : p()->sim->target_non_sleeping_list )
@@ -3746,6 +4080,9 @@ struct niuzao_spell_t : public monk_spell_t
   void execute() override
   {
     monk_spell_t::execute();
+
+    // BracketSim legacy compatibility: Invoker's Delight.
+    p()->buff.legacy_invokers_delight->trigger();
 
     p()->pets.niuzao.spawn( p()->talent.brewmaster.invoke_niuzao_the_black_ox->duration(), 1 );
     p()->buff.invoke_niuzao->trigger();
@@ -3997,6 +4334,19 @@ struct zenith_t : public monk_spell_t
 
 struct expel_harm_t : monk_heal_t
 {
+  // BracketSim legacy compatibility: the conduit Harm Denial (15). Shadowlands
+  // was explicit that it raises the HEALING only and not the damage, so this
+  // sits on the heal and nothing is added to damage_t below.
+  double action_multiplier() const override
+  {
+    double am = monk_heal_t::action_multiplier();
+
+    if ( p()->legacy_conduits.has( 15 ) )
+      am *= 1.0 + p()->legacy_conduits.percent( 15 );
+
+    return am;
+  }
+
   struct damage_t : monk_spell_t
   {
     damage_t( monk_t *player ) : monk_spell_t( player, "expel_harm_damage", player->baseline.monk.expel_harm_damage )
@@ -5182,6 +5532,32 @@ namespace monk
 monk_td_t::monk_td_t( player_t *target, monk_t *player )
   : actor_target_data_t( target, player ), dot(), debuff(), monk( *player )
 {
+  // Legacy Azerite: Sunrise Technique
+  debuff.legacy_sunrise_technique =
+      make_buff_fallback( player->legacy_azerite.sunrise_technique.ok(), *this, "legacy_sunrise_technique",
+                          player->find_spell( 273299 ) );
+
+  // BracketSim legacy compatibility: Faeline Harmony.
+  debuff.legacy_fae_exposure =
+      make_buff_fallback( player->shadowlands_legacy.faeline_harmony, *this,
+                          "fae_exposure", player->find_spell( 356773 ) );
+
+  // BracketSim legacy compatibility: Keefer's Skyreach.
+  debuff.legacy_keefers_skyreach =
+      make_buff_fallback( player->shadowlands_legacy.keefers_skyreach, *this, "keefers_skyreach",
+                          player->find_spell( 344021 ) );
+  debuff.legacy_skyreach_exhaustion =
+      make_buff_fallback( player->shadowlands_legacy.keefers_skyreach, *this, "skyreach_exhaustion",
+                          player->find_spell( 337341 ) );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  debuff.legacy_weapons_of_order =
+      make_buff_fallback( player->legacy_covenant.weapons_of_order->ok(), *this, "weapons_of_order_debuff",
+                          player->legacy_covenant.weapons_of_order_debuff );
+  debuff.legacy_bonedust_brew =
+      make_buff_fallback( player->legacy_covenant.bonedust_brew->ok(), *this, "bonedust_brew",
+                          player->legacy_covenant.bonedust_brew );
+
   // Windwalker
   debuff.empowered_tiger_lightning = make_buff_fallback<buffs::empowered_tiger_lightning_t>(
       player->baseline.windwalker.empowered_tiger_lightning->ok(), *this, "empowered_tiger_lightning" );
@@ -5231,6 +5607,12 @@ monk_t::monk_t( sim_t *sim, std::string_view name, race_e r )
   cooldown.blackout_kick   = get_cooldown( "blackout_kick" );
   cooldown.fists_of_fury   = get_cooldown( "fists_of_fury" );
   cooldown.rising_sun_kick = get_cooldown( "rising_sun_kick" );
+
+  // BracketSim legacy compatibility: Sinister Teachings. The first must be the
+  // SAME cooldown object the fallen_order action uses, or shortening it would
+  // shorten nothing; get_cooldown returns exactly that.
+  cooldown.legacy_fallen_order      = get_cooldown( "fallen_order" );
+  cooldown.legacy_sinister_teachings = get_cooldown( "legacy_sinister_teachings" );
 
   resource_regeneration              = regen_type::DYNAMIC;
   regen_caches[ CACHE_HASTE ]        = true;
@@ -5316,9 +5698,276 @@ void monk_t::parse_player_effects()
   // Midnight S3 Set Effects
 }
 
+namespace actions
+{
+// BracketSim legacy compatibility: Shadowlands covenant abilities ==========
+// Duration, cooldown, chance and damage all come from the covenant spells
+// themselves, which still resolve in current client data.
+
+struct legacy_weapons_of_order_t : public monk_spell_t
+{
+  legacy_weapons_of_order_t( monk_t *p, std::string_view options_str )
+    : monk_spell_t( p, "weapons_of_order", p->legacy_covenant.weapons_of_order )
+  {
+    parse_options( options_str );
+    harmful = may_miss = false;
+    aoe     = -1;
+  }
+
+  void execute() override
+  {
+    monk_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_KYRIAN,
+                                            cooldown );
+    p()->buff.legacy_weapons_of_order->trigger();
+
+    // BracketSim legacy compatibility: Call to Arms (7718). Weapons of Order
+    // also summons the spec's celestial briefly.
+    //
+    // Shadowlands READ the duration from four spells - 358518 Xuen, 358520
+    // Niuzao, 358521 Yu'lon, 358522 Chi-Ji - and every one of them is missing
+    // from Midnight's export, which is why this sat blocked. The twelve
+    // seconds below is not a guess: all four were read out of the live client
+    // on 2026-09-06 and every one says "Summons an effigy ... for 12 sec".
+    // Same sourcing as Merciless Bonegrinder's nine seconds.
+    //
+    // Only the damage celestials are summoned. Yu'lon and Chi-Ji are healing
+    // and this sim does not track healing for these characters, so summoning
+    // them would add a pet that cannot be measured either way.
+    if ( p()->shadowlands_legacy.call_to_arms )
+    {
+      switch ( p()->specialization() )
+      {
+        case MONK_WINDWALKER:
+          p()->pets.xuen.spawn( 12_s, 1 );
+          break;
+        case MONK_BREWMASTER:
+          p()->pets.niuzao.spawn( 12_s, 1 );
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  void impact( action_state_t *s ) override
+  {
+    monk_spell_t::impact( s );
+    // The mark that made the target take more of the monk's damage. The brew
+    // cost reduction Rising Sun Kick granted is not modelled.
+    p()->get_target_data( s->target )->debuff.legacy_weapons_of_order->trigger();
+  }
+};
+
+struct legacy_bonedust_brew_t : public monk_spell_t
+{
+  legacy_bonedust_brew_t( monk_t *p, std::string_view options_str )
+    : monk_spell_t( p, "bonedust_brew", p->legacy_covenant.bonedust_brew )
+  {
+    parse_options( options_str );
+    harmful = may_miss = false;
+    aoe     = -1;
+    if ( p->action.legacy_bonedust_brew_damage )
+      add_child( p->action.legacy_bonedust_brew_damage );
+  }
+
+  void impact( action_state_t *s ) override
+  {
+    monk_spell_t::impact( s );
+    p()->get_target_data( s->target )->debuff.legacy_bonedust_brew->trigger();
+  }
+
+  void execute() override
+  {
+    monk_spell_t::execute();
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NECROLORD,
+                                            cooldown );
+  }
+};
+
+// BracketSim legacy compatibility: Fallen Order. One adept's whole six seconds
+// of output, delivered as a single hit when it spawns. The coefficient is FITTED
+// from one Brewmaster log rather than read from data - see PORT_STATE.md - and
+// the adepts' own spec abilities beyond Brewmaster's are not modelled at all.
+struct legacy_fallen_order_adept_t : public monk_spell_t
+{
+  legacy_fallen_order_adept_t( monk_t *p )
+    : monk_spell_t( p, "fallen_order_adept", p->legacy_covenant.fallen_order )
+  {
+    background = dual = true;
+    may_crit = true;
+    aoe = 0;
+    // The adept shares the driver's spell, and that spell carries the PORTAL's
+    // 24 second duration. Without clearing it the adept spawns a 24 tick dot of
+    // its own that deals nothing and inflates every tick count in the report.
+    dot_duration = 0_ms;
+    base_tick_time = 0_ms;
+    // 2.286 attack power per adept: 9947 base damage over 9 adepts against 394
+    // attack power, with the log's 22.679% versatility divided back out.
+    attack_power_mod.direct = 2.286;
+    spell_power_mod.direct  = 0.0;
+    school = SCHOOL_SHADOW;
+  }
+};
+
+struct legacy_fallen_order_t : public monk_spell_t
+{
+  legacy_fallen_order_t( monk_t *p, std::string_view options_str )
+    : monk_spell_t( p, "fallen_order", p->legacy_covenant.fallen_order )
+  {
+    parse_options( options_str );
+    may_miss = harmful = false;
+    channeled = false;
+
+    // The portal is a 24 second ground effect that spawns an adept every 3
+    // seconds, so it is modelled as a ticking driver rather than as summons:
+    // eight ticks, one per adept, unaffected by haste.
+    dot_duration   = data().duration();
+    base_tick_time = 3_s;
+    hasted_ticks   = false;
+    tick_zero      = false;
+
+    tick_action = new legacy_fallen_order_adept_t( p );
+    add_child( tick_action );
+
+    // BracketSim legacy compatibility: Sinister Teachings adds one adept that
+    // lasts 356818 effect 2 seconds, against a base adept's 326860 effect 4.
+    // Both are read here rather than chosen, and the ratio is how many extra
+    // adepts the one long-lived one is worth in a model that has no durations.
+    if ( p->shadowlands_legacy.sinister_teachings )
+    {
+      double extra_secs = p->find_spell( 356818 )->effectN( 2 ).base_value();
+      double one_adept  = p->legacy_covenant.fallen_order->effectN( 4 ).base_value();
+      int extra = one_adept > 0 ? static_cast<int>( extra_secs / one_adept ) : 0;
+      int ticks = static_cast<int>( dot_duration / base_tick_time );
+      // Spread them out rather than dropping them all on one tick.
+      legacy_extra_every = ( extra > 0 && ticks > extra ) ? ticks / extra : 0;
+    }
+  }
+
+  // BracketSim legacy compatibility: Sinister Teachings. Fire the adept a
+  // second time on every Nth tick, so the extra adepts arrive across the
+  // portal the way the base ones do.
+  int legacy_extra_every = 0;
+  int legacy_tick_count  = 0;
+
+  void tick( dot_t *d ) override
+  {
+    monk_spell_t::tick( d );
+
+    if ( legacy_extra_every > 0 && ++legacy_tick_count % legacy_extra_every == 0 )
+      tick_action->execute_on_target( d->target );
+  }
+
+  // A ground effect, not a channel: the monk keeps acting while it runs.
+  timespan_t composite_dot_duration( const action_state_t * ) const override
+  { return dot_duration; }
+
+  void execute() override
+  {
+    monk_spell_t::execute();
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_VENTHYR,
+                                            cooldown );
+  }
+};
+
+struct legacy_faeline_stomp_damage_t : public monk_spell_t
+{
+  legacy_faeline_stomp_damage_t( monk_t *p )
+    : monk_spell_t( p, "faeline_stomp_damage", p->legacy_covenant.faeline_stomp_damage )
+  {
+    background = true;
+    // Five enemies, as the driver's own description states.
+    aoe = 5;
+  }
+
+  double composite_aoe_multiplier( const action_state_t *state ) const override
+  {
+    double cam = monk_spell_t::composite_aoe_multiplier( state );
+
+    // BracketSim legacy compatibility: Way of the Fae (conduit 63) raises this
+    // damage per target it hits, up to five.
+    //
+    // SimulationCraft read the cap from effect 2 of conduit spell 337303, which
+    // Midnight does not ship. Five is not a guess: the conduit's own
+    // description gives both halves - "10.0% per target hit ... up to a maximum
+    // of 50.0%" - and the ability itself already hits at most five.
+    if ( p()->legacy_conduits.has( 63 ) )
+    {
+      const std::vector<player_t *> &targets = state->action->target_list();
+      if ( !targets.empty() )
+      {
+        cam *= 1.0 + p()->legacy_conduits.percent( 63 ) *
+                         std::min( static_cast<double>( targets.size() ), 5.0 );
+      }
+    }
+
+    return cam;
+  }
+};
+
+struct legacy_faeline_stomp_t : public monk_spell_t
+{
+  action_t *damage;
+
+  legacy_faeline_stomp_t( monk_t *p, std::string_view options_str )
+    : monk_spell_t( p, "faeline_stomp", p->legacy_covenant.faeline_stomp ),
+      damage( new legacy_faeline_stomp_damage_t( p ) )
+  {
+    parse_options( options_str );
+    may_miss = false;
+    add_child( damage );
+  }
+
+  void execute() override
+  {
+    monk_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NIGHT_FAE,
+                                            cooldown );
+    // The faeline itself - a patch of ground that re-triggered on later casts -
+    // is not modelled; only the stomp's own damage is.
+    damage->execute_on_target( target );
+
+    // BracketSim legacy compatibility: Faeline Harmony. Shadowlands applied
+    // Fae Exposure to every target the stomp reached, whether or not it was
+    // damaged or healed.
+    if ( p()->shadowlands_legacy.faeline_harmony )
+      p()->get_target_data( target )->debuff.legacy_fae_exposure->trigger();
+  }
+};
+}  // namespace actions
+
 action_t *monk_t::create_action( std::string_view name, std::string_view options_str )
 {
   using namespace actions;
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  if ( name == "weapons_of_order" && legacy_covenant.weapons_of_order->ok() )
+    return new legacy_weapons_of_order_t( this, options_str );
+  if ( name == "bonedust_brew" && legacy_covenant.bonedust_brew->ok() )
+    return new legacy_bonedust_brew_t( this, options_str );
+  if ( name == "fallen_order" && legacy_covenant.fallen_order->ok() )
+    return new legacy_fallen_order_t( this, options_str );
+  if ( name == "faeline_stomp" && legacy_covenant.faeline_stomp->ok() )
+    return new legacy_faeline_stomp_t( this, options_str );
   // Monk
   if ( name == "snapshot_stats" )
     return new monk_snapshot_stats_t( this, options_str );
@@ -5437,7 +6086,15 @@ void monk_t::trigger_celestial_fortune( action_state_t *s )
 
 bool monk_t::validate_actor()
 {
-  if ( specialization() == MONK_MISTWEAVER )
+  // BracketSim legacy compatibility: let a healing spec through when the sim
+  // asks for it, the way sc_priest.cpp already does for Discipline and Holy.
+  //
+  // Every healer in the author's roster is a character somebody plays, and refusing
+  // to sim one at all is a worse answer than simming its damage with a stated
+  // caveat. The app supplies a damage rotation (HEALER_DAMAGE_APL in
+  // comparison.js) and labels the result; without this flag the run never got
+  // far enough to use it.
+  if ( specialization() == MONK_MISTWEAVER && !sim->allow_experimental_specializations )
   {
     if ( !quiet )
       sim->error( "Mistweaver Monk for {} is not currently supported.", *this );
@@ -5475,9 +6132,29 @@ bool monk_t::validate_actor()
     count -= 1;
     if ( count < expected && count != 0 )
     {
-      sim->error( SEVERE, "Invalid Hero Talent tree, possibly low level. Found {} talents, expected {}.", count,
-                  expected );
-      return false;
+      // BracketSim legacy compatibility: a short hero tree is only an ERROR at
+      // max level.
+      //
+      // the author's own level 80 Brewmaster (a test character) has ten of the thirteen,
+      // which is simply what a level 80 monk's hero tree holds, and this gate
+      // refused the actor for it - "No active players in sim!" on a profile
+      // that is not wrong about anything. The message already guessed the
+      // reason ("possibly low level"); below MAX_LEVEL that guess is the
+      // answer, so it says so and carries on. At 90 a short tree really is a
+      // malformed talent string and it still refuses.
+      if ( true_level < MAX_LEVEL )
+      {
+        if ( !quiet )
+          sim->error( "{} has {} of {} hero talents at level {}; that is what the tree holds "
+                      "below max level, so it is used as it is.",
+                      *this, count, expected, true_level );
+      }
+      else
+      {
+        sim->error( SEVERE, "Invalid Hero Talent tree, possibly low level. Found {} talents, expected {}.", count,
+                    expected );
+        return false;
+      }
     }
   }
 
@@ -5486,6 +6163,15 @@ bool monk_t::validate_actor()
     case MONK_BREWMASTER:
     case MONK_WINDWALKER:
       return true;
+    // BracketSim legacy compatibility: the SECOND gate on Mistweaver, and the
+    // one that actually stopped it. Opening the first (the explicit refusal
+    // above) left this switch to drop the actor through `default`, so the run
+    // still ended with "No active players in sim!" - two doors, one lock each.
+    case MONK_MISTWEAVER:
+      if ( sim->allow_experimental_specializations )
+        return true;
+      sim->error( "Mistweaver Monk for {} is not currently supported.", *this );
+      return false;
     default:
       sim->error( "No specialization was selected for {}.", *this );
       return false;
@@ -5526,6 +6212,101 @@ bool monk_t::validate_fight_style( fight_style_e style ) const
 void monk_t::init_spells()
 {
   base_t::init_spells();
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+  legacy_azerite.sweep_the_leg      = find_azerite_spell( "Sweep the Leg" );
+
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
+  // off the bonus id the original legendary item carried.
+  auto legacy = [ this ]( int bonus_id ) {
+    return shadowlands_legacy.legacy_shadowlands_enabled &&
+           range::any_of( items, [ bonus_id ]( const item_t &item ) {
+             return range::contains( item.parsed.bonus_id, bonus_id );
+           } );
+  };
+
+  shadowlands_legacy.fatal_touch       = legacy( 7081 );
+  shadowlands_legacy.invokers_delight  = legacy( 7082 );
+  shadowlands_legacy.xuens_battlegear  = legacy( 7070 );
+  shadowlands_legacy.keefers_skyreach  = legacy( 7068 );
+  shadowlands_legacy.stormstouts_last_keg = legacy( 7077 );
+
+  // BracketSim legacy compatibility: Unity (bonus 8124), the 9.2 legendary
+  // whose effect is whichever covenant legendary matches the covenant you are
+  // in. A real Unity item carries 8124 and NOT the legendary's own bonus id,
+  // so a power keyed only off its own id misses every Unity wearer.
+  auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
+  {
+    return legacy( bonus_id ) ||
+           ( legacy( 8124 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
+  };
+
+  shadowlands_legacy.bountiful_brew     = legacy_unity( 7707, "necrolord" );
+  shadowlands_legacy.faeline_harmony    = legacy_unity( 7721, "night_fae" );
+  shadowlands_legacy.sinister_teachings = legacy_unity( 7726, "venthyr" );
+  shadowlands_legacy.call_to_arms       = legacy_unity( 7718, "kyrian" );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  auto covenant = [ this ]( std::string_view name, unsigned id ) {
+    return ( shadowlands_legacy.legacy_shadowlands_enabled &&
+             util::str_compare_ci( legacy_covenant.chosen, name ) )
+               ? find_spell( id )
+               : spell_data_t::not_found();
+  };
+
+  legacy_covenant.weapons_of_order = covenant( "kyrian", 310454 );
+  legacy_covenant.bonedust_brew    = covenant( "necrolord", 325216 );
+  legacy_covenant.faeline_stomp    = covenant( "night_fae", 327104 );
+  legacy_covenant.fallen_order     = covenant( "venthyr", 326860 );
+
+  // BracketSim legacy compatibility: report the covenant abilities this
+  // actor can cast, so player_t::init_actions() can put them into the
+  // rotation. SimulationCraft's own action lists never press them.
+  if ( legacy_covenant.weapons_of_order->ok() )
+    legacy_apl_actions.emplace_back( "weapons_of_order" );
+  if ( legacy_covenant.bonedust_brew->ok() )
+    legacy_apl_actions.emplace_back( "bonedust_brew" );
+  if ( legacy_covenant.faeline_stomp->ok() )
+    legacy_apl_actions.emplace_back( "faeline_stomp" );
+  if ( legacy_covenant.fallen_order->ok() )
+    legacy_apl_actions.emplace_back( "fallen_order" );
+  // Fallen Order's adepts are summons with their own stats, so their output is
+  // FITTED from one Brewmaster log rather than read from data. Brewmaster is
+  // also the only spec ever observed: Windwalker's adepts cast Fists of Fury
+  // and Mistweaver's cast Enveloping Mist, and neither adept spell id is
+  // known, so those specs carry a Brewmaster number.
+
+  legacy_covenant.weapons_of_order_debuff =
+      legacy_covenant.weapons_of_order->ok() ? find_spell( 312106 ) : spell_data_t::not_found();
+  legacy_covenant.bonedust_brew_damage =
+      legacy_covenant.bonedust_brew->ok() ? find_spell( 325217 ) : spell_data_t::not_found();
+  legacy_conduits.parse();
+
+  legacy_covenant.faeline_stomp_damage =
+      legacy_covenant.faeline_stomp->ok() ? find_spell( 327264 ) : spell_data_t::not_found();
+  legacy_azerite.glory_of_the_dawn  = find_azerite_spell( "Glory of the Dawn" );
+  legacy_azerite.strength_of_spirit = find_azerite_spell( "Strength of Spirit" );
+  legacy_azerite.sunrise_technique  = find_azerite_spell( "Sunrise Technique" );
+  legacy_azerite.boiling_brew       = find_azerite_spell( "Boiling Brew" );
+  legacy_azerite.elusive_footwork   = find_azerite_spell( "Elusive Footwork" );
+  legacy_azerite.fit_to_burst       = find_azerite_spell( "Fit to Burst" );
+  legacy_azerite.niuzaos_blessing   = find_azerite_spell( "Niuzao's Blessing" );
+  legacy_azerite.staggering_strikes = find_azerite_spell( "Staggering Strikes" );
+  legacy_azerite.training_of_niuzao = find_azerite_spell( "Training of Niuzao" );
+  legacy_azerite.dance_of_chiji     = find_azerite_spell( "Dance of Chi-Ji" );
+  legacy_azerite.fury_of_xuen       = find_azerite_spell( "Fury of Xuen" );
+  legacy_azerite.iron_fists         = find_azerite_spell( "Iron Fists" );
+  legacy_azerite.meridian_strikes   = find_azerite_spell( "Meridian Strikes" );
+  legacy_azerite.open_palm_strikes  = find_azerite_spell( "Open Palm Strikes" );
+  legacy_azerite.pressure_point     = find_azerite_spell( "Pressure Point" );
+  legacy_azerite.swift_roundhouse   = find_azerite_spell( "Swift Roundhouse" );
+
+  if ( legacy_azerite.boiling_brew.ok() )
+    legacy_boiling_brew_rppm = get_rppm( "legacy_boiling_brew", legacy_azerite.boiling_brew.spell() );
+
+  // BracketSim legacy compatibility: Bountiful Brew's own RPPM, from 356592.
+  if ( shadowlands_legacy.bountiful_brew )
+    legacy_bountiful_brew_rppm = get_rppm( "legacy_bountiful_brew", find_spell( 356592 ) );
 
   auto _CT = [ & ]( std::string_view name ) { return find_talent_spell( talent_tree::CLASS, name, specialization() ); };
   auto _ST = [ & ]( std::string_view name ) {
@@ -6097,6 +6878,45 @@ void monk_t::init_background_actions()
   // Tier
   if ( sets->has_set_bonus( MONK_BREWMASTER, MID2, B4 ) )
     action.mid2_brm_4pc = new monk_spell_t( this, "aflame", tier.mid2.brm_4pc_damage );
+
+  // Legacy Azerite: Glory of the Dawn's extra Rising Sun Kick hit.
+  if ( legacy_azerite.glory_of_the_dawn.ok() )
+  {
+    auto gotd = new monk_melee_attack_t( this, "legacy_glory_of_the_dawn", find_spell( 288636 ) );
+    gotd->background = true;
+    action.legacy_glory_of_the_dawn = gotd;
+  }
+
+  // Legacy Azerite: Fit to Burst's periodic self-heal.
+  if ( legacy_azerite.fit_to_burst.ok() )
+  {
+    auto ftb = new monk_heal_t( this, "legacy_fit_to_burst", find_spell( 275894 ) );
+    ftb->background = ftb->proc = true;
+    ftb->target = this;
+    ftb->base_dd_min = ftb->base_dd_max = legacy_azerite.fit_to_burst.value();
+    action.legacy_fit_to_burst = ftb;
+  }
+
+  // BracketSim legacy compatibility: Bonedust Brew's shadow echo.
+  if ( legacy_covenant.bonedust_brew->ok() )
+  {
+    auto bdb = new monk_spell_t( this, "bonedust_brew_damage", legacy_covenant.bonedust_brew_damage );
+    bdb->background = bdb->proc = true;
+    bdb->may_crit = false;
+    action.legacy_bonedust_brew_damage = bdb;
+  }
+
+  // Legacy Azerite: Sunrise Technique's extra hit.
+  if ( legacy_azerite.sunrise_technique.ok() )
+  {
+    auto st = new monk_melee_attack_t( this, "legacy_sunrise_technique", find_spell( 275673 ) );
+    st->background = true;
+    st->may_crit = true;
+    st->trigger_gcd = timespan_t::zero();
+    st->min_gcd = timespan_t::zero();
+    st->base_dd_min = st->base_dd_max = legacy_azerite.sunrise_technique.value();
+    action.legacy_sunrise_technique = st;
+  }
 }
 
 void monk_t::init_base_stats()
@@ -6191,14 +7011,37 @@ struct training_of_niuzao_buff_t : buffs::monk_buff_t<>
 
 void monk_t::create_buffs()
 {
+  // BracketSim legacy compatibility: Weapons of Order. Only effect 1, the
+  // Mastery gain, is applied: effects 2 to 5 are unused template rows that the
+  // ability never granted in game.
+  buff.legacy_weapons_of_order =
+      make_buff( this, "weapons_of_order", legacy_covenant.weapons_of_order )
+          ->set_default_value_from_effect( 1, 0.01 )
+          ->set_pct_buff_type( STAT_PCT_BUFF_MASTERY )
+          ->set_chance( legacy_covenant.weapons_of_order->ok() ? 1.0 : 0.0 );
+
+  // BracketSim legacy compatibility: Invoker's Delight (7082) was detected but
+  // never had a buff to grant. Its haste comes straight from spell 338321.
+  buff.legacy_invokers_delight =
+      make_buff( this, "legacy_invokers_delight", find_spell( 338321 ) )
+          ->set_default_value_from_effect( 1, 0.01 )
+          ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+          ->set_chance( shadowlands_legacy.invokers_delight ? 1.0 : 0.0 );
+
   create_stagger<debuff_override_t, self_damage_override>(
       { baseline.brewmaster.stagger_self_damage,
         { { baseline.brewmaster.light_stagger, 0.0 },
           { baseline.brewmaster.moderate_stagger, 0.2 },
           { baseline.brewmaster.heavy_stagger, 0.6 },
           { spell_data_t::nil(), 10.0 } },
-        { "quick_sip", "staggering_strikes", "touch_of_death", "purifying_brew", "tranquil_spirit_eh",
-          "tranquil_spirit_goto" },
+        // BracketSim legacy compatibility: "legacy_staggering_strikes" MUST be
+        // in this list. purify_flat() asserts the token is registered and then
+        // does mitigated_by_ability[ token ]->add(), and the assert is compiled
+        // out in a release build - so a missing token default-constructs a null
+        // pointer and dereferences it. The azerite trait crashed the sim with
+        // an access violation on BOTH monk specs until this line was added.
+        { "quick_sip", "staggering_strikes", "legacy_staggering_strikes", "touch_of_death",
+          "purifying_brew", "tranquil_spirit_eh", "tranquil_spirit_goto" },
         [ this ]() { return specialization() == MONK_BREWMASTER; },
         [ this ]( school_e, result_amount_type, const action_state_t *state ) {
           if ( state->action->id == baseline.brewmaster.stagger_self_damage->id() )
@@ -6240,6 +7083,55 @@ void monk_t::create_buffs()
         } } );
 
   base_t::create_buffs();
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite trait buffs.
+  buff.swift_roundhouse = make_buff( this, "swift_roundhouse", find_spell( 278710 ) )
+                              ->set_default_value( legacy_azerite.swift_roundhouse.value() );
+  buff.legacy_pressure_point = make_buff( this, "legacy_pressure_point", find_spell( 247255 ) )
+                                   ->set_default_value( legacy_azerite.pressure_point.value() );
+  // Legacy Azerite: Dance of Chi-Ji. Deliberately NOT buff.dance_of_chiji -
+  // that one belongs to the modern talent and is built with chance 1.0 when the
+  // talent is absent, which would fire this on every Chi spend instead of on
+  // the trait's own proc rate. 286586 carries that rate.
+  buff.legacy_dance_of_chiji = make_buff( this, "legacy_dance_of_chiji", find_spell( 286587 ) )
+                                   ->set_trigger_spell( find_spell( 286586 ) )
+                                   ->set_chance( legacy_azerite.dance_of_chiji.ok()
+                                                     ? find_spell( 286586 )->proc_chance()
+                                                     : 0.0 );
+  // Legacy Azerite: Fury of Xuen. 287062 stacks on Combo Strikes and its third
+  // effect is the per-stack chance, stored as a percentage of a percent.
+  // 287063 is the Haste reward and its duration is how long the tiger stays.
+  buff.legacy_fury_of_xuen_stacks =
+      make_buff( this, "legacy_fury_of_xuen_stacks", find_spell( 287062 ) )
+          ->set_default_value( ( find_spell( 287062 )->effectN( 3 ).base_value() / 100 ) * 0.01 )
+          ->set_chance( legacy_azerite.fury_of_xuen.ok() ? 1.0 : 0.0 );
+  buff.legacy_fury_of_xuen_haste =
+      make_buff<stat_buff_t>( this, "legacy_fury_of_xuen_haste", find_spell( 287063 ) )
+          ->add_stat( STAT_HASTE_RATING, legacy_azerite.fury_of_xuen.value() );
+
+  // Legacy Azerite: Iron Fists raises Fists of Fury's crit chance when it lands
+  // on enough targets.
+  buff.legacy_iron_fists = make_buff<stat_buff_t>( this, "legacy_iron_fists", find_spell( 272806 ) )
+                               ->add_stat( STAT_CRIT_RATING, legacy_azerite.iron_fists.value() )
+                               ->set_chance( legacy_azerite.iron_fists.ok() ? 1.0 : 0.0 );
+  // Legacy Azerite: Fit to Burst heals over its stacks after a Purifying Brew
+  // used out of Heavy Stagger.
+  buff.legacy_fit_to_burst = make_buff( this, "legacy_fit_to_burst", find_spell( 275893 ) )
+                                 ->set_chance( legacy_azerite.fit_to_burst.ok() ? 1.0 : 0.0 )
+                                 ->set_period( 1_s )
+                                 ->set_tick_behavior( buff_tick_behavior::CLIP )
+                                 ->set_tick_callback( [ this ]( buff_t *, int, timespan_t ) {
+                                   if ( action.legacy_fit_to_burst )
+                                     action.legacy_fit_to_burst->execute();
+                                 } );
+  // Legacy Azerite: Sunrise Technique arms the extra hit after a Rising Sun Kick.
+  buff.legacy_sunrise_technique = make_buff( this, "legacy_sunrise_technique", find_spell( 273298 ) )
+                                      ->set_chance( legacy_azerite.sunrise_technique.ok() ? 1.0 : 0.0 );
+  // Legacy Azerite: Training of Niuzao grants Mastery scaled by the Stagger band.
+  buff.legacy_training_of_niuzao = make_buff<stat_buff_t>( this, "legacy_training_of_niuzao", find_spell( 278767 ) )
+                                       ->add_stat( STAT_MASTERY_RATING, legacy_azerite.training_of_niuzao.value() )
+                                       ->set_max_stack( 3 )
+                                       ->set_chance( legacy_azerite.training_of_niuzao.ok() ? 1.0 : 0.0 );
 
   // Monk
   buff.combat_wisdom = make_buff_fallback( talent.windwalker.combat_wisdom->ok(), this, "combat_wisdom",
@@ -6539,6 +7431,7 @@ void monk_t::init_gains()
 {
   base_t::init_gains();
 
+  gain.legacy_open_palm_strikes = get_gain( "Open Palm Strikes (Azerite)" );
   gain.black_ox_brew_energy = get_gain( "black_ox_brew_energy" );
   gain.combo_breaker        = get_gain( "combo_breaker" );
   gain.chi_refund           = get_gain( "chi_refund" );
@@ -6986,6 +7879,42 @@ void monk_t::init_finished()
   parse_player_effects();
 }
 
+
+// BracketSim legacy compatibility: Vision of Perfection (Heart of Azeroth major
+// essence). The engine procs it and calls this; each spec fires its signature
+// cooldown early, at the fraction of its duration the essence grants.
+void monk_t::vision_of_perfection_proc()
+{
+  auto essence = find_azerite_essence( "Vision of Perfection" );
+  if ( !essence.enabled() )
+    return;
+
+  double mult = essence.spell( 1u )->effectN( 1 ).percent() +
+                essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
+
+  buff_t* window = nullptr;
+  switch ( specialization() )
+  {
+    case MONK_WINDWALKER:
+      window = buff.zenith;
+      break;
+    case MONK_BREWMASTER:
+      window = buff.invoke_niuzao;
+      break;
+    default:
+      break;
+  }
+
+  if ( !window || mult <= 0 )
+    return;
+
+  timespan_t dur = window->buff_duration() * mult;
+  if ( window->check() )
+    window->extend_duration( dur );
+  else
+    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+}
+
 void monk_t::reset()
 {
   base_t::reset();
@@ -7076,6 +8005,10 @@ void monk_t::create_options()
 {
   base_t::create_options();
 
+  add_option( opt_bool( "monk.legacy_shadowlands_enabled",
+                        shadowlands_legacy.legacy_shadowlands_enabled ) );
+  add_option( opt_string( "monk.legacy_covenant", legacy_covenant.chosen ) );
+  add_option( opt_string( "monk.legacy_conduits", legacy_conduits.option ) );
   add_option( opt_int( "monk.initial_chi", user_options.initial_chi, 0, 6 ) );
   add_option( opt_int( "monk.chi_burst_healing_targets", user_options.chi_burst_healing_targets, 0, 30 ) );
 

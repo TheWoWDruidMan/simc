@@ -87,6 +87,50 @@ void warlock_pet_t::create_buffs()
   buffs.embers->quiet = true;
 }
 
+/*
+ * BracketSim legacy compatibility: Relic of Demonic Synergy, runeforge 7027 -
+ * the demon's half of it.
+ *
+ * "Damage done by you or your primary demon has a chance to grant THE OTHER ONE
+ * increased damage." A proc callback only fires for the actor it is registered
+ * on, so the demon's driver has to live on the demon, and it grants the buff
+ * the WARLOCK wears. `is_main_pet` is what "primary demon" means here - the
+ * Imp, Voidwalker, Felhunter, Succubus or Felguard, whichever is summoned.
+ */
+void warlock_pet_t::init_special_effects()
+{
+  pet_t::init_special_effects();
+
+  if ( !is_main_pet || !o()->shadowlands_legacy.relic_of_demonic_synergy )
+    return;
+
+  auto const synergy = new special_effect_t( this );
+  synergy->name_str = "legacy_relic_of_demonic_synergy_pet";
+  synergy->spell_id = 337057;
+  synergy->custom_buff = o()->buffs.legacy_demonic_synergy;
+  special_effects.push_back( synergy );
+
+  // See warlock_t::init_special_effects: pushed after the base class has already
+  // initialized everything, so this one initializes itself.
+  auto cb = new dbc_proc_callback_t( this, *synergy );
+  cb->initialize();
+}
+
+/*
+ * And the buff the demon WEARS, granted by the warlock's own damage. It is held
+ * on the warlock because a demon that has not been summoned yet has no buff to
+ * raise; only the primary demon reads it, which is who the spell names.
+ */
+double warlock_pet_t::composite_player_multiplier( school_e school ) const
+{
+  double m = pet_t::composite_player_multiplier( school );
+
+  if ( is_main_pet && o()->buffs.legacy_demonic_synergy_pet->check() )
+    m *= 1.0 + o()->buffs.legacy_demonic_synergy_pet->check_value();
+
+  return m;
+}
+
 void warlock_pet_t::init_base_stats()
 {
   pet_t::init_base_stats();
@@ -238,6 +282,19 @@ void warlock_pet_t::demise()
 warlock_pet_td_t::warlock_pet_td_t( player_t* target, warlock_pet_t& p ) :
   actor_target_data_t( target, &p ), pet( p )
 {
+  // BracketSim legacy compatibility: Infernal Brand. Spell 340045 is absent
+  // from Midnight's data, so a buff built from it would have no duration and a
+  // single stack - it measured a flat one-stack +4%, which is not the conduit.
+  // The 8 second duration and 15 stack cap are read from the archived 9.2.7
+  // client data in simc-shadowlands' sc_spell_data.inc, the same source
+  // legacy_conduits.hpp already carries its rank table from.
+  debuffs.legacy_infernal_brand =
+      make_buff( *this, "legacy_infernal_brand", pet.o()->find_spell( 340045 ) )
+          ->set_duration( 8_s )
+          ->set_max_stack( 15 )
+          ->set_default_value( pet.o()->legacy_conduits.percent( 214 ) )
+          ->set_chance( pet.o()->legacy_conduits.has( 214 ) ? 1.0 : 0.0 );
+
   debuffs.whiplash = make_buff( *this, "whiplash", pet.o()->find_spell( 6360 ) )
                         ->set_default_value( pet.o()->find_spell( 6360 )->effectN( 2 ).percent() )
                         ->set_max_stack( pet.o()->find_spell( 6360 )->max_stacks() - 1 ); // Data erroneously has 11 as the maximum stack
@@ -541,6 +598,22 @@ felguard_pet_t::felguard_pet_t( warlock_t* owner, util::string_view name )
 
   is_main_pet = true;
 }
+
+// BracketSim legacy compatibility: the conduit Fel Commando (207) makes the
+// Felguard deal more damage (and take less, which a damage sim does not model).
+// Shadowlands applied it inside warlock_pet_t::composite_player_multiplier
+// behind a pet_type == PET_FELGUARD test; Midnight's base has no such branch,
+// so it lives on the Felguard itself, which is the same set of pets.
+double felguard_pet_t::composite_player_multiplier( school_e school ) const
+{
+  double m = warlock_pet_t::composite_player_multiplier( school );
+
+  m *= 1.0 + o()->legacy_conduits.percent( 207 );
+
+  return m;
+}
+
+
 
 struct felguard_melee_t : public warlock_pet_melee_t
 {
@@ -1121,7 +1194,14 @@ struct dreadstalker_melee_t : warlock_pet_melee_t
   {
     warlock_pet_melee_t::execute();
 
-    if ( p()->o()->talents.carnivorous_stalkers.ok() && p()->o()->flat_rng.carnivorous_stalkers->trigger() )
+    // BracketSim legacy compatibility: the conduit Carnivorous Stalkers (205)
+    // is a second, independent roll alongside the modern talent of the same
+    // name - a player can have either, both, or neither. The talent uses a
+    // flat_rng deck; the conduit is a plain roll, which is how Shadowlands
+    // wrote it, so the two are deliberately not merged into one chance.
+    if ( ( p()->o()->talents.carnivorous_stalkers.ok() && p()->o()->flat_rng.carnivorous_stalkers->trigger() ) ||
+         ( p()->o()->legacy_conduits.has( 205 ) &&
+           rng().roll( p()->o()->legacy_conduits.percent( 205 ) ) ) )
     {
       debug_cast<dreadstalker_t*>( p() )->dreadbite_executes++;
       p()->o()->procs.carnivorous_stalkers->occur();
@@ -1236,6 +1316,10 @@ void dreadstalker_t::demise()
   {
     o()->buffs.dreadstalkers->decrement();
 
+    // Legacy Azerite: Shadow's Bite empowers Demonbolt when the dogs leave.
+    if ( o()->legacy_azerite.shadows_bite.ok() )
+      o()->buffs.legacy_shadows_bite->trigger();
+
     if ( o()->talents.summon_demonic_tyrant.ok() )
     {
       for ( auto t : o()->warlock_pet_list.demonic_tyrants )
@@ -1263,6 +1347,12 @@ double dreadstalker_t::composite_player_multiplier( school_e school ) const
   // NOTE: 2026-08-27 The MID1 4pc damage increase does not apply in-game; its duration increase still works (bug)
   if ( !o()->bugs && o()->active_4pc<MID1>() )
     m *= 1.0 + o()->tier.wl_demonology_12_0_class_set_4pc->effectN( 1 ).percent();
+
+  // BracketSim legacy compatibility: Grim Inquisitor's Dread Calling (7034).
+  // The percent these dogs were SUMMONED with, not whatever has been banked
+  // since - see warlock_t::legacy_dread_calling_summoned.
+  if ( o()->shadowlands_legacy.grim_inquisitors_dread_calling )
+    m *= 1.0 + o()->legacy_dread_calling_summoned;
 
   return m;
 }
@@ -1530,6 +1620,16 @@ struct demonfire_t : public warlock_pet_spell_t
   demonfire_t( warlock_pet_t* p, util::string_view options_str )
     : warlock_pet_spell_t( "Demonfire", p, p->find_spell( 270481 ) )
   { parse_options( options_str ); }
+
+  // Legacy Azerite: Baleful Invocation also strengthens the Tyrant's Demonfire.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = warlock_pet_spell_t::bonus_da( s );
+
+    da += p()->o()->legacy_azerite.baleful_invocation.value( 1 );
+
+    return da;
+  }
 };
 
 struct burning_cleave_t : public warlock_pet_spell_t
@@ -1595,6 +1695,26 @@ void demonic_tyrant_t::arise()
   warlock_pet_t::arise();
 
   leap_executes = 1;
+}
+
+void demonic_tyrant_t::demise()
+{
+  // Legacy Azerite: Supreme Commander pays out when the Tyrant leaves.
+  if ( !current.sleeping && o()->legacy_azerite.supreme_commander.ok() )
+  {
+    o()->buffs.demonic_core->trigger( 1 );
+    o()->buffs.legacy_supreme_commander->trigger();
+  }
+
+  // BracketSim legacy compatibility: the conduit Tyrant's Soul (206) pays out
+  // at the same moment and independently of the azerite trait above.
+  if ( !current.sleeping && o()->legacy_conduits.has( 206 ) )
+  {
+    o()->buffs.demonic_core->trigger( 1 );
+    o()->buffs.legacy_tyrants_soul->trigger();
+  }
+
+  warlock_pet_t::demise();
 }
 
 double demonic_tyrant_t::composite_player_multiplier( school_e school ) const
@@ -2068,6 +2188,18 @@ struct immolation_tick_t : public warlock_pet_spell_t
     aoe = -1;
     background = may_crit = true;
   }
+
+  // BracketSim legacy compatibility: Infernal Brand amplifies the Infernal's
+  // own Immolation on every target it has branded.
+  double composite_target_da_multiplier( player_t* t ) const override
+  {
+    double m = warlock_pet_spell_t::composite_target_da_multiplier( t );
+
+    if ( pet_td( t )->debuffs.legacy_infernal_brand->check() )
+      m *= 1.0 + pet_td( t )->debuffs.legacy_infernal_brand->check_stack_value();
+
+    return m;
+  }
 };
 
 struct infernal_melee_t : warlock_pet_melee_t
@@ -2075,6 +2207,15 @@ struct infernal_melee_t : warlock_pet_melee_t
   infernal_melee_t( warlock_pet_t* p, double wm, const char* name = "melee" ) :
     warlock_pet_melee_t ( p, wm, name )
   { }
+
+  // BracketSim legacy compatibility: Infernal Brand stacks on every melee.
+  void impact( action_state_t* s ) override
+  {
+    warlock_pet_melee_t::impact( s );
+
+    if ( p()->o()->legacy_conduits.has( 214 ) )
+      pet_td( s->target )->debuffs.legacy_infernal_brand->trigger();
+  }
 };
 
 void infernal_t::init_base_stats()

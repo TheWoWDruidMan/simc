@@ -1478,6 +1478,11 @@ void item::khazgoroths_courage( special_effect_t& effect )
       if ( new_ == 1 ) secondary_cb -> activate();
       else             secondary_cb -> deactivate();
     } );
+
+  // BracketSim (26 Sep 2026): the handler built the buff but never registered the callback that
+  // triggers it, so Mark of Khaz'goroth could not proc at any level (register: "implemented, not
+  // observable"). Caged Horror and the rest of this file register theirs explicitly.
+  new dbc_proc_callback_t( effect.item, effect );
 }
 
 // Golganneth's Vitality ===================================================
@@ -1523,6 +1528,9 @@ void item::norgannons_prowess( special_effect_t& effect )
 {
   effect.proc_flags_ = effect.driver() -> proc_flags() | PF_NONE_HARMFUL;
   effect.custom_buff = effect.create_buff();
+
+  // BracketSim (26 Sep 2026): same gap as Khaz'goroth's Courage - no callback, so it never procced.
+  new dbc_proc_callback_t( effect.item, effect );
 }
 
 // Prototype Personnel Decimator ===========================================
@@ -2129,7 +2137,18 @@ struct bulwark_of_flame_t : public absorb_buff_t
     // Ensure there is no double-player-ready event created if the player is channeling something
     // while this ability is being used. This is technically a bug, but for now the workaround is to
     // not crash the sim.
-    if ( player -> channeling )
+    //
+    // BracketSim: CASTING counts too, not just channeling. The shield expires on
+    // its own timer, so it can expire while the player is part way through an
+    // ordinary cast - `player->executing` set, `player->channeling` null. The
+    // ready event scheduled below then exists when that cast's own execute event
+    // fires, and action.cpp throws "non-channeling Action ... is trying to
+    // overwrite player-ready-event upon execute". Measured on a level 80 shadow
+    // priest wearing item 151978: it died on Vampiric Touch at iteration 2.
+    //
+    // A cast schedules its own ready event when it finishes, so there is nothing
+    // for this handler to do in that case either.
+    if ( player -> channeling || player -> executing )
     {
       return;
     }

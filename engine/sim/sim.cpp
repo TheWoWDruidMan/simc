@@ -1470,6 +1470,7 @@ sim_t::sim_t()
     challenge_mode( false ),
     scale_itemlevel_down_only( false ),
     disable_set_bonuses( false ),
+    bracketsim_legacy_set_bonuses( false ),
     enable_taunts( false ),
     use_item_verification( true ),
     pvp_rules(),
@@ -3913,6 +3914,7 @@ void sim_t::create_options()
   add_option( opt_int( "scale_to_itemlevel", scale_to_itemlevel ) );
   add_option( opt_bool( "scale_itemlevel_down_only", scale_itemlevel_down_only ) );
   add_option( opt_bool( "disable_set_bonuses", disable_set_bonuses ) );
+  add_option( opt_bool( "bracketsim_legacy_set_bonuses", bracketsim_legacy_set_bonuses ) );
   add_option( opt_string( "disable_2_set", disable_2_set ) );
   add_option( opt_string( "disable_4_set", disable_4_set ) );
   add_option( opt_string( "enable_2_set", enable_2_set ) );

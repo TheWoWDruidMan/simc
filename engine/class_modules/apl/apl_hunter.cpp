@@ -248,6 +248,17 @@ void marksmanship( player_t* p )
   default_->add_action( "call_action_list,name=sentaoe,if=active_enemies>2&talent.trick_shots&hero_tree.sentinel" );
   default_->add_action( "call_action_list,name=drst,if=hero_tree.dark_ranger" );
   default_->add_action( "call_action_list,name=sentst,if=hero_tree.sentinel" );
+  // BracketSim: every branch above requires a hero tree, and hero trees start
+  // at level 71. A character below that matched nothing and cast NOTHING - a
+  // real level 60 Marksmanship hunter sat at 956 dps firing only auto shot,
+  // while the same character on a three-line action list did 2894. This is the
+  // only spec in the file with no ungated branch.
+  //
+  // The fallback is sentst rather than a hand-written rotation: it is a list
+  // this file already maintains, and any action in it the character cannot use
+  // is skipped, so nothing is invented here.
+  default_->add_action( "call_action_list,name=sentaoe,if=active_enemies>2&!hero_tree.dark_ranger&!hero_tree.sentinel" );
+  default_->add_action( "call_action_list,name=sentst,if=!hero_tree.dark_ranger&!hero_tree.sentinel" );
 
   cds->add_action( "invoke_external_buff,name=power_infusion,if=buff.trueshot.remains>12|fight_remains<13" );
   cds->add_action( "berserking,if=buff.trueshot.up|fight_remains<13" );
@@ -350,6 +361,17 @@ void marksmanship_ptr( player_t* p )
   default_->add_action( "call_action_list,name=sentaoe,if=active_enemies>2&talent.trick_shots&hero_tree.sentinel" );
   default_->add_action( "call_action_list,name=drst,if=hero_tree.dark_ranger" );
   default_->add_action( "call_action_list,name=sentst,if=hero_tree.sentinel" );
+  // BracketSim: every branch above requires a hero tree, and hero trees start
+  // at level 71. A character below that matched nothing and cast NOTHING - a
+  // real level 60 Marksmanship hunter sat at 956 dps firing only auto shot,
+  // while the same character on a three-line action list did 2894. This is the
+  // only spec in the file with no ungated branch.
+  //
+  // The fallback is sentst rather than a hand-written rotation: it is a list
+  // this file already maintains, and any action in it the character cannot use
+  // is skipped, so nothing is invented here.
+  default_->add_action( "call_action_list,name=sentaoe,if=active_enemies>2&!hero_tree.dark_ranger&!hero_tree.sentinel" );
+  default_->add_action( "call_action_list,name=sentst,if=!hero_tree.dark_ranger&!hero_tree.sentinel" );
 
   cds->add_action( "invoke_external_buff,name=power_infusion,if=buff.trueshot.remains>12|fight_remains<13" );
   cds->add_action( "berserking,if=buff.trueshot.up|fight_remains<13" );

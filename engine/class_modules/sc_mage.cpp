@@ -4,6 +4,9 @@
 // ==========================================================================
 
 #include "simulationcraft.hpp"
+
+// BracketSim legacy compatibility: Shadowlands conduits.
+#include "player/legacy_conduits.hpp"
 #include "util/util.hpp"
 #include "class_modules/apl/mage.hpp"
 #include "report/charts.hpp"
@@ -84,7 +87,9 @@ enum class ao_type
 enum class meteor_type
 {
   NORMAL,
-  ISOTHERMIC
+  ISOTHERMIC,
+  // BracketSim legacy compatibility: the free Meteor from Molten Skyfall.
+  LEGACY_MOLTEN_SKYFALL
 };
 
 enum class arcane_phoenix_rotation
@@ -109,6 +114,14 @@ struct mage_td_t final : public actor_target_data_t
     buff_t* freezing;
     buff_t* freezing_winds;
     buff_t* touch_of_the_magi;
+    // BracketSim legacy compatibility: Radiant Spark's vulnerability window,
+    // which is also what Harmonic Echo reads.
+    buff_t* legacy_radiant_spark_vulnerability;
+
+    // BracketSim legacy compatibility: Packed Ice (Battle for Azeroth).
+    buff_t* packed_ice;
+    // BracketSim legacy compatibility: Grisly Icicle (Shadowlands runeforge).
+    buff_t* legacy_grisly_icicle;
   } debuffs;
 
   mage_td_t( player_t* target, mage_t* mage );
@@ -232,6 +245,10 @@ public:
     action_t* flash_freezeburn;
     action_t* frostfire_empowerment;
     action_t* glacial_assault;
+    // BracketSim legacy compatibility: the Battle for Azeroth trait of the same
+    // name is a separate source with its own damage and proc chance, so it gets
+    // its own action rather than sharing the modern talent's.
+    action_t* legacy_glacial_assault;
     action_t* hand_of_frost;
     action_t* ignite;
     action_t* isothermic_comet_storm;
@@ -243,6 +260,10 @@ public:
     action_t* splinter;
     action_t* touch_of_the_magi_explosion;
     action_t* winters_end;
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    action_t* legacy_frozen_orb;
+    action_t* legacy_glacial_fragments;
+    action_t* legacy_meteor;
 
     struct shatter_actions_t
     {
@@ -251,6 +272,9 @@ public:
       action_t* ice_lance;
       action_t* meteor;
     } shatter;
+
+    // BracketSim legacy compatibility: Harmonic Echo.
+    action_t* legacy_harmonic_echo = nullptr;
   } action;
 
   // Benefits
@@ -272,6 +296,8 @@ public:
     buff_t* arcane_salvo;
     buff_t* arcane_surge;
     buff_t* clearcasting;
+    // BracketSim legacy compatibility: Heart of the Fae.
+    buff_t* legacy_heart_of_the_fae;
     buff_t* cumulative_power;
     buff_t* enlightened;
     buff_t* evocation;
@@ -292,17 +318,31 @@ public:
     buff_t* hot_streak;
     buff_t* pyroclasm;
 
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite powers.
+    buff_t* arcane_pummeling;
+    buff_t* blaster_master;
+    buff_t* brain_storm;
+    buff_t* enhanced_pyrotechnics;
+    buff_t* firemind;
+    buff_t* flames_of_alacrity;
+    buff_t* frigid_grasp;
+    buff_t* tunnel_of_ice;
+    buff_t* wildfire;
+
 
     // Frost
     buff_t* brain_freeze;
     buff_t* comet_storm;
+    buff_t* deathborne;
     buff_t* fingers_of_frost;
     buff_t* freezing_rain;
     buff_t* glacial_spike;
     buff_t* hand_of_frost;
     buff_t* icicles;
+    buff_t* icy_veins;
     buff_t* permafrost_lances;
     buff_t* rapid_refreezing;
+    buff_t* slick_ice;
     buff_t* thermal_void;
 
 
@@ -326,6 +366,28 @@ public:
     // Shared
     buff_t* brainstorm;
     buff_t* overflowing_energy;
+
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    // Fevered Incantation and Freezing Winds are also current Midnight talents,
+    // so the legendary versions carry the legacy_ prefix and stack with them.
+    buff_t* legacy_arcane_harmony;
+    buff_t* legacy_nether_precision;
+    buff_t* legacy_cold_front;
+    buff_t* legacy_cold_front_ready;
+    buff_t* legacy_disciplinary_command;
+    buff_t* legacy_disciplinary_command_arcane;
+    buff_t* legacy_disciplinary_command_fire;
+    buff_t* legacy_disciplinary_command_frost;
+    buff_t* legacy_expanded_potential;
+    buff_t* legacy_fevered_incantation;
+    buff_t* legacy_firestorm;
+    buff_t* legacy_freezing_winds;
+    buff_t* legacy_molten_skyfall;
+    buff_t* legacy_molten_skyfall_ready;
+    buff_t* legacy_siphon_storm;
+    buff_t* legacy_sun_kings_blessing;
+    buff_t* legacy_sun_kings_blessing_ready;
+    buff_t* legacy_temporal_warp;
   } buffs;
 
   // Cooldowns
@@ -372,6 +434,8 @@ public:
     bool il_requires_freezing = false;
     bool il_sort_by_freezing = true;
     bool randomize_si_target = false;
+    bool legacy_shadowlands_enabled = true;
+    std::string legacy_unity_power = "auto";
   } options;
 
   // Pets
@@ -419,6 +483,11 @@ public:
     accumulated_rng_t* spellfire_spheres;
   } accumulated_rng;
 
+  struct rppms_t
+  {
+    real_ppm_t* deaths_fathom;
+  } rppm;
+
   // Sample data
   struct sample_data_t
   {
@@ -456,6 +525,7 @@ public:
     bool trigger_overpowered_missiles;
     bool gained_initial_clearcasting; // Used to prevent queueing Arcane Missiles immediately after gaining the first stack Clearclasting.
     timespan_t last_random_clearcasting; // Brainstorm cannot be triggered twice if a singular spell/action triggers Clearcasting twice.
+    bool thermal_void_active;
     int glorious_incandescence_snapshot;
     int fired_up_count; // number of Fired Up procs in this Combustion
   } state;
@@ -823,9 +893,91 @@ public:
     player_talent_t memory_of_alar;
   } talents;
 
+  // BracketSim legacy compatibility. These powers remain in the live DBC,
+  // but their class hooks were removed from upstream after Battle for Azeroth.
+  // BracketSim legacy compatibility: Tunnel of Ice only counts Frostbolts that
+  // keep hitting the same target, so the previous one has to be remembered.
+  player_t* last_frostbolt_target = nullptr;
+
+  struct azerite_powers_t
+  {
+    // Arcane
+    azerite_power_t arcane_pressure;
+    azerite_power_t arcane_pummeling;
+    azerite_power_t brain_storm;
+    azerite_power_t equipoise;
+    azerite_power_t explosive_echo;
+    azerite_power_t galvanizing_spark;
+
+    // Fire
+    azerite_power_t blaster_master;
+    azerite_power_t duplicative_incineration;
+    azerite_power_t firemind;
+    azerite_power_t flames_of_alacrity;
+    azerite_power_t trailing_embers;
+    azerite_power_t wildfire;
+
+    // Frost
+    azerite_power_t flash_freeze;
+    azerite_power_t frigid_grasp;
+    azerite_power_t glacial_assault;
+    azerite_power_t packed_ice;
+    azerite_power_t tunnel_of_ice;
+    azerite_power_t whiteout;
+  } azerite;
+
+  // BracketSim legacy compatibility: Shadowlands Runecarving powers. These
+  // are activated only by their original bonus IDs and do not affect current
+  // characters that are not wearing the old legendary items.
+  // BracketSim legacy compatibility: Shadowlands covenant abilities. Midnight
+  // has no covenant DBC, but every covenant spell still resolves, so they are
+  // looked up by id and gated on the chosen covenant. Covenants were chosen
+  // rather than equipped, so there is no bonus id to key them off.
+  struct legacy_covenant_t
+  {
+    std::string chosen = "none";
+    const spell_data_t* radiant_spark = spell_data_t::not_found();
+    const spell_data_t* shifting_power = spell_data_t::not_found();
+    const spell_data_t* mirrors_of_torment = spell_data_t::not_found();
+    const spell_data_t* deathborne = spell_data_t::not_found();
+  } legacy_covenant;
+
+  // BracketSim legacy compatibility: Shadowlands conduits. Midnight ships
+  // neither the ConduitRank table nor most conduit spells, so both the values
+  // and the ids come from legacy_conduits.hpp. Sockets are given as
+  // id:rank pairs, which is exactly what the in-game dump reports.
+  legacy_conduit::set_t legacy_conduits;
+
+  struct shadowlands_legacy_t
+  {
+    // These three ride a covenant ability, so they only do anything when the
+    // matching covenant is chosen as well.
+    bool harmonic_echo = false;
+    bool heart_of_the_fae = false;
+    bool sinful_delight = false;
+    bool slick_ice = false;
+    bool deaths_fathom = false;
+    bool arcane_bombardment = false;
+    bool arcane_harmony = false;
+    bool cold_front = false;
+    bool disciplinary_command = false;
+    bool expanded_potential = false;
+    bool fevered_incantation = false;
+    bool firestorm = false;
+    bool freezing_winds = false;
+    bool glacial_fragments = false;
+    bool grisly_icicle = false;
+    bool molten_skyfall = false;
+    bool siphon_storm = false;
+    bool sun_kings_blessing = false;
+    bool temporal_warp = false;
+  } shadowlands_legacy;
+
   mage_t( sim_t* sim, std::string_view name, race_e r = RACE_NONE );
 
   // Character Definition
+  // BracketSim legacy compatibility: Vision of Perfection.
+  void vision_of_perfection_proc() override;
   void init_spells() override;
   void init_base_stats() override;
   void create_buffs() override;
@@ -853,6 +1005,8 @@ public:
   std::unique_ptr<expr_t> create_action_expression( action_t&, std::string_view ) override;
   action_t* create_action( std::string_view, std::string_view ) override;
   void create_actions() override;
+  // BracketSim legacy compatibility: Sinful Delight.
+  void legacy_trigger_sinful_delight();
   void create_pets() override;
   resource_e primary_resource() const override { return RESOURCE_MANA; }
   role_e primary_role() const override { return ROLE_SPELL; }
@@ -904,6 +1058,7 @@ public:
   }
 
   void trigger_arcane_charge( int stacks = 1 );
+  void trigger_deaths_fathom();
   bool trigger_brain_freeze( double chance, proc_t* source, timespan_t delay = 0_ms );
   bool trigger_crowd_control( const action_state_t* s, spell_mechanic type );
   bool trigger_clearcasting( double chance = 1.0, bool allow_predict = true, bool has_double_proc_delay = false );
@@ -918,6 +1073,10 @@ public:
   int  trigger_shatter( player_t* target, action_t* action, int max_consumption, shatter_source_t* source, bool fof = false );
   void trigger_icicle( int count = 1, bool grant_buff = true );
   void trigger_arcane_salvo( proc_t* source, int stacks = 1, double chance = 1.0 );
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+  void trigger_legacy_disciplinary_command( school_e school );
+  void trigger_legacy_counter_buff( buff_t* counter, buff_t* ready, int offset = 1 );
+  bool consume_legacy_cold_front( player_t* target );
 };
 
 namespace pets {
@@ -1276,6 +1435,8 @@ struct arcane_phoenix_pet_t final : public mage_pet_t
   };
 
   void create_actions() override;
+  // BracketSim legacy compatibility: Sinful Delight.
+  void legacy_trigger_sinful_delight();
 };
 
 struct arcane_barrage_t final : public arcane_phoenix_spell_t
@@ -1405,6 +1566,21 @@ namespace buffs {
 
 // Custom buffs =============================================================
 
+// BracketSim legacy compatibility: Expanded Potential (Shadowlands runeforge).
+// The legendary does not add a proc of its own - it stops the next Clearcasting,
+// Hot Streak or Brain Freeze consumption from spending the stack, so the buff
+// has to sit on those three rather than on a hook.
+struct legacy_expanded_potential_buff_t final : public buff_t
+{
+  mage_t* mage;
+
+  legacy_expanded_potential_buff_t( mage_t* p, std::string_view name, const spell_data_t* spell_data ) :
+    buff_t( p, name, spell_data ), mage( p )
+  { }
+
+  void decrement( int stacks, double value ) override;
+};
+
 struct touch_of_the_magi_t final : public buff_t
 {
   touch_of_the_magi_t( mage_td_t* td ) :
@@ -1419,7 +1595,11 @@ struct touch_of_the_magi_t final : public buff_t
     buff_t::expire_override( stacks, duration );
 
     auto p = debug_cast<mage_t*>( source );
-    double damage = current_value * p->talents.touch_of_the_magi->effectN( 1 ).percent();
+    // BracketSim legacy compatibility: Magi's Brand adds to the share of the
+    // banked damage the explosion pays out.
+    double fraction = p->talents.touch_of_the_magi->effectN( 1 ).percent() +
+                      p->legacy_conduits.percent( 51 );
+    double damage = current_value * fraction;
     p->action.touch_of_the_magi_explosion->execute_on_target( player, damage );
   }
 };
@@ -1554,6 +1734,8 @@ struct mage_spell_t : public spell_t
     bool freeze_and_shatter_1 = false;
     bool freeze_and_shatter_2 = false;
     bool hand_of_frost = true;
+    bool legacy_deathborne = true;
+    bool legacy_deathborne_cleave = false;
     bool savant = false;
     bool spellfire_sphere = true;
 
@@ -1680,6 +1862,18 @@ public:
       salvo_source = p()->get_proc( fmt::format( "Arcane Salvo applied ({})", data().name_cstr() ) );
   }
 
+  int n_targets() const override
+  {
+    int targets = spell_t::n_targets();
+    if ( affected_by.legacy_deathborne_cleave && p()->buffs.deathborne->check() )
+    {
+      // Shadowlands Deathborne made Fireball, Frostbolt, and Arcane Blast
+      // strike the primary target plus two nearby enemies.
+      targets = std::max( targets, 1 + as<int>( p()->buffs.deathborne->data().effectN( 4 ).base_value() ) );
+    }
+    return targets;
+  }
+
   double action_multiplier() const override
   {
     double m = spell_t::action_multiplier();
@@ -1693,6 +1887,9 @@ public:
     if ( affected_by.hand_of_frost )
       m *= 1.0 + p()->buffs.hand_of_frost->check_stack_value();
 
+    if ( affected_by.legacy_deathborne )
+      m *= 1.0 + p()->buffs.deathborne->check_value();
+
     if ( affected_by.spellfire_sphere )
       m *= 1.0 + p()->buffs.spellfire_sphere->check_stack_value();
 
@@ -1701,6 +1898,18 @@ public:
 
     if ( affected_by.freeze_and_shatter_2 )
       m *= 1.0 + p()->cache.mastery() * p()->spec.freeze_and_shatter->effectN( 2 ).mastery_value();
+
+    return m;
+  }
+
+  double composite_target_multiplier( player_t* target ) const override
+  {
+    double m = spell_t::composite_target_multiplier( target );
+
+    // BracketSim legacy compatibility: Radiant Spark's window makes the target
+    // take more from the mage's spells, worth effect 1 of 307454 a stack.
+    if ( p()->legacy_covenant.radiant_spark->ok() )
+      m *= 1.0 + p()->get_target_data( target )->debuffs.legacy_radiant_spark_vulnerability->check_stack_value();
 
     return m;
   }
@@ -1846,7 +2055,23 @@ public:
     spell_t::execute();
 
     if ( affected_by.clearcasting )
+    {
       p()->buffs.clearcasting->decrement();
+
+      // BracketSim legacy compatibility: Sinful Delight. Effect 1 is the time
+      // taken off Mirrors of Torment each time Clearcasting is spent.
+      //
+      // These braces are a FIX, not a tidy-up. The call was indented as though
+      // it sat inside this if and had no braces around it, so it fired on every
+      // arcane spell execute rather than only when Clearcasting was spent -
+      // handing Mirrors of Torment far more cooldown reduction than the
+      // runeforge grants.
+      p()->legacy_trigger_sinful_delight();
+
+      // BracketSim legacy compatibility: the conduit Nether Precision (36).
+      // Spending Clearcasting is what grants it, which is why it lives here.
+      p()->buffs.legacy_nether_precision->trigger();
+    }
 
     if ( p()->spec.clearcasting->ok() && triggers.clearcasting )
     {
@@ -1866,6 +2091,9 @@ public:
 
     if ( triggers.spellfire_sphere )
       p()->trigger_spellfire_sphere( MAGE_ARCANE, background );
+
+    // BracketSim legacy compatibility: Disciplinary Command.
+    p()->trigger_legacy_disciplinary_command( get_school() );
   }
 
   void impact( action_state_t* s ) override
@@ -1895,6 +2123,34 @@ public:
 
     if ( p()->talents.fevered_incantation.ok() && s->result_type == result_amount_type::DMG_DIRECT )
       p()->trigger_merged_buff( p()->buffs.fevered_incantation, s->result == RESULT_CRIT );
+
+    // BracketSim legacy compatibility: Icy Propulsion. A critical strike while
+    // Icy Veins is up pulls its cooldown forward. The 0.1 factor and reading the
+    // value as seconds are both what Shadowlands SimulationCraft did; the value
+    // comes from the socketed rank. Icy Veins is Frost-only, so the buff check
+    // is also the spec check.
+    if ( s->result == RESULT_CRIT && p()->legacy_conduits.has( 20 ) &&
+         p()->buffs.icy_veins->check() )
+    {
+      p()->get_cooldown( "icy_veins" )->adjust(
+          -0.1 * timespan_t::from_seconds( p()->legacy_conduits.value( 20 ) ) );
+    }
+
+    // BracketSim legacy compatibility: Harmonic Echo repeats a share of every
+    // hit the spark's vulnerability window takes. Effect 1 of the runeforge is
+    // that share.
+    if ( p()->shadowlands_legacy.harmonic_echo && p()->action.legacy_harmonic_echo &&
+         this != p()->action.legacy_harmonic_echo &&
+         p()->get_target_data( s->target )->debuffs.legacy_radiant_spark_vulnerability->check() )
+    {
+      p()->action.legacy_harmonic_echo->execute_on_target(
+          s->target, s->result_total * p()->find_spell( 354186 )->effectN( 1 ).percent() );
+    }
+
+    // BracketSim legacy compatibility: the Shadowlands legendary of the same
+    // name keeps its own crit chain, and stacks with the modern talent.
+    if ( p()->shadowlands_legacy.fevered_incantation && s->result_type == result_amount_type::DMG_DIRECT )
+      p()->trigger_merged_buff( p()->buffs.legacy_fevered_incantation, s->result == RESULT_CRIT );
   }
 
   void assess_damage( result_amount_type rt, action_state_t* s ) override
@@ -1919,7 +2175,11 @@ public:
 
         // Arcane Echo doesn't use the normal callbacks system (both in simc and in game). To prevent
         // loops, we need to explicitly check that the triggering action wasn't Arcane Echo.
-        if ( p()->talents.arcane_echo.ok() && this != p()->action.arcane_echo && p()->cooldowns.arcane_echo->up() )
+        // BracketSim legacy compatibility (26 Sep 2026): the legacy Harmonic Echo is an echo too. Arcane Echo's
+        // hit triggered Harmonic Echo, whose hit triggered Arcane Echo, at the same instant forever - 60 Arcane's
+        // borrowed-power stage hung on Kyrian ("Simulation stuck"). An echo does not echo an echo.
+        if ( p()->talents.arcane_echo.ok() && this != p()->action.arcane_echo &&
+             this != p()->action.legacy_harmonic_echo && p()->cooldowns.arcane_echo->up() )
         {
           make_event( *sim, [ this, t = s->target ] { p()->action.arcane_echo->execute_on_target( t ); } );
           p()->cooldowns.arcane_echo->start();
@@ -2332,7 +2592,9 @@ struct hot_streak_spell_t : public custom_state_spell_t<fire_mage_spell_t, hot_s
 
   timespan_t execute_time() const override
   {
-    if ( p()->buffs.hot_streak->check() || p()->buffs.hyperthermia->check() )
+    // BracketSim legacy compatibility: Firestorm also makes the cast instant.
+    if ( p()->buffs.hot_streak->check() || p()->buffs.hyperthermia->check()
+      || p()->buffs.legacy_firestorm->check() )
       return 0_ms;
 
     return custom_state_spell_t::execute_time();
@@ -2359,13 +2621,21 @@ struct hot_streak_spell_t : public custom_state_spell_t<fire_mage_spell_t, hot_s
     double c = custom_state_spell_t::composite_crit_chance();
 
     c += p()->buffs.hyperthermia->check_value();
-
-    // The spelldata for Pyroclasm and the 12.1 2pc doesn't seem to be used,
-    // so we're hardcoding it here as they probably did serverside.
-    if ( pyroclasm_active() && p()->sets->has_set_bonus( MAGE_FIRE, MID2, B2 ) )
-      c += 1.0;
+    // BracketSim legacy compatibility: Firestorm.
+    c += p()->buffs.legacy_firestorm->check_value();
 
     return c;
+  }
+
+  result_e calculate_result( action_state_t* s ) const override
+  {
+    result_e r = custom_state_spell_t::calculate_result( s );
+
+    // TODO: Pyroclasm 2pc is likely scripted. Fuel the Fire does not see the increased crit chance.
+    if ( r == RESULT_HIT && pyroclasm_active() && p()->sets->has_set_bonus( MAGE_FIRE, MID2, B2 ) )
+      r = RESULT_CRIT;
+
+    return r;
   }
 
   double composite_da_multiplier( const action_state_t* s ) const override
@@ -2407,6 +2677,16 @@ struct hot_streak_spell_t : public custom_state_spell_t<fire_mage_spell_t, hot_s
       p()->trigger_spellfire_sphere( MAGE_FIRE );
     }
 
+    // BracketSim legacy compatibility: Sun King's Blessing. A hard cast spends
+    // the banked charge and extends or starts Combustion; Hot Streak casts feed
+    // the counter instead.
+    if ( !last_hot_streak && p()->buffs.legacy_sun_kings_blessing_ready->check() )
+    {
+      p()->buffs.legacy_sun_kings_blessing_ready->expire();
+      p()->buffs.combustion->extend_duration_or_trigger(
+        1000 * p()->find_spell( 333313 )->effectN( 2 ).time_value() );
+    }
+
     custom_state_spell_t::execute();
 
     // TODO: When exactly in execute does this trigger the first cinder?
@@ -2422,8 +2702,14 @@ struct hot_streak_spell_t : public custom_state_spell_t<fire_mage_spell_t, hot_s
     {
       p()->buffs.hot_streak->decrement();
       p()->buffs.pyroclasm->trigger();
+      p()->buffs.firemind->trigger();
 
       p()->buffs.mana_cascade->trigger();
+
+      // BracketSim legacy compatibility: Sun King's Blessing.
+      if ( p()->shadowlands_legacy.sun_kings_blessing )
+        p()->trigger_legacy_counter_buff( p()->buffs.legacy_sun_kings_blessing,
+                                          p()->buffs.legacy_sun_kings_blessing_ready );
     }
 
     // TODO: Pyromaniac seems to proc regardless of Hot Streak state
@@ -2595,6 +2881,195 @@ struct arcane_orb_bolt_t final : public arcane_mage_spell_t
   }
 };
 
+// BracketSim legacy compatibility: Shadowlands covenant abilities ==========
+// Damage, cooldown and cost all come from the covenant spells themselves,
+// which still resolve in current client data.
+
+// BracketSim legacy compatibility: Harmonic Echo echoes a share of the damage
+// the spark's vulnerability window takes.
+struct legacy_harmonic_echo_t final : public arcane_mage_spell_t
+{
+  legacy_harmonic_echo_t( std::string_view n, mage_t* p )
+    : arcane_mage_spell_t( n, p, p->find_spell( 354189 ) )
+  {
+    background = true;
+    may_crit = false;
+    aoe = -1;
+  }
+};
+
+struct legacy_radiant_spark_t final : public arcane_mage_spell_t
+{
+  legacy_radiant_spark_t( std::string_view n, mage_t* p, std::string_view options_str )
+    : arcane_mage_spell_t( n, p, p->legacy_covenant.radiant_spark )
+  {
+    parse_options( options_str );
+    affected_by.savant = true;
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    arcane_mage_spell_t::impact( s );
+    // Effect 3 of the spark is what opens the vulnerability window; the stack
+    // cap, duration and per-stack amount all live on 307454.
+    p()->get_target_data( s->target )->debuffs.legacy_radiant_spark_vulnerability->trigger();
+  }
+
+  void execute() override
+  {
+    arcane_mage_spell_t::execute();
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_KYRIAN,
+                                            cooldown );
+  }
+};
+
+struct legacy_shifting_power_pulse_t final : public arcane_mage_spell_t
+{
+  legacy_shifting_power_pulse_t( std::string_view n, mage_t* p )
+    : arcane_mage_spell_t( n, p, p->find_spell( 325130 ) )
+  {
+    background = true;
+    aoe = -1;
+  }
+};
+
+struct legacy_shifting_power_t final : public arcane_mage_spell_t
+{
+  action_t* pulse;
+  timespan_t cdr;
+
+  legacy_shifting_power_t( std::string_view n, mage_t* p, std::string_view options_str )
+    : arcane_mage_spell_t( n, p, p->legacy_covenant.shifting_power ),
+      pulse( get_action<legacy_shifting_power_pulse_t>( "shifting_power_pulse", p ) ),
+      cdr( timespan_t::from_millis( p->legacy_covenant.shifting_power->effectN( 2 ).base_value() ) +
+           // BracketSim legacy compatibility: Discipline of the Grove. Its value
+           // is negative milliseconds, in the same direction as the covenant's
+           // own reduction.
+           timespan_t::from_millis( p->legacy_conduits.value( 38 ) ) )
+  {
+    parse_options( options_str );
+
+    channeled = true;
+    add_child( pulse );
+  }
+
+  void tick( dot_t* d ) override
+  {
+    arcane_mage_spell_t::tick( d );
+
+    pulse->execute_on_target( d->target );
+
+    // BracketSim legacy compatibility: Heart of the Fae. Its movement clause is
+    // irrelevant to a patchwerk sim; the stacking crit and haste are not.
+    p()->buffs.legacy_heart_of_the_fae->trigger();
+
+    // Every pulse pulls the Mage's own cooldowns forward.
+    for ( auto cd : { p()->cooldowns.frozen_orb, p()->cooldowns.fire_blast } )
+      if ( cd )
+        cd->adjust( cdr, false );
+  }
+
+  void execute() override
+  {
+    arcane_mage_spell_t::execute();
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NIGHT_FAE,
+                                            cooldown );
+  }
+};
+
+// Each mirror is consumed when the target acts, no more often than the hidden
+// 345977 window allows, and each one lands an Agonizing Backlash. A sim target
+// acts constantly, so the mirrors are spent on that window: the count comes
+// from the covenant spell's effect 2 and the period from 345977.
+struct legacy_agonizing_backlash_t final : public arcane_mage_spell_t
+{
+  legacy_agonizing_backlash_t( std::string_view n, mage_t* p )
+    : arcane_mage_spell_t( n, p, p->find_spell( 320035 ) )
+  {
+    background = true;
+  }
+};
+
+struct legacy_deathborne_t final : public arcane_mage_spell_t
+{
+  timespan_t window;
+
+  legacy_deathborne_t( std::string_view n, mage_t* p, std::string_view options_str )
+    : arcane_mage_spell_t( n, p, p->legacy_covenant.deathborne ),
+      // The covenant ability's own 25 second window, plus Gift of the Lich in
+      // milliseconds. The buff object's default duration belongs to Death's
+      // Fathom, whose proc window is much shorter, so this one is passed
+      // explicitly at trigger time rather than by changing that default.
+      window( p->legacy_covenant.deathborne->duration() +
+              timespan_t::from_millis( p->legacy_conduits.value( 39 ) ) )
+  {
+    parse_options( options_str );
+    harmful = false;
+  }
+
+  void execute() override
+  {
+    arcane_mage_spell_t::execute();
+
+    p()->buffs.deathborne->trigger( 1, p()->buffs.deathborne->default_value, -1, window );
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NECROLORD,
+                                            cooldown );
+  }
+};
+
+struct legacy_mirrors_of_torment_t final : public arcane_mage_spell_t
+{
+  action_t* backlash;
+  int mirrors;
+
+  legacy_mirrors_of_torment_t( std::string_view n, mage_t* p, std::string_view options_str )
+    : arcane_mage_spell_t( n, p, p->legacy_covenant.mirrors_of_torment ),
+      backlash( new legacy_agonizing_backlash_t( "agonizing_backlash", p ) ),
+      mirrors( as<int>( p->legacy_covenant.mirrors_of_torment->effectN( 2 ).base_value() ) )
+  {
+    parse_options( options_str );
+    add_child( backlash );
+  }
+
+  void execute() override
+  {
+    arcane_mage_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_VENTHYR,
+                                            cooldown );
+
+    auto period = p()->find_spell( 345977 )->duration();
+    if ( period <= 0_ms || mirrors <= 0 )
+      return;
+
+    // The slow each backlash also applied is not modelled.
+    for ( int i = 1; i <= mirrors; i++ )
+    {
+      if ( period * i > data().duration() )
+        break;
+      make_event( *sim, period * i, [ this, t = target ] { backlash->execute_on_target( t ); } );
+    }
+  }
+};
+
 struct arcane_orb_t final : public arcane_mage_spell_t
 {
   const ao_type type;
@@ -2730,6 +3205,21 @@ struct arcane_barrage_t final : public arcane_mage_spell_t
 
     p()->buffs.arcane_charge->expire();
     p()->buffs.intuition->expire();
+    // BracketSim legacy compatibility: Arcane Harmony is spent by Arcane Barrage.
+    p()->buffs.legacy_arcane_harmony->expire();
+
+    // BracketSim legacy compatibility: Artifice of the Archmage. A chance to
+    // hand back Arcane Charges immediately after Barrage has spent them, which
+    // is why it sits after the expire above rather than before it.
+    //
+    // The 0.1 is not a fudge: Shadowlands stored this conduit's chance as a
+    // value where 100 means 10%, and multiplied by 0.1 at the read site. The
+    // archived table keeps that raw scale, so the same factor applies here.
+    if ( p()->legacy_conduits.has( 55 ) &&
+         rng().roll( 0.1 * p()->legacy_conduits.percent( 55 ) ) )
+    {
+      p()->trigger_arcane_charge( 4 );
+    }
 
     int salvo = p()->buffs.arcane_salvo->check();
 
@@ -2784,6 +3274,11 @@ struct arcane_barrage_t final : public arcane_mage_spell_t
   {
     double m = arcane_mage_spell_t::composite_da_multiplier( s );
 
+    // BracketSim legacy compatibility: Arcane Bombardment.
+    if ( p()->shadowlands_legacy.arcane_bombardment
+      && s->target->health_percentage() < p()->find_spell( 332892 )->effectN( 1 ).base_value() )
+      m *= 1.0 + p()->find_spell( 332892 )->effectN( 2 ).percent();
+
     if ( s->n_targets > 1 )
       m *= 1.0 + ( s->n_targets - 1 ) * p()->talents.resonance->effectN( 1 ).percent();
 
@@ -2797,8 +3292,28 @@ struct arcane_barrage_t final : public arcane_mage_spell_t
     am *= arcane_charge_multiplier( true );
     am *= 1.0 + p()->buffs.arcane_salvo->check_stack_value();
     am *= 1.0 + p()->buffs.intuition->check_value();
+    // BracketSim legacy compatibility: Arcane Harmony.
+    am *= 1.0 + p()->buffs.legacy_arcane_harmony->check_stack_value();
 
     return am;
+  }
+
+  // BracketSim legacy compatibility: Arcane Pressure. The bonus is divided out
+  // by the Arcane Charge multiplier because action_multiplier() applies that
+  // multiplier to the whole amount afterwards.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = arcane_mage_spell_t::bonus_da( s );
+
+    if ( p()->azerite.arcane_pressure.enabled() &&
+         s->target->health_percentage() <
+           p()->azerite.arcane_pressure.spell_ref().effectN( 2 ).base_value() )
+    {
+      da += p()->azerite.arcane_pressure.value() * p()->buffs.arcane_charge->check() /
+            arcane_charge_multiplier( true );
+    }
+
+    return da;
   }
 
   void impact( action_state_t* s ) override
@@ -2828,11 +3343,39 @@ struct arcane_barrage_t final : public arcane_mage_spell_t
 
 struct arcane_blast_t final : public arcane_mage_spell_t
 {
+  // BracketSim legacy compatibility: Equipoise. Its data is spread across two
+  // other spells, exactly as it was in Battle for Azeroth.
+  double equipoise_threshold = 0.0;
+  double equipoise_reduction = 0.0;
+
   arcane_blast_t( std::string_view n, mage_t* p, std::string_view options_str ) :
     arcane_mage_spell_t( n, p, p->find_specialization_spell( "Arcane Blast" ) )
   {
     parse_options( options_str );
+    affected_by.legacy_deathborne_cleave = true;
     triggers.clearcasting = triggers.spellfire_sphere = triggers.mana_cascade = true;
+
+    base_dd_adder += p->azerite.galvanizing_spark.value( 2 );
+
+    if ( p->azerite.equipoise.enabled() )
+    {
+      equipoise_threshold = p->find_spell( 264351 )->effectN( 1 ).percent();
+      equipoise_reduction = p->find_spell( 264353 )->effectN( 1 ).average( p );
+    }
+  }
+
+  // Equipoise adds damage above the mana threshold and cuts cost below it.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = arcane_mage_spell_t::bonus_da( s );
+
+    if ( p()->azerite.equipoise.enabled() &&
+         p()->resources.pct( RESOURCE_MANA ) > equipoise_threshold )
+    {
+      da += p()->azerite.equipoise.value();
+    }
+
+    return da;
   }
 
   double cost_pct_multiplier() const override
@@ -2844,6 +3387,21 @@ struct arcane_blast_t final : public arcane_mage_spell_t
     return c;
   }
 
+  // The other half of Equipoise: below the mana threshold it cuts a flat amount
+  // off the cost. equipoise_reduction is already negative in spell data.
+  double cost_flat_modifier() const override
+  {
+    double c = arcane_mage_spell_t::cost_flat_modifier();
+
+    if ( p()->azerite.equipoise.enabled() &&
+         p()->resources.pct( RESOURCE_MANA ) <= equipoise_threshold )
+    {
+      c += equipoise_reduction;
+    }
+
+    return c;
+  }
+
   void execute() override
   {
     p()->benefits.arcane_charge.arcane_blast->update();
@@ -2851,6 +3409,20 @@ struct arcane_blast_t final : public arcane_mage_spell_t
     arcane_mage_spell_t::execute();
 
     p()->trigger_arcane_charge( as<int>( data().effectN( 2 ).base_value() ) );
+
+    // BracketSim legacy compatibility: Nether Precision loses a stack per cast.
+    // Shadowlands delayed this by 15ms so the blast that consumed the stack
+    // still benefited from it; the same delay is kept here.
+    if ( p()->legacy_conduits.has( 36 ) )
+      make_event( *sim, 15_ms, [ this ] { p()->buffs.legacy_nether_precision->decrement(); } );
+
+    // BracketSim legacy compatibility: Galvanizing Spark grants an extra charge.
+    if ( p()->azerite.galvanizing_spark.enabled() &&
+         rng().roll( p()->azerite.galvanizing_spark.spell_ref().effectN( 1 ).percent() ) )
+    {
+      p()->trigger_arcane_charge();
+    }
+
     p()->trigger_arcane_salvo( salvo_source, as<int>( p()->talents.expanded_mind->effectN( 1 ).base_value() ) );
     p()->trigger_splinter( p()->target );
 
@@ -2858,6 +3430,17 @@ struct arcane_blast_t final : public arcane_mage_spell_t
       p()->buffs.presence_of_mind->decrement();
 
     p()->buffs.cumulative_power->expire();
+
+    // BracketSim legacy compatibility: Expanded Potential.
+    p()->buffs.legacy_expanded_potential->trigger();
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    arcane_mage_spell_t::impact( s );
+
+    if ( result_is_hit( s->result ) )
+      p()->trigger_deaths_fathom();
   }
 
   double action_multiplier() const override
@@ -2866,6 +3449,9 @@ struct arcane_blast_t final : public arcane_mage_spell_t
 
     am *= arcane_charge_multiplier();
     am *= 1.0 + p()->buffs.cumulative_power->check_stack_value();
+
+    // BracketSim legacy compatibility: the conduit Nether Precision (36).
+    am *= 1.0 + p()->buffs.legacy_nether_precision->check_value();
 
     return am;
   }
@@ -2954,6 +3540,25 @@ struct arcane_explosion_t final : public arcane_mage_spell_t
     parse_options( options_str );
     aoe = -1;
     triggers.clearcasting = true;
+
+    base_dd_adder += p->azerite.explosive_echo.value( 2 );
+  }
+
+  // BracketSim legacy compatibility: Explosive Echo. Rolls per cast once the
+  // target count clears the threshold in the trait's own spell data.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = arcane_mage_spell_t::bonus_da( s );
+
+    if ( p()->azerite.explosive_echo.enabled() &&
+         target_list().size() >=
+           as<size_t>( p()->azerite.explosive_echo.spell_ref().effectN( 1 ).base_value() ) &&
+         rng().roll( p()->azerite.explosive_echo.spell_ref().effectN( 3 ).percent() ) )
+    {
+      da += p()->azerite.explosive_echo.value( 4 );
+    }
+
+    return da;
   }
 
   void execute() override
@@ -3162,6 +3767,9 @@ struct arcane_missiles_tick_t final : public custom_state_spell_t<arcane_mage_sp
 
     if ( rng().roll( p()->talents.pyrocosm->effectN( 1 ).percent() ) )
       trigger_meteorite( target );
+
+    // BracketSim legacy compatibility: Arcane Harmony.
+    p()->buffs.legacy_arcane_harmony->trigger();
   }
 
   double action_multiplier() const override
@@ -3375,6 +3983,8 @@ struct blizzard_shard_t final : public frost_mage_spell_t
   blizzard_shard_t( std::string_view n, mage_t* p ) :
     frost_mage_spell_t( n, p, p->find_spell( 190357 ) )
   {
+    // BracketSim legacy compatibility: Shivering Core.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 18 );
     aoe = -1;
     reduced_aoe_targets = 8; // TODO: check if this is still the case
     background = proc = ground_aoe = true;
@@ -3518,6 +4128,7 @@ struct combustion_t final : public fire_mage_spell_t
     value += spheres * p()->talents.codex_of_the_sunstriders->effectN( 2 ).percent();
 
     buff->trigger( -1, value, -1.0, duration );
+    p()->buffs.wildfire->trigger();
     p()->cooldowns.fire_blast->reset( false, as<int>( p()->talents.spontaneous_combustion->effectN( 1 ).base_value() ) );
     if ( p()->pets.arcane_phoenix )
       p()->pets.arcane_phoenix->summon( duration ); // TODO: The extra random pet duration can sometimes result in an extra cast.
@@ -3678,12 +4289,46 @@ struct dragons_breath_t final : public fire_mage_spell_t
 
 struct evocation_t final : public arcane_mage_spell_t
 {
+  // BracketSim legacy compatibility: Brain Storm.
+  int brain_storm_charges = 0;
+  // BracketSim legacy compatibility: Siphon Storm (Shadowlands runeforge).
+  int siphon_storm_charges = 0;
+
   evocation_t( std::string_view n, mage_t* p, std::string_view options_str ) :
     arcane_mage_spell_t( n, p, p->talents.evocation )
   {
     parse_options( options_str );
     channeled = ignore_false_positive = tick_zero = true;
     harmful = false;
+
+    if ( p->azerite.brain_storm.enabled() )
+      brain_storm_charges = as<int>( p->find_spell( 288466 )->effectN( 1 ).base_value() );
+
+    if ( p->shadowlands_legacy.siphon_storm )
+      siphon_storm_charges = as<int>( p->find_spell( 332929 )->effectN( 1 ).base_value() );
+  }
+
+  void execute() override
+  {
+    arcane_mage_spell_t::execute();
+
+    if ( brain_storm_charges > 0 )
+    {
+      p()->trigger_arcane_charge( brain_storm_charges );
+      p()->buffs.brain_storm->trigger();
+    }
+
+    // BracketSim legacy compatibility: Siphon Storm also front-loads charges.
+    if ( siphon_storm_charges > 0 )
+      p()->trigger_arcane_charge( siphon_storm_charges );
+  }
+
+  void tick( dot_t* d ) override
+  {
+    arcane_mage_spell_t::tick( d );
+
+    // BracketSim legacy compatibility: Siphon Storm.
+    p()->buffs.legacy_siphon_storm->trigger();
   }
 
   void trigger_dot( action_state_t* s ) override
@@ -3711,97 +4356,20 @@ struct evocation_t final : public arcane_mage_spell_t
   }
 };
 
-// Common Frostfire Bolt behavior used by both fireball_t and frostbolt_t
-struct frostfire_data_t
-{
-  bool frostfire_empowerment = false;
-  void debug( std::ostringstream& s ) const { s << " ffe=" << frostfire_empowerment; }
-};
-
-template <typename Base>
-struct filler_spell_t : custom_state_spell_t<Base, frostfire_data_t>
+struct fireball_t final : public fire_mage_spell_t
 {
   const bool frostfire;
-
-  template <typename... Args>
-  filler_spell_t( bool frostfire_, Args&&... args ) :
-    super_t( std::forward<Args>( args )... ),
-    frostfire( frostfire_ )
-  { }
-
-  void snapshot_state( action_state_t* s, result_amount_type rt ) override
-  {
-    this->cast_state( s )->data.frostfire_empowerment = frostfire && this->p()->buffs.frostfire_empowerment->check();
-    super_t::snapshot_state( s, rt );
-  }
-
-  timespan_t execute_time() const override
-  {
-    if ( frostfire && this->p()->buffs.frostfire_empowerment->check() )
-      return 0_ms;
-
-    return super_t::execute_time();
-  }
-
-  bool apply_frostfire_empowerment( const action_state_t* s ) const
-  {
-    if ( this->sim->dbc->wowv() < wowv_t{ 12, 1, 5 } )
-      return frostfire && this->p()->state.trigger_ff_empowerment;
-    else
-      return frostfire && this->cast_state( s )->data.frostfire_empowerment;
-  }
-
-  void execute() override
-  {
-    super_t::execute();
-
-    if ( frostfire && this->p()->buffs.frostfire_empowerment->check() )
-    {
-      // Buff is decremented with a short delay, allowing two spells to benefit.
-      make_event( *this->sim, 15_ms, [ this ] { this->p()->buffs.frostfire_empowerment->decrement(); } );
-      this->p()->state.trigger_ff_empowerment = true;
-    }
-  }
-
-  void impact( action_state_t* s ) override
-  {
-    super_t::impact( s );
-
-    if ( this->result_is_hit( s->result ) && apply_frostfire_empowerment( s ) )
-    {
-      this->p()->state.trigger_ff_empowerment = false;
-
-      double amount = s->result_total;
-      // TODO: Doesn't seem to benefit from crits on the main target
-      if ( this->sim->dbc->wowv() >= wowv_t{ 12, 1, 5 } )
-        amount /= 1.0 + s->result_crit_bonus;
-      this->p()->action.frostfire_empowerment->execute_on_target( s->target, this->p()->talents.frostfire_empowerment->effectN( 2 ).percent() * amount );
-    }
-  }
-
-  double composite_da_multiplier( const action_state_t* s ) const override
-  {
-    double m = super_t::composite_da_multiplier( s );
-
-    if ( apply_frostfire_empowerment( s ) )
-      m *= 1.0 + this->p()->buffs.frostfire_empowerment->data().effectN( 3 ).percent();
-
-    return m;
-  }
-
-private:
-  using super_t = custom_state_spell_t<Base, frostfire_data_t>;
-};
-
-struct fireball_t final : public filler_spell_t<fire_mage_spell_t>
-{
   double master_of_flame_mult;
+  // BracketSim legacy compatibility: recursion guard for Duplicative Incineration.
+  bool duplicate = false;
 
   fireball_t( std::string_view n, mage_t* p, std::string_view options_str, bool frostfire_ = false ) :
-    filler_spell_t( frostfire_, n, p, frostfire_ ? p->talents.frostfire_bolt : p->find_specialization_spell( "Fireball" ) ),
+    fire_mage_spell_t( n, p, frostfire_ ? p->talents.frostfire_bolt : p->find_specialization_spell( "Fireball" ) ),
+    frostfire( frostfire_ ),
     master_of_flame_mult( 1.0 )
   {
     parse_options( options_str );
+    affected_by.legacy_deathborne_cleave = true;
     if ( frostfire )
       enable_calculate_on_impact( 468655 );
     affected_by.overflowing_energy = true;
@@ -3817,27 +4385,92 @@ struct fireball_t final : public filler_spell_t<fire_mage_spell_t>
 
   timespan_t travel_time() const override
   {
-    timespan_t t = filler_spell_t::travel_time();
+    timespan_t t = fire_mage_spell_t::travel_time();
     // TODO: Frostfire Bolt currently doesn't respect the max travel time
     return frostfire && p()->bugs ? t : std::min( t, 0.75_s );
   }
 
+  timespan_t execute_time() const override
+  {
+    if ( frostfire && p()->buffs.frostfire_empowerment->check() )
+      return 0_ms;
+
+    return fire_mage_spell_t::execute_time();
+  }
+
+  void execute() override
+  {
+    fire_mage_spell_t::execute();
+
+    if ( frostfire && p()->buffs.frostfire_empowerment->check() )
+    {
+      // Buff is decremented with a short delay, allowing two spells to benefit.
+      make_event( *sim, 15_ms, [ this ] { p()->buffs.frostfire_empowerment->decrement(); } );
+      p()->state.trigger_ff_empowerment = true;
+    }
+
+    // BracketSim legacy compatibility: Duplicative Incineration casts a second
+    // Fireball. Only the plain Fireball ever carried this, not Frostfire Bolt,
+    // and the recursion guard stops a duplicate duplicating itself.
+    if ( !frostfire && !duplicate && p()->azerite.duplicative_incineration.enabled() &&
+         rng().roll( p()->azerite.duplicative_incineration.spell_ref().effectN( 1 ).percent() ) )
+    {
+      duplicate = true;
+      execute();
+      duplicate = false;
+    }
+  }
+
   void impact( action_state_t* s ) override
   {
-    filler_spell_t::impact( s );
+    fire_mage_spell_t::impact( s );
 
     if ( result_is_hit( s->result ) )
     {
+      p()->trigger_deaths_fathom();
       get_td( s->target )->debuffs.controlled_destruction->trigger();
+
+      // BracketSim legacy compatibility: Molten Skyfall.
+      if ( p()->shadowlands_legacy.molten_skyfall )
+      {
+        if ( p()->buffs.legacy_molten_skyfall_ready->check() )
+        {
+          p()->buffs.legacy_molten_skyfall_ready->expire();
+          p()->action.legacy_meteor->execute_on_target( s->target );
+        }
+        else
+        {
+          p()->trigger_legacy_counter_buff( p()->buffs.legacy_molten_skyfall,
+                                            p()->buffs.legacy_molten_skyfall_ready, 2 );
+        }
+      }
+
+      if ( frostfire && p()->state.trigger_ff_empowerment )
+      {
+        p()->state.trigger_ff_empowerment = false;
+        p()->action.frostfire_empowerment->execute_on_target( s->target, p()->talents.frostfire_empowerment->effectN( 2 ).percent() * s->result_total );
+      }
 
       if ( rng().roll( p()->talents.pyrocosm->effectN( 2 ).percent() ) )
         trigger_meteorite( s->target );
+
+      if ( s->result == RESULT_CRIT )
+        p()->buffs.enhanced_pyrotechnics->expire();
+      else
+        p()->buffs.enhanced_pyrotechnics->trigger();
     }
+  }
+
+  double composite_crit_chance() const override
+  {
+    double c = fire_mage_spell_t::composite_crit_chance();
+    c += p()->buffs.enhanced_pyrotechnics->check_stack_value();
+    return c;
   }
 
   double composite_target_crit_chance( player_t* target ) const override
   {
-    double c = filler_spell_t::composite_target_crit_chance( target );
+    double c = fire_mage_spell_t::composite_target_crit_chance( target );
 
     if ( firestarter_active( target ) || fireball_execute_active( target ) )
       c += 1.0;
@@ -3847,10 +4480,13 @@ struct fireball_t final : public filler_spell_t<fire_mage_spell_t>
 
   double composite_da_multiplier( const action_state_t* s ) const override
   {
-    double m = filler_spell_t::composite_da_multiplier( s );
+    double m = fire_mage_spell_t::composite_da_multiplier( s );
 
     if ( !p()->buffs.combustion->check() )
       m *= master_of_flame_mult;
+
+    if ( frostfire && p()->state.trigger_ff_empowerment )
+      m *= 1.0 + p()->buffs.frostfire_empowerment->data().effectN( 3 ).percent();
 
     if ( fireball_execute_active( s->target ) )
       m *= 1.0 + p()->talents.scald->effectN( 1 ).percent();
@@ -3879,6 +4515,9 @@ struct flamestrike_t final : public hot_streak_spell_t
     hot_streak_spell_t( n, p, p->talents.flamestrike_1.ok() ? p->talents.flamestrike_1 : p->talents.flamestrike_2 )
   {
     parse_options( options_str );
+
+    // BracketSim legacy compatibility: Master Flame.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 32 );
     triggers.ignite = true;
     aoe = -1;
     reduced_aoe_targets = data().effectN( 2 ).base_value();
@@ -3920,6 +4559,19 @@ struct glacial_assault_t final : public frost_mage_spell_t
   }
 };
 
+// BracketSim legacy compatibility: Glacial Assault, the Battle for Azeroth
+// Azerite trait. Same shape as the modern talent but its own spell and value.
+struct legacy_glacial_assault_t final : public frost_mage_spell_t
+{
+  legacy_glacial_assault_t( std::string_view n, mage_t* p ) :
+    frost_mage_spell_t( n, p, p->find_spell( 279856 ) )
+  {
+    background = proc = true;
+    aoe = -1;
+    base_dd_min = base_dd_max = p->azerite.glacial_assault.value();
+  }
+};
+
 struct flurry_data_t
 {
   bool brain_freeze = false;
@@ -3944,6 +4596,19 @@ struct flurry_bolt_t final : public custom_state_spell_t<frost_mage_spell_t, flu
 
     if ( rng().roll( p()->talents.glacial_assault->effectN( 1 ).percent() ) )
       make_event( *sim, 1.0_s, [ this, t = s->target ] { p()->action.glacial_assault->execute_on_target( t ); } );
+
+    // BracketSim legacy compatibility: the Azerite trait rolls separately. The
+    // 999 ms delay is deliberate - it keeps the hit inside the Winter's Chill
+    // window, exactly as the Battle for Azeroth implementation did.
+    if ( p()->action.legacy_glacial_assault &&
+         rng().roll( p()->azerite.glacial_assault.spell_ref().effectN( 1 ).trigger()->proc_chance() ) )
+    {
+      make_event<ground_aoe_event_t>( *sim, p(), ground_aoe_params_t()
+        .pulse_time( 999_ms )
+        .target( s->target )
+        .n_pulses( 1 )
+        .action( p()->action.legacy_glacial_assault ) );
+    }
   }
 
   double composite_da_multiplier( const action_state_t* s ) const override
@@ -4022,18 +4687,57 @@ struct flurry_t final : public custom_state_spell_t<frost_mage_spell_t, flurry_d
       e->pulse_state->persistent_multiplier *= std::pow( chain_multiplier, s->chain_target );
 
     cast_state( e->pulse_state )->data = cast_state( s )->data;
+
+    // BracketSim legacy compatibility: Flurry also feeds Cold Front.
+    if ( p()->shadowlands_legacy.cold_front )
+    {
+      p()->consume_legacy_cold_front( s->target );
+      p()->trigger_legacy_counter_buff( p()->buffs.legacy_cold_front,
+                                        p()->buffs.legacy_cold_front_ready, 2 );
+    }
   }
 };
 
-struct frostbolt_t final : public filler_spell_t<frost_mage_spell_t>
+// Icy Veins was removed from the current Mage kit, but it is the activation
+// condition for the Shadowlands Slick Ice legendary. Recreate the original
+// 20-second / 3-minute window only when that exact Runecarving bonus is worn.
+struct legacy_icy_veins_t final : public frost_mage_spell_t
 {
+  legacy_icy_veins_t( std::string_view n, mage_t* p, std::string_view options_str ) :
+    frost_mage_spell_t( n, p )
+  {
+    parse_options( options_str );
+    harmful = false;
+    trigger_gcd = 0_ms;
+    cooldown->duration = 180_s;
+  }
+
+  void execute() override
+  {
+    frost_mage_spell_t::execute();
+    p()->buffs.slick_ice->expire();
+    p()->buffs.icy_veins->trigger();
+  }
+
+  bool ready() override
+  {
+    return p()->shadowlands_legacy.slick_ice && frost_mage_spell_t::ready();
+  }
+};
+
+struct frostbolt_t final : public frost_mage_spell_t
+{
+  const bool frostfire;
+
   double fof_chance = 0.0;
   double bf_chance = 0.0;
 
   frostbolt_t( std::string_view n, mage_t* p, std::string_view options_str, bool frostfire_ = false ) :
-    filler_spell_t( frostfire_, n, p, frostfire_ ? p->talents.frostfire_bolt : p->find_class_spell( "Frostbolt" ) )
+    frost_mage_spell_t( n, p, frostfire_ ? p->talents.frostfire_bolt : p->find_class_spell( "Frostbolt" ) ),
+    frostfire( frostfire_ )
   {
     parse_options( options_str );
+    affected_by.legacy_deathborne_cleave = true;
     enable_calculate_on_impact( frostfire ? 468655 : 228597 );
     affected_by.overflowing_energy = true;
     triggers.frostfire_empowerment = true;
@@ -4059,8 +4763,7 @@ struct frostbolt_t final : public filler_spell_t<frost_mage_spell_t>
     // * If you never cast Frostfire Bolt, Frostbolt simply deals full damage to everything.
     //
     // Since the last behavior is the most common one, that's what we'll model in simc.
-    // TODO: Adjust this (and the comment above) for 12.1.5
-    if ( p->bugs && !frostfire && sim->dbc->wowv() < wowv_t{ 12, 1, 5 } )
+    if ( p->bugs && !frostfire )
       chain_multiplier = 1.0;
 
     if ( data().ok() && p->talents.frostfire_empowerment.ok() )
@@ -4072,7 +4775,34 @@ struct frostbolt_t final : public filler_spell_t<frost_mage_spell_t>
     proc_brain_freeze = p()->get_proc( "Brain Freeze from Frostbolt" );
     proc_fof = p()->get_proc( "Fingers of Frost from Frostbolt" );
 
-    filler_spell_t::init_finished();
+    frost_mage_spell_t::init_finished();
+  }
+
+  timespan_t execute_time() const override
+  {
+    if ( frostfire && p()->buffs.frostfire_empowerment->check() )
+      return 0_ms;
+
+    return frost_mage_spell_t::execute_time() * ( 1.0 + p()->buffs.slick_ice->check_stack_value() );
+  }
+
+  timespan_t gcd() const override
+  {
+    timespan_t t = frost_mage_spell_t::gcd();
+    t *= 1.0 + p()->buffs.slick_ice->check_stack_value();
+    return std::max( t, min_gcd );
+  }
+
+  double composite_da_multiplier( const action_state_t* s ) const override
+  {
+    double m = frost_mage_spell_t::composite_da_multiplier( s );
+
+    if ( frostfire && p()->state.trigger_ff_empowerment )
+      m *= 1.0 + p()->buffs.frostfire_empowerment->data().effectN( 3 ).percent();
+
+    m *= 1.0 + p()->buffs.slick_ice->check() * p()->buffs.slick_ice->data().effectN( 3 ).percent();
+
+    return m;
   }
 
   void do_schedule_travel( action_state_t* s, timespan_t time ) override
@@ -4082,24 +4812,81 @@ struct frostbolt_t final : public filler_spell_t<frost_mage_spell_t>
     // work with distance targeting), it should be sufficient for most sims.
     if ( frostfire && p()->bugs && s->chain_target == 0 )
       time += 1_ms;
-    filler_spell_t::do_schedule_travel( s, time );
+    frost_mage_spell_t::do_schedule_travel( s, time );
   }
 
   void execute() override
   {
-    filler_spell_t::execute();
+    frost_mage_spell_t::execute();
 
     p()->trigger_fof( fof_chance, proc_fof );
     p()->trigger_brain_freeze( bf_chance, proc_brain_freeze, 150_ms );
     p()->trigger_splinter( p()->target );
+
+    if ( p()->buffs.icy_veins->check() )
+    {
+      p()->buffs.slick_ice->trigger();
+
+    }
+
+    // BracketSim legacy compatibility: Expanded Potential.
+    p()->buffs.legacy_expanded_potential->trigger();
+
+    if ( frostfire && p()->buffs.frostfire_empowerment->check() )
+    {
+      // Buff is decremented with a short delay, allowing two spells to benefit.
+      make_event( *sim, 15_ms, [ this ] { p()->buffs.frostfire_empowerment->decrement(); } );
+      p()->state.trigger_ff_empowerment = true;
+    }
+
+    // BracketSim legacy compatibility: switching target resets Tunnel of Ice.
+    if ( target != p()->last_frostbolt_target )
+      p()->buffs.tunnel_of_ice->expire();
+    p()->last_frostbolt_target = target;
+  }
+
+  // BracketSim legacy compatibility: Tunnel of Ice stacks while Frostbolt keeps
+  // landing on the same target, and the stacks feed back into its own damage.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = frost_mage_spell_t::bonus_da( s );
+
+    da += p()->buffs.tunnel_of_ice->check_stack_value();
+
+    return da;
   }
 
   void impact( action_state_t* s ) override
   {
-    filler_spell_t::impact( s );
+    frost_mage_spell_t::impact( s );
+
+    if ( result_is_hit( s->result ) )
+    {
+      p()->trigger_deaths_fathom();
+      p()->buffs.tunnel_of_ice->trigger();
+
+      // BracketSim legacy compatibility: Cold Front counts every Frostbolt that
+      // lands, once per target struck.
+      if ( p()->shadowlands_legacy.cold_front )
+      {
+        p()->consume_legacy_cold_front( s->target );
+        if ( s->chain_target == 0 )
+        {
+          for ( unsigned i = 0; i < s->n_targets; i++ )
+            p()->trigger_legacy_counter_buff( p()->buffs.legacy_cold_front,
+                                              p()->buffs.legacy_cold_front_ready, 2 );
+        }
+      }
+    }
 
     if ( s->result == RESULT_CRIT && p()->talents.frostbite.ok() )
       p()->trigger_freezing( s->target, as<int>( p()->talents.frostbite->effectN( 1 ).base_value() ), freezing_source );
+
+    if ( result_is_hit( s->result ) && frostfire && p()->state.trigger_ff_empowerment )
+    {
+      p()->state.trigger_ff_empowerment = false;
+      p()->action.frostfire_empowerment->execute_on_target( s->target, p()->talents.frostfire_empowerment->effectN( 2 ).percent() * s->result_total );
+    }
   }
 
   bool ready() override
@@ -4108,7 +4895,7 @@ struct frostbolt_t final : public filler_spell_t<frost_mage_spell_t>
     if ( p()->buffs.glacial_spike->check() && p()->executing != this )
       return false;
 
-    return filler_spell_t::ready();
+    return frost_mage_spell_t::ready();
   }
 };
 
@@ -4125,6 +4912,10 @@ struct frost_nova_t final : public mage_spell_t
   {
     mage_spell_t::impact( s );
     p()->trigger_crowd_control( s, MECHANIC_FREEZE );
+
+    // BracketSim legacy compatibility: Grisly Icicle.
+    if ( result_is_hit( s->result ) && p()->shadowlands_legacy.grisly_icicle )
+      get_td( s->target )->debuffs.legacy_grisly_icicle->trigger();
   }
 };
 
@@ -4133,6 +4924,8 @@ struct frozen_orb_bolt_t final : public frost_mage_spell_t
   frozen_orb_bolt_t( std::string_view n, mage_t* p ) :
     frost_mage_spell_t( n, p, p->find_spell( 84721 ) )
   {
+    // BracketSim legacy compatibility: Unrelenting Cold.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 17 );
     aoe = -1;
     reduced_aoe_targets = data().effectN( 2 ).base_value();
     background = proc = true;
@@ -4153,19 +4946,37 @@ struct frozen_orb_bolt_t final : public frost_mage_spell_t
     if ( hit_any_target )
       p()->trigger_fof( p()->talents.everlasting_frost->effectN( 2 ).percent(), proc_fof );
   }
+
+  // BracketSim legacy compatibility: Packed Ice. The orb's bolts apply the
+  // debuff that makes the target take more damage from Ice Lance.
+  void impact( action_state_t* s ) override
+  {
+    frost_mage_spell_t::impact( s );
+
+    if ( result_is_hit( s->result ) )
+      p()->get_target_data( s->target )->debuffs.packed_ice->trigger();
+  }
 };
 
 struct frozen_orb_t final : public frost_mage_spell_t
 {
   action_t* frozen_orb_bolt;
 
-  frozen_orb_t( std::string_view n, mage_t* p, std::string_view options_str ) :
+  frozen_orb_t( std::string_view n, mage_t* p, std::string_view options_str, bool legacy_free = false ) :
     frost_mage_spell_t( n, p, p->talents.frozen_orb ),
     frozen_orb_bolt( get_action<frozen_orb_bolt_t>( "frozen_orb_bolt", p ) )
   {
     parse_options( options_str );
     may_miss = false;
     add_child( frozen_orb_bolt );
+
+    // BracketSim legacy compatibility: the free Frozen Orb from Cold Front.
+    if ( legacy_free )
+    {
+      background = proc = true;
+      cooldown->duration = 0_ms;
+      base_costs[ RESOURCE_MANA ] = 0;
+    }
   }
 
   void init_finished() override
@@ -4192,9 +5003,19 @@ struct frozen_orb_t final : public frost_mage_spell_t
 
     p()->buffs.permafrost_lances->trigger();
     p()->buffs.freezing_rain->trigger();
+    // BracketSim legacy compatibility: Freezing Winds.
+    p()->buffs.legacy_freezing_winds->trigger();
     p()->trigger_brain_freeze( p()->talents.wintertide->effectN( 1 ).percent(), proc_brain_freeze );
     if ( p()->talents.everlasting_frost.ok() )
       p()->trigger_fof( 1.0, proc_fof, as<int>( p()->talents.everlasting_frost->effectN( 1 ).base_value() ) );
+
+    // BracketSim legacy compatibility: Frigid Grasp. Refreshing rather than
+    // stacking, and its stack callback hands out a Fingers of Frost charge.
+    if ( p()->azerite.frigid_grasp.enabled() )
+    {
+      p()->buffs.frigid_grasp->expire();
+      p()->buffs.frigid_grasp->trigger();
+    }
   }
 
   void impact( action_state_t* s ) override
@@ -4334,6 +5155,15 @@ struct shatter_t final : public mage_spell_t
     mage_spell_t( n, p, p->find_spell( 1246949 ) )
   {
     background = proc = true;
+
+    // BracketSim legacy compatibility: Ice Bite (conduit 21) raised Ice Lance's
+    // damage against frozen targets. Shadowlands delivered that as a
+    // frozen_multiplier on Ice Lance itself; Midnight delivers the whole frozen
+    // bonus as this separate Shatter proc instead, so the conduit is applied
+    // here. That is an equivalence rather than a line-for-line port: the thing
+    // the conduit scaled is now this action.
+    base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 21 );
+
     // Spell data contains the AoE effect which is disabled unless you pick Frostbite
     // Fix the spell power mod and use base_aoe_multiplier for the cleave
     double primary_coef = data().effectN( 1 ).sp_coeff();
@@ -4413,13 +5243,21 @@ struct winters_end_t final : public mage_spell_t
   }
 };
 
-struct ice_lance_data_t
+// BracketSim legacy compatibility: Glacial Fragments (Shadowlands runeforge).
+// Ice Lance has a chance to shatter the ground under the target; the chance is
+// higher while a Blizzard is running there.
+struct legacy_glacial_fragments_t final : public frost_mage_spell_t
 {
-  bool thermal_void = false;
-  void debug( std::ostringstream& s ) const { s << " thermal_void=" << thermal_void; }
+  legacy_glacial_fragments_t( std::string_view n, mage_t* p ) :
+    frost_mage_spell_t( n, p, p->find_spell( 327498 ) )
+  {
+    aoe = -1;
+    reduced_aoe_targets = p->find_spell( 327492 )->effectN( 3 ).base_value();
+    background = true;
+  }
 };
 
-struct ice_lance_t final : public custom_state_spell_t<frost_mage_spell_t, ice_lance_data_t>
+struct ice_lance_t final : public frost_mage_spell_t
 {
   int freezing_consume;
   shatter_source_t* shatter_source;
@@ -4429,13 +5267,16 @@ struct ice_lance_t final : public custom_state_spell_t<frost_mage_spell_t, ice_l
   { return ( p->talents.thermal_void.ok() ? 2 : 1 ) * consume; }
 
   ice_lance_t( std::string_view n, mage_t* p, std::string_view options_str ) :
-    custom_state_spell_t( n, p, p->talents.ice_lance ),
+    frost_mage_spell_t( n, p, p->talents.ice_lance ),
     freezing_consume( as<int>( p->spec.shatter->effectN( 4 ).base_value() ) ),
     shatter_source( p->get_shatter_source( name_str, max_consume( p, freezing_consume ) ) ),
     shatter_source_cleave( p->get_shatter_source( "Ice Lance cleave", max_consume( p, freezing_consume ) ) )
   {
     parse_options( options_str );
     enable_calculate_on_impact( 228598 );
+
+    // BracketSim legacy compatibility: Whiteout adds flat Ice Lance damage.
+    base_dd_adder += p->azerite.whiteout.value( 3 );
 
     if ( p->talents.fractured_frost.ok() )
     {
@@ -4445,32 +5286,57 @@ struct ice_lance_t final : public custom_state_spell_t<frost_mage_spell_t, ice_l
 
     if ( p->spec.shatter->ok() )
       add_child( p->action.shatter.ice_lance );
-  }
 
-  void snapshot_state( action_state_t* s, result_amount_type rt ) override
-  {
-    cast_state( s )->data.thermal_void = p()->buffs.thermal_void->check();
-    custom_state_spell_t::snapshot_state( s, rt );
+    // BracketSim legacy compatibility: Glacial Fragments.
+    if ( p->shadowlands_legacy.glacial_fragments && p->action.legacy_glacial_fragments )
+      add_child( p->action.legacy_glacial_fragments );
   }
 
   void execute() override
   {
-    custom_state_spell_t::execute();
+    frost_mage_spell_t::execute();
 
     p()->state.fingers_of_frost_active = p()->buffs.fingers_of_frost->up();
     p()->buffs.fingers_of_frost->decrement();
 
-    p()->buffs.thermal_void->up(); // Benefit tracking
+    p()->state.thermal_void_active = p()->buffs.thermal_void->up();
     p()->buffs.thermal_void->decrement();
+
+    // BracketSim legacy compatibility: the other half of Whiteout pulls Frozen
+    // Orb's cooldown forward. The time value is stored per 100 in spell data.
+    if ( p()->azerite.whiteout.enabled() )
+    {
+      p()->cooldowns.frozen_orb->adjust(
+        -100 * p()->azerite.whiteout.spell_ref().effectN( 2 ).time_value(), false );
+    }
+  }
+
+  // BracketSim legacy compatibility: Packed Ice reads the debuff the Frozen Orb
+  // bolts left behind. Splitting Ice cut the bonus by a third when it cleaved.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = frost_mage_spell_t::bonus_da( s );
+
+    if ( auto td = p()->find_target_data( s->target ) )
+    {
+      double pi_bonus = td->debuffs.packed_ice->check_value();
+
+      if ( num_targets_hit > 1 )
+        pi_bonus *= 0.666;
+
+      da += pi_bonus;
+    }
+
+    return da;
   }
 
   void impact( action_state_t* s ) override
   {
-    custom_state_spell_t::impact( s );
+    frost_mage_spell_t::impact( s );
 
     if ( result_is_hit( s->result ) && p()->action.shatter.ice_lance )
     {
-      int consume = ( cast_state( s )->data.thermal_void ? 2 : 1 ) * freezing_consume;
+      int consume = ( p()->state.thermal_void_active ? 2 : 1 ) * freezing_consume;
       int stacks = p()->trigger_shatter( s->target, p()->action.shatter.ice_lance, consume,
                                          s->chain_target == 0 ? shatter_source : shatter_source_cleave, p()->state.fingers_of_frost_active );
 
@@ -4482,11 +5348,24 @@ struct ice_lance_t final : public custom_state_spell_t<frost_mage_spell_t, ice_l
       p()->cooldowns.frozen_orb->adjust( -whiteout );
       p()->cooldowns.ray_of_frost->adjust( -stacks * p()->talents.glaciate->effectN( 2 ).time_value() );
     }
+
+    // BracketSim legacy compatibility: Glacial Fragments. The chance is higher
+    // while the target is standing in a Blizzard.
+    if ( p()->action.legacy_glacial_fragments )
+    {
+      const spell_data_t* gf = p()->find_spell( 327492 );
+      double chance = p()->ground_aoe_expiration[ AOE_BLIZZARD ] > sim->current_time()
+        ? gf->effectN( 2 ).percent()
+        : gf->effectN( 1 ).percent();
+
+      if ( rng().roll( chance ) )
+        p()->action.legacy_glacial_fragments->execute_on_target( s->target );
+    }
   }
 
   size_t available_targets( std::vector<player_t*>& tl ) const override
   {
-    custom_state_spell_t::available_targets( tl );
+    frost_mage_spell_t::available_targets( tl );
 
     // Priority for target selection. Main target is always chosen, rest depends on Freezing stacks.
     auto value = [ this ] ( player_t* t )
@@ -4510,7 +5389,7 @@ struct ice_lance_t final : public custom_state_spell_t<frost_mage_spell_t, ice_l
     // Freezing stacks change often enough that trying to do a more
     // fine-grained invalidation isn't worth it.
     target_cache.is_valid = false;
-    return custom_state_spell_t::target_list();
+    return frost_mage_spell_t::target_list();
   }
 };
 
@@ -4583,6 +5462,8 @@ struct fire_blast_t final : public fire_mage_spell_t
     }
 
     p()->buffs.feel_the_burn->trigger();
+    if ( hit_any_target )
+      p()->buffs.blaster_master->trigger();
   }
 
   void impact( action_state_t* s ) override
@@ -4713,6 +5594,10 @@ struct meteor_t final : public fire_mage_spell_t
       case meteor_type::ISOTHERMIC:
         burn_name = "isothermic_meteor_burn";
         impact_name = "isothermic_meteor_impact";
+        break;
+      case meteor_type::LEGACY_MOLTEN_SKYFALL:
+        burn_name = "legacy_molten_skyfall_meteor_burn";
+        impact_name = "legacy_molten_skyfall_meteor_impact";
         break;
       default:
         assert( false );
@@ -4887,16 +5772,41 @@ struct pyroblast_pyromaniac_t final : public fire_mage_spell_t
   }
 };
 
+// BracketSim legacy compatibility: Trailing Embers, the periodic half of the
+// Pyroblast trait. Damage comes straight from the trait's own value.
+struct trailing_embers_t final : public fire_mage_spell_t
+{
+  trailing_embers_t( std::string_view n, mage_t* p ) :
+    fire_mage_spell_t( n, p, p->find_spell( 277703 ) )
+  {
+    background = tick_zero = true;
+    hasted_ticks = false;
+    base_td = p->azerite.trailing_embers.value();
+  }
+};
+
 struct pyroblast_t final : public hot_streak_spell_t
 {
   action_t* duality_gs = nullptr;
+  action_t* trailing_embers = nullptr;
 
   pyroblast_t( std::string_view n, mage_t* p, std::string_view options_str ) :
     hot_streak_spell_t( n, p, p->talents.pyroblast )
   {
+    // BracketSim legacy compatibility: Controlled Destruction. The modern talent
+    // of the same name is a separate effect and both apply, as they never
+    // coexisted in game.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 249 );
     parse_options( options_str );
     triggers.hot_streak = TT_MAIN_TARGET;
     triggers.ignite = triggers.from_the_ashes = true;
+    base_dd_adder += p->azerite.wildfire.value( 2 );
+
+    if ( p->azerite.trailing_embers.enabled() )
+    {
+      trailing_embers = get_action<trailing_embers_t>( "trailing_embers", p );
+      add_child( trailing_embers );
+    }
 
     if ( p->talents.pyromaniac.ok() )
       pyromaniac_action = get_action<pyroblast_pyromaniac_t>( "pyroblast_pyromaniac", p );
@@ -4920,6 +5830,18 @@ struct pyroblast_t final : public hot_streak_spell_t
 
     if ( rng().roll( p()->talents.duality->effectN( 1 ).percent() ) )
       duality_gs->execute_on_target( target );
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    hot_streak_spell_t::impact( s );
+
+    // Trailing Embers lands on every target in range, not just the one hit.
+    if ( trailing_embers )
+    {
+      for ( auto t : target_list() )
+        trailing_embers->execute_on_target( t );
+    }
   }
 
   double composite_target_crit_chance( player_t* target ) const override
@@ -5121,13 +6043,19 @@ struct time_warp_t final : public mage_spell_t
     parse_options( options_str );
     harmful = false;
 
-    if ( sim->overrides.bloodlust )
+    // BracketSim legacy compatibility: Temporal Warp makes Time Warp worth
+    // casting even when the raid is already exhausted, so it stays foreground.
+    if ( sim->overrides.bloodlust && !p->shadowlands_legacy.temporal_warp )
       background = true;
   }
 
   void execute() override
   {
     mage_spell_t::execute();
+
+    // BracketSim legacy compatibility: Temporal Warp.
+    if ( player->buffs.exhaustion->check() )
+      p()->buffs.legacy_temporal_warp->trigger();
 
     // use indices since it's possible to spawn new actors when bloodlust is triggered
     for ( size_t i = 0; i < sim->player_non_sleeping_list.size(); i++ )
@@ -5143,7 +6071,9 @@ struct time_warp_t final : public mage_spell_t
 
   bool ready() override
   {
-    if ( player->buffs.exhaustion->check() )
+    // BracketSim legacy compatibility: Temporal Warp is the whole point of the
+    // legendary - Time Warp stays castable through Exhaustion.
+    if ( player->buffs.exhaustion->check() && !p()->shadowlands_legacy.temporal_warp )
       return false;
 
     return mage_spell_t::ready();
@@ -5257,9 +6187,9 @@ struct arcane_echo_t final : public arcane_mage_spell_t
 
 struct frostfire_empowerment_t final : public spell_t
 {
-   proc_t* freezing_source;
   // Counts the excluded main target towards the soft cap.
   double reduced_aoe_targets_2;
+  proc_t* freezing_source;
 
   frostfire_empowerment_t( std::string_view n, mage_t* p ) :
     spell_t( n, p, p->find_spell( 431186 ) ),
@@ -5629,6 +6559,17 @@ mage_td_t::mage_td_t( player_t* target, mage_t* mage ) :
   debuffs()
 {
   // Baseline
+  // BracketSim legacy compatibility: Radiant Spark Vulnerability. Every effect
+  // it needs - the stack cap, the duration and the 10% a stack is worth - is on
+  // spell 307454.
+  debuffs.legacy_radiant_spark_vulnerability =
+      make_buff( *this, "radiant_spark_vulnerability", mage->find_spell( 307454 ) )
+          ->set_default_value_from_effect( 1 )
+          // BracketSim legacy compatibility: Ire of the Ascended (conduit 40)
+          // adds to what each stack of the vulnerability is worth.
+          ->modify_default_value( mage->legacy_conduits.percent( 40 ) )
+          ->set_chance( mage->legacy_covenant.radiant_spark->ok() ? 1.0 : 0.0 );
+
   debuffs.controlled_destruction = make_buff( *this, "controlled_destruction", mage->find_spell( 453268 ) )
                                      ->set_default_value( 0.1 * mage->talents.controlled_destruction->effectN( 1 ).percent() )
                                      ->set_chance( mage->talents.controlled_destruction.ok() );
@@ -5648,10 +6589,17 @@ mage_td_t::mage_td_t( player_t* target, mage_t* mage ) :
                                              mage->procs.freezing_expired->occur();
                                        } )
                                      ->set_chance( mage->spec.shatter->ok() );
+  // BracketSim legacy compatibility: Grisly Icicle (Shadowlands runeforge).
+  debuffs.legacy_grisly_icicle   = make_buff( *this, "legacy_grisly_icicle", mage->find_spell( 348007 ) )
+                                     ->set_default_value_from_effect( 1 )
+                                     ->set_chance( mage->shadowlands_legacy.grisly_icicle );
   debuffs.freezing_winds         = make_buff( *this, "recently_damaged_by_blizzard", mage->find_spell( 1216988 ) )
                                      ->set_chance( mage->talents.freezing_winds.ok() )
                                      ->set_quiet( true );
   debuffs.touch_of_the_magi      = make_buff<buffs::touch_of_the_magi_t>( this );
+  debuffs.packed_ice             = make_buff( *this, "packed_ice", mage->find_spell( 272970 ) )
+                                     ->set_chance( mage->azerite.packed_ice.enabled() )
+                                     ->set_default_value( mage->azerite.packed_ice.value() );
 }
 
 mage_t::mage_t( sim_t* sim, std::string_view name, race_e r ) :
@@ -5667,6 +6615,7 @@ mage_t::mage_t( sim_t* sim, std::string_view name, race_e r ) :
   pets(),
   procs(),
   accumulated_rng(),
+  rppm(),
   sample_data(),
   spec(),
   state(),
@@ -5700,6 +6649,16 @@ action_t* mage_t::create_action( std::string_view name, std::string_view options
   if ( talents.frostfire_bolt.ok() && ( name == "fireball" || name == "frostbolt" ) )
     return create_action( "frostfire_bolt", options_str );
 
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  if ( name == "radiant_spark" && legacy_covenant.radiant_spark->ok() )
+    return new legacy_radiant_spark_t( name, this, options_str );
+  if ( name == "shifting_power" && legacy_covenant.shifting_power->ok() )
+    return new legacy_shifting_power_t( name, this, options_str );
+  if ( name == "mirrors_of_torment" && legacy_covenant.mirrors_of_torment->ok() )
+    return new legacy_mirrors_of_torment_t( name, this, options_str );
+  if ( name == "deathborne" && legacy_covenant.deathborne->ok() )
+    return new legacy_deathborne_t( name, this, options_str );
+
   // Arcane
   if ( name == "arcane_barrage"    ) return new    arcane_barrage_t( name, this, options_str );
   if ( name == "arcane_blast"      ) return new      arcane_blast_t( name, this, options_str );
@@ -5727,6 +6686,7 @@ action_t* mage_t::create_action( std::string_view name, std::string_view options
   if ( name == "flurry"            ) return new            flurry_t( name, this, options_str );
   if ( name == "frozen_orb"        ) return new        frozen_orb_t( name, this, options_str );
   if ( name == "glacial_spike"     ) return new     glacial_spike_t( name, this, options_str );
+  if ( name == "icy_veins"         ) return new   legacy_icy_veins_t( name, this, options_str );
   if ( name == "ice_lance"         ) return new         ice_lance_t( name, this, options_str );
   if ( name == "ray_of_frost"      ) return new      ray_of_frost_t( name, this, options_str );
 
@@ -5763,9 +6723,23 @@ action_t* mage_t::create_action( std::string_view name, std::string_view options
   return player_t::create_action( name, options_str );
 }
 
+// BracketSim legacy compatibility: Sinful Delight shortens Mirrors of Torment.
+void mage_t::legacy_trigger_sinful_delight()
+{
+  if ( !shadowlands_legacy.sinful_delight || !legacy_covenant.mirrors_of_torment->ok() )
+    return;
+
+  get_cooldown( "mirrors_of_torment" )
+      ->adjust( -timespan_t::from_millis( find_spell( 354333 )->effectN( 1 ).base_value() ) );
+}
+
 void mage_t::create_actions()
 {
   using namespace actions;
+
+  // BracketSim legacy compatibility: Harmonic Echo.
+  if ( shadowlands_legacy.harmonic_echo && legacy_covenant.radiant_spark->ok() )
+    action.legacy_harmonic_echo = get_action<legacy_harmonic_echo_t>( "harmonic_echo", this );
 
   if ( spec.shatter->ok() )
   {
@@ -5790,6 +6764,10 @@ void mage_t::create_actions()
   if ( talents.glacial_assault.ok() )
     action.glacial_assault = get_action<glacial_assault_t>( "glacial_assault", this );
 
+  if ( azerite.glacial_assault.enabled() )
+    action.legacy_glacial_assault =
+      get_action<legacy_glacial_assault_t>( "legacy_glacial_assault", this );
+
   if ( talents.touch_of_the_magi.ok() )
     action.touch_of_the_magi_explosion = get_action<touch_of_the_magi_explosion_t>( "touch_of_the_magi_explosion", this );
 
@@ -5801,6 +6779,19 @@ void mage_t::create_actions()
 
   if ( talents.flash_freezeburn.ok() )
     action.flash_freezeburn = get_action<flash_freezeburn_t>( "flash_freezeburn", this );
+
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries that
+  // hand out a free copy of an existing spell.
+  if ( shadowlands_legacy.molten_skyfall )
+    action.legacy_meteor = get_action<meteor_t>( "legacy_meteor", this, "",
+                                                 meteor_type::LEGACY_MOLTEN_SKYFALL );
+
+  if ( shadowlands_legacy.cold_front )
+    action.legacy_frozen_orb = get_action<frozen_orb_t>( "legacy_frozen_orb", this, "", true );
+
+  if ( shadowlands_legacy.glacial_fragments )
+    action.legacy_glacial_fragments =
+      get_action<legacy_glacial_fragments_t>( "legacy_glacial_fragments", this );
 
   if ( talents.isothermic_core.ok() )
   {
@@ -5854,6 +6845,10 @@ void mage_t::create_options()
   add_option( opt_bool( "mage.il_requires_freezing", options.il_requires_freezing ) );
   add_option( opt_bool( "mage.il_sort_by_freezing", options.il_sort_by_freezing ) );
   add_option( opt_bool( "mage.randomize_si_target", options.randomize_si_target ) );
+  add_option( opt_bool( "mage.legacy_shadowlands_enabled", options.legacy_shadowlands_enabled ) );
+  add_option( opt_string( "mage.legacy_covenant", legacy_covenant.chosen ) );
+  add_option( opt_string( "mage.legacy_conduits", legacy_conduits.option ) );
+  add_option( opt_string( "mage.legacy_unity_power", options.legacy_unity_power ) );
   player_t::create_options();
 }
 
@@ -5972,6 +6967,86 @@ void mage_t::create_pets()
 void mage_t::init_spells()
 {
   player_t::init_spells();
+
+  auto has_bonus_id = [ this ]( int bonus_id )
+  {
+    return range::any_of( items, [ bonus_id ]( const item_t& item )
+    { return range::contains( item.parsed.bonus_id, bonus_id ); } );
+  };
+
+  shadowlands_legacy.slick_ice = options.legacy_shadowlands_enabled && has_bonus_id( 6823 );
+
+  auto legacy = [ & ]( int bonus_id )
+  { return options.legacy_shadowlands_enabled && has_bonus_id( bonus_id ); };
+
+  // BracketSim legacy compatibility: Unity (bonus 8123), the 9.2 legendary whose
+  // effect is whichever covenant legendary matches the covenant you are in. A
+  // real Unity item carries 8123 and NOT the legendary's own bonus id, so a
+  // power keyed only off its own id misses every Unity wearer. Both routes are
+  // checked here, and Unity opens only the one door its covenant names.
+  auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
+  {
+    return legacy( bonus_id ) ||
+           ( legacy( 8123 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
+  };
+
+  // Death's Fathom reaches a mage three ways: its own bonus id, Unity worn as a
+  // Necrolord, or the mage.legacy_unity_power option naming it outright. The
+  // option predates the covenant route and profiles may still set it, so it is
+  // kept as an explicit override rather than removed.
+  shadowlands_legacy.deaths_fathom = legacy_unity( 7475, "necrolord" ) ||
+    ( options.legacy_shadowlands_enabled && has_bonus_id( 8123 ) &&
+      util::str_compare_ci( options.legacy_unity_power, "deaths_fathom" ) );
+
+  shadowlands_legacy.arcane_bombardment   = legacy( 6927 );
+  shadowlands_legacy.arcane_harmony       = legacy( 6926 );
+  shadowlands_legacy.cold_front           = legacy( 6828 );
+  shadowlands_legacy.disciplinary_command = legacy( 6832 );
+  shadowlands_legacy.expanded_potential   = legacy( 6831 );
+  shadowlands_legacy.fevered_incantation  = legacy( 6931 );
+  shadowlands_legacy.firestorm            = legacy( 6932 );
+  shadowlands_legacy.freezing_winds       = legacy( 6829 );
+  shadowlands_legacy.glacial_fragments    = legacy( 6830 );
+  shadowlands_legacy.grisly_icicle        = legacy( 6937 );
+  shadowlands_legacy.molten_skyfall       = legacy( 6933 );
+  shadowlands_legacy.siphon_storm         = legacy( 6928 );
+  shadowlands_legacy.sun_kings_blessing   = legacy( 6934 );
+  shadowlands_legacy.temporal_warp        = legacy( 6834 );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  auto covenant = [ this ]( std::string_view name, unsigned id ) {
+    return ( options.legacy_shadowlands_enabled &&
+             util::str_compare_ci( legacy_covenant.chosen, name ) )
+               ? find_spell( id )
+               : spell_data_t::not_found();
+  };
+
+  legacy_covenant.radiant_spark      = covenant( "kyrian", 307443 );
+  legacy_covenant.shifting_power     = covenant( "night_fae", 314791 );
+  legacy_covenant.mirrors_of_torment = covenant( "venthyr", 314793 );
+  legacy_covenant.deathborne         = covenant( "necrolord", 324220 );
+
+  // BracketSim legacy compatibility: report the covenant abilities this
+  // actor can cast, so player_t::init_actions() can put them into the
+  // rotation. SimulationCraft's own action lists never press them.
+  if ( legacy_covenant.radiant_spark->ok() )
+    legacy_apl_actions.emplace_back( "radiant_spark" );
+  if ( legacy_covenant.shifting_power->ok() )
+    legacy_apl_actions.emplace_back( "shifting_power" );
+  if ( legacy_covenant.mirrors_of_torment->ok() )
+    legacy_apl_actions.emplace_back( "mirrors_of_torment" );
+  // Deathborne had a buff and the damage hooks that read it, but nothing that
+  // could ever cast it: the buff was reachable only as a Death's Fathom proc.
+  // A Necrolord mage therefore simmed with its covenant ability missing and
+  // reported a perfectly plausible number without it.
+  if ( legacy_covenant.deathborne->ok() )
+    legacy_apl_actions.emplace_back( "deathborne" );
+
+  legacy_conduits.parse();
+
+  shadowlands_legacy.harmonic_echo    = legacy_unity( 7473, "kyrian" );
+  shadowlands_legacy.heart_of_the_fae = legacy_unity( 7727, "night_fae" );
+  shadowlands_legacy.sinful_delight   = legacy_unity( 7476, "venthyr" );
 
   // Mage Talents
   // Row 1
@@ -6294,6 +7369,29 @@ void mage_t::init_spells()
   spec.ignite             = find_mastery_spell( MAGE_FIRE );
   spec.freeze_and_shatter = find_mastery_spell( MAGE_FROST );
 
+  // Battle for Azeroth class-specific Azerite powers.
+  azerite.arcane_pressure   = find_azerite_spell( "Arcane Pressure" );
+  azerite.arcane_pummeling  = find_azerite_spell( "Arcane Pummeling" );
+  azerite.brain_storm       = find_azerite_spell( "Brain Storm" );
+  azerite.equipoise         = find_azerite_spell( "Equipoise" );
+  azerite.explosive_echo    = find_azerite_spell( "Explosive Echo" );
+  azerite.galvanizing_spark = find_azerite_spell( "Galvanizing Spark" );
+
+  azerite.duplicative_incineration = find_azerite_spell( "Duplicative Incineration" );
+  azerite.trailing_embers          = find_azerite_spell( "Trailing Embers" );
+
+  azerite.flash_freeze    = find_azerite_spell( "Flash Freeze" );
+  azerite.frigid_grasp    = find_azerite_spell( "Frigid Grasp" );
+  azerite.glacial_assault = find_azerite_spell( "Glacial Assault" );
+  azerite.packed_ice      = find_azerite_spell( "Packed Ice" );
+  azerite.tunnel_of_ice   = find_azerite_spell( "Tunnel of Ice" );
+  azerite.whiteout        = find_azerite_spell( "Whiteout" );
+
+  azerite.blaster_master = find_azerite_spell( "Blaster Master" );
+  azerite.firemind       = find_azerite_spell( "Firemind" );
+  azerite.flames_of_alacrity = find_azerite_spell( "Flames of Alacrity" );
+  azerite.wildfire       = find_azerite_spell( "Wildfire" );
+
   // Misc
   cooldowns.arcane_echo->duration = bugs ? 0_ms : find_spell( 464515 )->internal_cooldown();
 
@@ -6367,7 +7465,15 @@ void mage_t::create_buffs()
   buffs.arcane_surge              = make_buff( this, "arcane_surge", find_spell( 365362 ) )
                                       ->set_default_value_from_effect( 1 )
                                       ->set_affects_regen( true );
-  buffs.clearcasting              = make_buff( this, "clearcasting", find_spell( 263725 ) )
+  // BracketSim legacy compatibility: Heart of the Fae. Each stack is worth the
+  // crit in effect 1 and the haste in effect 2 of spell 356881.
+  buffs.legacy_heart_of_the_fae   = make_buff( this, "heart_of_the_fae", find_spell( 356881 ) )
+                                      ->set_default_value_from_effect( 1 )
+                                      ->set_pct_buff_type( STAT_PCT_BUFF_CRIT )
+                                      ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+                                      ->set_chance( shadowlands_legacy.heart_of_the_fae ? 1.0 : 0.0 );
+
+  buffs.clearcasting              = make_buff<buffs::legacy_expanded_potential_buff_t>( this, "clearcasting", find_spell( 263725 ) )
                                       ->set_default_value_from_effect( 1 )
                                       ->set_chance( spec.clearcasting->ok() ) ;
   buffs.cumulative_power          = make_buff( this, "cumulative_power", find_spell( 1296930 ) )
@@ -6424,16 +7530,67 @@ void mage_t::create_buffs()
                                      ->set_default_value_from_effect( 3 )
                                      ->set_trigger_spell( talents.heat_shimmer );
   buffs.heating_up               = make_buff( this, "heating_up", find_spell( 48107 ) );
-  buffs.hot_streak               = make_buff( this, "hot_streak", find_spell( 48108 ) );
+  buffs.hot_streak               = make_buff<buffs::legacy_expanded_potential_buff_t>( this, "hot_streak", find_spell( 48108 ) )
+                                     ->set_stack_change_callback( [ this ] ( buff_t*, int old, int )
+                                       { if ( old == 0 ) buffs.legacy_firestorm->trigger(); } );
   buffs.pyroclasm                = make_buff( this, "pyroclasm", find_spell( 269651 ) )
                                      ->set_default_value_from_effect( 1 )
                                      ->set_chance( talents.pyroclasm->effectN( 1 ).percent() ); // TODO: test proc chance
+  buffs.arcane_pummeling         = make_buff( this, "arcane_pummeling", find_spell( 270670 ) )
+                                     ->set_default_value( azerite.arcane_pummeling.value() )
+                                     ->set_chance( azerite.arcane_pummeling.enabled() );
+  buffs.brain_storm              = make_buff<stat_buff_t>( this, "brain_storm", find_spell( 273330 ) )
+                                     ->add_stat( STAT_INTELLECT, azerite.brain_storm.value() )
+                                     ->set_chance( azerite.brain_storm.enabled() );
+  proc_t* proc_fof_frigid_grasp = get_proc( "Fingers of Frost from Frigid Grasp" );
+  buffs.frigid_grasp             = make_buff<stat_buff_t>( this, "frigid_grasp", find_spell( 279684 ) )
+                                     ->add_stat( STAT_INTELLECT, azerite.frigid_grasp.value() )
+                                     ->set_stack_change_callback( [ this, proc_fof_frigid_grasp ]( buff_t*, int old, int )
+                                       { if ( old == 0 ) trigger_fof( 1.0, proc_fof_frigid_grasp ); } )
+                                     ->set_chance( azerite.frigid_grasp.enabled() );
+  buffs.tunnel_of_ice            = make_buff( this, "tunnel_of_ice", find_spell( 277904 ) )
+                                     ->set_default_value( azerite.tunnel_of_ice.value() )
+                                     ->set_chance( azerite.tunnel_of_ice.enabled() );
+  buffs.blaster_master           = make_buff<stat_buff_t>( this, "blaster_master", find_spell( 274598 ) )
+                                     ->add_stat( STAT_MASTERY_RATING, azerite.blaster_master.value() )
+                                     ->set_chance( azerite.blaster_master.enabled() );
+  buffs.firemind                 = make_buff<stat_buff_t>( this, "firemind", find_spell( 279715 ) )
+                                     ->add_stat( STAT_INTELLECT, azerite.firemind.value() )
+                                     ->set_chance( azerite.firemind.enabled() );
+  buffs.flames_of_alacrity       = make_buff<stat_buff_t>( this, "flames_of_alacrity", find_spell( 272934 ) )
+                                     ->add_stat( STAT_HASTE_RATING, azerite.flames_of_alacrity.value() )
+                                     ->set_chance( azerite.flames_of_alacrity.enabled() );
+  buffs.enhanced_pyrotechnics    = make_buff( this, "enhanced_pyrotechnics", find_spell( 157644 ) )
+                                     ->set_default_value_from_effect( 1 )
+                                     ->set_chance( azerite.flames_of_alacrity.enabled() )
+                                     ->set_stack_change_callback( [ this ] ( buff_t*, int old, int cur )
+                                       {
+                                         if ( cur > old )
+                                           buffs.flames_of_alacrity->trigger( cur - old );
+                                         else
+                                           buffs.flames_of_alacrity->decrement( old - cur );
+                                       } );
+  buffs.wildfire                 = make_buff<stat_buff_t>( this, "wildfire", find_spell( 288800 ) )
+                                     ->set_chance( azerite.wildfire.enabled() );
 
 
   // Frost
-  buffs.brain_freeze       = make_buff( this, "brain_freeze", find_spell( 190446 ) );
+  buffs.brain_freeze       = make_buff<buffs::legacy_expanded_potential_buff_t>( this, "brain_freeze", find_spell( 190446 ) );
   buffs.comet_storm        = make_buff( this, "comet_storm", find_spell( 1247778 ) )
                                ->set_chance( talents.comet_storm.ok() );
+  buffs.deathborne         = make_buff( this, "deathborne", find_spell( 324220 ) )
+                               ->set_default_value_from_effect( 2 )
+                               // BracketSim legacy compatibility: Gift of the
+                               // Lich extends the window, in milliseconds.
+                               ->set_duration( 8_s + timespan_t::from_millis(
+                                   legacy_conduits.value( 39 ) ) )
+                               ->set_cooldown( 0_ms )
+                               // Two sources now: the Death's Fathom proc, which
+                               // uses the short default duration above, and the
+                               // Necrolord covenant ability, which passes its own
+                               // 25 second window at trigger time.
+                               ->set_chance( shadowlands_legacy.deaths_fathom ||
+                                             legacy_covenant.deathborne->ok() );
   buffs.fingers_of_frost   = make_buff( this, "fingers_of_frost", find_spell( 44544 ) );
   buffs.freezing_rain      = make_buff( this, "freezing_rain", find_spell( 270232 ) )
                                ->set_chance( talents.freezing_rain.ok() );
@@ -6446,6 +7603,13 @@ void mage_t::create_buffs()
                                ->set_chance( talents.hand_of_frost_2.ok() );
   buffs.icicles            = make_buff( this, "icicles", find_spell( 205473 ) )
                                ->set_chance( talents.icicles.ok() );
+  buffs.icy_veins          = make_buff( this, "icy_veins", spell_data_t::nil() )
+                               ->set_default_value( 0.30 )
+                               ->set_duration( 20_s )
+                               ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+                               ->set_chance( shadowlands_legacy.slick_ice )
+                               ->set_stack_change_callback( [ this ] ( buff_t*, int, int current )
+                                 { if ( current == 0 ) buffs.slick_ice->expire(); } );
   buffs.permafrost_lances  = make_buff( this, "permafrost_lances", find_spell( 455122 ) )
                                ->set_default_value_from_effect( 1 )
                                ->set_chance( talents.permafrost_lances.ok() );
@@ -6453,6 +7617,66 @@ void mage_t::create_buffs()
                                ->set_tick_callback( [ this ] ( buff_t*, int, timespan_t )
                                  { trigger_icicle(); } )
                                ->set_chance( sets->has_set_bonus( MAGE_FROST, MID2, B4 ) );
+  buffs.slick_ice          = make_buff( this, "slick_ice", find_spell( 327509 ) )
+                               ->set_default_value_from_effect( 1 )
+                               ->set_chance( shadowlands_legacy.slick_ice );
+
+  // BracketSim legacy compatibility: the conduit Nether Precision (36). Two
+  // stacks, spent one per Arcane Blast.
+  buffs.legacy_nether_precision = make_buff( this, "legacy_nether_precision", find_spell( 336889 ) )
+                                    ->set_default_value( legacy_conduits.percent( 36 ) )
+                                    ->set_chance( legacy_conduits.has( 36 ) ? 1.0 : 0.0 );
+
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+  buffs.legacy_arcane_harmony = make_buff( this, "legacy_arcane_harmony", find_spell( 332777 ) )
+                                  ->set_default_value_from_effect( 1 )
+                                  ->set_chance( shadowlands_legacy.arcane_harmony )
+                                  ->set_constant_behavior( buff_constant_behavior::NEVER_CONSTANT );
+  buffs.legacy_siphon_storm   = make_buff( this, "legacy_siphon_storm", find_spell( 332934 ) )
+                                  ->set_default_value_from_effect( 1 )
+                                  ->set_pct_buff_type( STAT_PCT_BUFF_INTELLECT )
+                                  ->set_chance( shadowlands_legacy.siphon_storm );
+  buffs.legacy_temporal_warp  = make_buff( this, "legacy_temporal_warp", find_spell( 327355 ) )
+                                  ->set_default_value_from_effect( 1 )
+                                  ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+                                  ->set_chance( shadowlands_legacy.temporal_warp );
+
+  buffs.legacy_fevered_incantation      = make_buff( this, "legacy_fevered_incantation", find_spell( 333049 ) )
+                                            ->set_default_value_from_effect( 1 )
+                                            ->set_chance( shadowlands_legacy.fevered_incantation );
+  buffs.legacy_firestorm                = make_buff( this, "legacy_firestorm", find_spell( 333100 ) )
+                                            ->set_default_value_from_effect( 2 )
+                                            ->set_chance( shadowlands_legacy.firestorm );
+  buffs.legacy_molten_skyfall           = make_buff( this, "legacy_molten_skyfall", find_spell( 333170 ) )
+                                            ->set_chance( shadowlands_legacy.molten_skyfall );
+  buffs.legacy_molten_skyfall_ready     = make_buff( this, "legacy_molten_skyfall_ready", find_spell( 333182 ) );
+  buffs.legacy_sun_kings_blessing       = make_buff( this, "legacy_sun_kings_blessing", find_spell( 333314 ) )
+                                            ->set_chance( shadowlands_legacy.sun_kings_blessing );
+  buffs.legacy_sun_kings_blessing_ready = make_buff( this, "legacy_sun_kings_blessing_ready", find_spell( 333315 ) );
+
+  buffs.legacy_cold_front       = make_buff( this, "legacy_cold_front", find_spell( 327327 ) )
+                                    ->set_chance( shadowlands_legacy.cold_front );
+  buffs.legacy_cold_front_ready = make_buff( this, "legacy_cold_front_ready", find_spell( 327330 ) );
+  proc_t* legacy_fw_fof = get_proc( "Fingers of Frost from Freezing Winds" );
+  buffs.legacy_freezing_winds   = make_buff( this, "legacy_freezing_winds", find_spell( 327478 ) )
+                                    ->set_tick_callback( [ this, legacy_fw_fof ] ( buff_t*, int, timespan_t )
+                                      { trigger_fof( 1.0, legacy_fw_fof ); } )
+                                    ->set_chance( shadowlands_legacy.freezing_winds );
+
+  buffs.legacy_disciplinary_command        = make_buff( this, "legacy_disciplinary_command", find_spell( 327371 ) )
+                                               ->set_default_value_from_effect( 1 );
+  buffs.legacy_disciplinary_command_arcane = make_buff( this, "legacy_disciplinary_command_arcane", find_spell( 327369 ) )
+                                               ->set_quiet( true )
+                                               ->set_chance( shadowlands_legacy.disciplinary_command );
+  buffs.legacy_disciplinary_command_frost  = make_buff( this, "legacy_disciplinary_command_frost", find_spell( 327366 ) )
+                                               ->set_quiet( true )
+                                               ->set_chance( shadowlands_legacy.disciplinary_command );
+  buffs.legacy_disciplinary_command_fire   = make_buff( this, "legacy_disciplinary_command_fire", find_spell( 327368 ) )
+                                               ->set_quiet( true )
+                                               ->set_chance( shadowlands_legacy.disciplinary_command );
+  buffs.legacy_expanded_potential          = make_buff( this, "legacy_expanded_potential", find_spell( 327495 ) )
+                                               ->set_activated( false )
+                                               ->set_chance( shadowlands_legacy.expanded_potential );
   buffs.thermal_void       = make_buff( this, "thermal_void", find_spell( 1247730 ) )
                                ->set_chance( talents.thermal_void->effectN( 1 ).percent() );
 
@@ -6603,6 +7827,8 @@ void mage_t::init_rng()
 {
   player_t::init_rng();
 
+  rppm.deaths_fathom = get_rppm( "deaths_fathom", find_spell( 354294 ) );
+
   // Accumulated RNG is also not present in the game data.
   // TODO: Double check that this RNG is the same in Midnight.
   accumulated_rng.pyromaniac = get_accumulated_rng( "pyromaniac", talents.pyromaniac.ok() ? 0.00605 : 0.0 );
@@ -6652,6 +7878,8 @@ void mage_t::init_action_list()
         break;
       case MAGE_FROST:
         mage_apl::frost( this );
+        if ( shadowlands_legacy.slick_ice )
+          get_action_priority_list( "cds" )->add_action( "icy_veins" );
         break;
       default:
         break;
@@ -6783,6 +8011,12 @@ double mage_t::composite_player_multiplier( school_e school ) const
   if ( buffs.fired_up->has_common_school( school ) )
     m *= 1.0 + buffs.fired_up->check_stack_value();
 
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+  if ( buffs.legacy_fevered_incantation->has_common_school( school ) )
+    m *= 1.0 + buffs.legacy_fevered_incantation->check_stack_value();
+  if ( buffs.legacy_disciplinary_command->has_common_school( school ) )
+    m *= 1.0 + buffs.legacy_disciplinary_command->check_value();
+
   return m;
 }
 
@@ -6796,6 +8030,10 @@ double mage_t::composite_player_target_multiplier( player_t* target, school_e sc
     auto totm = td->debuffs.touch_of_the_magi;
     if ( totm->check() && totm->has_common_school( school ) )
       m *= 1.0 + totm->data().effectN( 2 ).percent();
+
+    // BracketSim legacy compatibility: Grisly Icicle.
+    if ( td->debuffs.legacy_grisly_icicle->has_common_school( school ) )
+      m *= 1.0 + td->debuffs.legacy_grisly_icicle->check_value();
   }
 
   return m;
@@ -6855,6 +8093,42 @@ double mage_t::composite_player_pet_damage_multiplier( const action_state_t* s, 
   m *= 1.0 + buffs.hand_of_frost->check_stack_value();
 
   return m;
+}
+
+
+// BracketSim legacy compatibility: Vision of Perfection (Heart of Azeroth major
+// essence). The engine procs it and calls this; each spec fires its signature
+// cooldown early, at the fraction of its duration the essence grants.
+void mage_t::vision_of_perfection_proc()
+{
+  auto essence = find_azerite_essence( "Vision of Perfection" );
+  if ( !essence.enabled() )
+    return;
+
+  double mult = essence.spell( 1u )->effectN( 1 ).percent() +
+                essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
+
+  buff_t* window = nullptr;
+  switch ( specialization() )
+  {
+    case MAGE_ARCANE:
+      window = buffs.arcane_surge;
+      break;
+    case MAGE_FIRE:
+      window = buffs.combustion;
+      break;
+    default:
+      break;
+  }
+
+  if ( !window || mult <= 0 )
+    return;
+
+  timespan_t dur = window->buff_duration() * mult;
+  if ( window->check() )
+    window->extend_duration( dur );
+  else
+    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
 }
 
 void mage_t::reset()
@@ -7444,6 +8718,88 @@ bool mage_t::trigger_fof( double chance, proc_t* source, int stacks )
   }
 
   return success;
+}
+
+// BracketSim legacy compatibility: Expanded Potential eats one consumption of
+// Clearcasting, Hot Streak or Brain Freeze rather than adding a proc.
+void buffs::legacy_expanded_potential_buff_t::decrement( int stacks, double value )
+{
+  if ( check() && mage->buffs.legacy_expanded_potential->check() )
+    mage->buffs.legacy_expanded_potential->expire();
+  else
+    buff_t::decrement( stacks, value );
+}
+
+// BracketSim legacy compatibility: Disciplinary Command rewards casting one
+// spell of each school. Only one school is credited per cast, checked from the
+// largest school mask down, exactly as the Shadowlands implementation did.
+void mage_t::trigger_legacy_disciplinary_command( school_e school )
+{
+  if ( !shadowlands_legacy.disciplinary_command || buffs.legacy_disciplinary_command->cooldown->down() )
+    return;
+
+  if ( dbc::is_school( school, SCHOOL_ARCANE ) )
+    buffs.legacy_disciplinary_command_arcane->trigger();
+  else if ( dbc::is_school( school, SCHOOL_FROST ) )
+    buffs.legacy_disciplinary_command_frost->trigger();
+  else if ( dbc::is_school( school, SCHOOL_FIRE ) )
+    buffs.legacy_disciplinary_command_fire->trigger();
+
+  if ( buffs.legacy_disciplinary_command_arcane->check()
+    && buffs.legacy_disciplinary_command_frost->check()
+    && buffs.legacy_disciplinary_command_fire->check() )
+  {
+    buffs.legacy_disciplinary_command->trigger();
+    buffs.legacy_disciplinary_command_arcane->expire();
+    buffs.legacy_disciplinary_command_frost->expire();
+    buffs.legacy_disciplinary_command_fire->expire();
+  }
+}
+
+bool mage_t::consume_legacy_cold_front( player_t* target )
+{
+  if ( !buffs.legacy_cold_front_ready->check() )
+    return false;
+
+  buffs.legacy_cold_front_ready->expire();
+  action.legacy_frozen_orb->execute_on_target( target );
+  return true;
+}
+
+// BracketSim legacy compatibility: Cold Front and Molten Skyfall both count
+// casts on a hidden buff and hand out a free spell when it fills up.
+void mage_t::trigger_legacy_counter_buff( buff_t* counter, buff_t* ready, int offset )
+{
+  if ( ready->check() )
+    return;
+
+  if ( counter->at_max_stacks( offset ) )
+  {
+    counter->expire();
+    ready->trigger();
+  }
+  else
+  {
+    counter->trigger();
+  }
+}
+
+void mage_t::trigger_deaths_fathom()
+{
+  if ( !shadowlands_legacy.deaths_fathom )
+    return;
+
+  // The original implementation added one percentage point for every enemy
+  // hit while Deathborne was already active, then performed the 1.25 RPPM
+  // proc roll. A proc grants or extends the eight-second Deathborne window.
+  if ( buffs.deathborne->check() )
+    buffs.deathborne->current_value += find_spell( 354294 )->effectN( 2 ).percent();
+
+  if ( rppm.deaths_fathom->trigger() )
+    // BracketSim legacy compatibility: the explicit duration here overrides the
+    // buff's configured one, so Gift of the Lich has to be added at both sites.
+    buffs.deathborne->extend_duration_or_trigger(
+        8_s + timespan_t::from_millis( legacy_conduits.value( 39 ) ) );
 }
 
 void mage_t::trigger_arcane_charge( int stacks )

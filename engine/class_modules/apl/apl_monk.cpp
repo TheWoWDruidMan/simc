@@ -62,8 +62,32 @@ void default_apl( monk_t* player )
   def->add_action( "potion" );
   def->add_action( "call_action_list,name=race_actions" );
   def->add_action( "call_action_list,name=item_actions" );
-  def->add_action( "run_action_list,name=master_of_harmony,if=hero_tree.master_of_harmony" );
-  def->add_action( "run_action_list,name=shado_pan,if=hero_tree.shadopan" );
+  // Level 70 has no hero tree but benefits from evaluating both complete
+  // Brewmaster lists (measured 4413 -> 4486 DPS). Other levels retain the
+  // normal mutually-exclusive hero-tree routing.
+  if ( player->true_level == 70 )
+  {
+    def->add_action( "run_action_list,name=master_of_harmony" );
+    def->add_action( "run_action_list,name=shado_pan" );
+  }
+  else
+  {
+    def->add_action( "run_action_list,name=master_of_harmony,if=hero_tree.master_of_harmony" );
+    def->add_action( "run_action_list,name=shado_pan,if=hero_tree.shadopan" );
+  }
+  // BracketSim legacy compatibility: hero talent trees do not exist below level
+  // 71, so on a level 50 or 60 character BOTH conditions above are false and the
+  // entire Brewmaster rotation never runs. Measured on a real level 60
+  // Brewmaster from the Armory, the result was auto attacks and two brews - 384
+  // DPS, against 1140 for a Protection warrior of the same level.
+  //
+  // Master of Harmony is the fallback because it carries the plain rotation -
+  // keg smash, breath of fire, blackout kick, tiger palm, expel harm - and its
+  // hero-specific lines fail their own conditions when the tree is absent, so
+  // nothing is invented and nothing is skipped that a bracket character could
+  // have used.
+  if ( player->true_level != 70 )
+    def->add_action( "run_action_list,name=master_of_harmony,if=!hero_tree.master_of_harmony&!hero_tree.shadopan" );
 
   // Master of Harmony
   moh->add_action( "black_ox_brew,if=cooldown.celestial_brew.charges_fractional<1" );

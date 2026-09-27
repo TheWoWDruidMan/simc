@@ -7,6 +7,9 @@
 #include <optional>
 
 #include "simulationcraft.hpp"
+
+// BracketSim legacy compatibility: Shadowlands conduits.
+#include "player/legacy_conduits.hpp"
 #include "player/pet_spawner.hpp"
 #include "class_modules/apl/apl_hunter.hpp"
 
@@ -365,6 +368,10 @@ struct hunter_td_t: public actor_target_data_t
     buff_t* spotters_mark;
     buff_t* spotters_mark_rapid_fire;
     buff_t* sentinels_mark;
+
+    // Legacy Azerite (Battle for Azeroth)
+    buff_t* legacy_steady_aim;
+    buff_t* legacy_death_chakram = nullptr;  // 325037: +10% damage taken from the hunter/pet/guardians, 10 s
   } debuffs;
 
   struct dots_t
@@ -456,6 +463,19 @@ public:
     buff_t* trick_shots;
     buff_t* lock_and_load;
     buff_t* trueshot;
+
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries that
+    // ride a covenant ability.
+    buff_t* legacy_pact_of_the_soulstalkers;
+    buff_t* legacy_flayers_mark;
+    // BracketSim legacy compatibility: Empowered Release (139) and Flame
+    // Infusion (252).
+    buff_t* legacy_empowered_release;
+    buff_t* legacy_flame_infusion;
+
+    // Legacy Azerite (Battle for Azeroth)
+    buff_t* legacy_unerring_vision_driver;
+    buff_t* legacy_unerring_vision;
     buff_t* unstable_trigger;
     buff_t* bullseye;
     buff_t* bulletstorm;
@@ -513,7 +533,109 @@ public:
     // Dark Ranger
     buff_t* withering_fire;
     buff_t* wailing_arrow;
+
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+    buff_t* blur_of_talons;
+    buff_t* dance_of_death;
+    buff_t* haze_of_rage;
+    buff_t* in_the_rhythm;
+    buff_t* legacy_aspect_of_the_wild;
+    // BracketSim legacy compatibility: Brutal Projectiles. Auto Shot arms the
+    // first; Rapid Fire spends it and stacks the second, which multiplies every
+    // tick of the channel.
+    buff_t* legacy_brutal_projectiles;
+    buff_t* legacy_brutal_projectiles_hidden;
+    buff_t* primal_instincts;
+    buff_t* primeval_intuition;
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    buff_t* legacy_eagletalons_true_focus;
+    buff_t* legacy_flamewakers_cobra_sting;
+    buff_t* legacy_nesingwarys_apparatus;
+    buff_t* legacy_secrets_of_the_unblinking_vigil;
+    // BracketSim legacy: Wild Spirits (Night Fae) - its 15 s aura; value = Wild Mark's damage-taken bonus.
+    buff_t* legacy_wild_spirits = nullptr;
+    // BracketSim legacy: Resonating Arrow (Kyrian) - 308498, +30% crit chance for the hunter and its pets, 10 s.
+    buff_t* legacy_resonating_arrow = nullptr;
   } buffs;
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. These
+  // powers are still in the live DBC but upstream dropped their class hooks
+  // after Battle for Azeroth, so they are restored here. Named legacy_azerite
+  // because player_t already owns an "azerite" member.
+  struct legacy_azerite_t
+  {
+    azerite_power_t blur_of_talons;
+    azerite_power_t dance_of_death;
+    azerite_power_t dire_consequences;
+    azerite_power_t feeding_frenzy;
+    azerite_power_t focused_fire;
+    azerite_power_t haze_of_rage;
+    azerite_power_t in_the_rhythm;
+    azerite_power_t latent_poison;
+    azerite_power_t primal_instincts;
+    azerite_power_t primeval_intuition;
+    azerite_power_t rapid_reload;
+    azerite_power_t serrated_jaws;
+    azerite_power_t steady_aim;
+    azerite_power_t surging_shots;
+    azerite_power_t unerring_vision;
+    azerite_power_t venomous_fangs;
+    azerite_power_t wilderness_survival;
+    azerite_power_t wildfire_cluster;
+  } legacy_azerite;
+
+  // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
+  // has no runeforge DBC, so each one is switched on by the bonus id its
+  // original legendary item carried and is inert on any other character. Three
+  // of these share a name with a current talent, so those carry a legacy_
+  // prefix and both sources can be active at once.
+  // BracketSim legacy compatibility: Shadowlands covenant abilities. Midnight
+  // has no covenant DBC, but every covenant spell still resolves, so they are
+  // looked up by id and gated on the chosen covenant.
+  // BracketSim legacy compatibility: Shadowlands conduits, as id:rank pairs.
+  legacy_conduit::set_t legacy_conduits;
+
+  struct legacy_covenant_t
+  {
+    std::string chosen = "none";
+    const spell_data_t* resonating_arrow = spell_data_t::not_found();
+    const spell_data_t* flayed_shot = spell_data_t::not_found();
+    const spell_data_t* death_chakram = spell_data_t::not_found();
+    const spell_data_t* wild_spirits = spell_data_t::not_found();
+  } legacy_covenant;
+
+  // BracketSim legacy compatibility: Rae'shalare, Death's Whisper (186414) teaches the Shadowlands
+  // Wailing Arrow (355589) - a plain one-minute cooldown, not the Dark Ranger's buff-gated one.
+  bool legacy_raeshalare = false;
+  // Not pressed by default: measured 26 Sep at 60 with the bow (ilvl 73), 3,000-4,000 iterations,
+  // pressing it on cooldown LOST damage at 1, 3 and 5 targets - Marksmanship -0.6/-0.9/-0.9%, Beast
+  // Mastery -0.9/-0.8/-0.6%, Survival +0.0% - because its 2 s cast is worth half an Aimed Shot.
+  // A player leaves it alone, so the rotation does; hunter.legacy_raeshalare_press=1 or an explicit
+  // wailing_arrow line still casts it.
+  bool legacy_raeshalare_press = false;
+
+  struct shadowlands_legacy_t
+  {
+    bool legacy_shadowlands_enabled = true;
+    bool call_of_the_wild = false;
+    bool dire_command = false;
+    bool eagletalons_true_focus = false;
+    bool flamewakers_cobra_sting = false;
+    bool nesingwarys_apparatus = false;
+    bool qapla_eredun_war_order = false;
+    bool rylakstalkers_confounding_strikes = false;
+    bool rylakstalkers_piercing_fangs = false;
+    bool secrets_of_the_unblinking_vigil = false;
+    bool soulforge_embers = false;
+    bool surging_shots = false;
+    bool wildfire_cluster = false;
+    // These four ride a covenant ability, so they only do anything when the
+    // matching covenant is chosen as well.
+    bool bag_of_munitions = false;
+    bool elder_antlers = false;
+    bool pact_of_the_soulstalkers = false;
+    bool pouch_of_razor_fragments = false;
+  } shadowlands_legacy;
 
   struct cooldowns_t
   {
@@ -545,6 +667,7 @@ public:
 
   struct gains_t
   {
+    gain_t* legacy_aspect_of_the_wild;
     gain_t* barbed_shot;
     gain_t* pack_tactics;
     gain_t* invigorating_pulse;
@@ -552,6 +675,8 @@ public:
     gain_t* lethal_barbs;
     gain_t* shrapnel_bomb;
     gain_t* disruptive_rounds;
+    // BracketSim legacy compatibility: Nesingwary's Trapping Apparatus (7004).
+    gain_t* legacy_nesingwarys_apparatus;
   } gains;
 
   struct procs_t
@@ -1032,6 +1157,8 @@ public:
 
     action_t* let_fly = nullptr;
     action_t* cobra_cleave = nullptr;
+
+    action_t* legacy_wild_spirits_proc = nullptr;
   } actions;
 
   cdwaste::player_data_t cd_waste;
@@ -1098,6 +1225,8 @@ public:
   void create_actions() override;
   void create_buffs() override;
   void init_gains() override;
+  // BracketSim legacy compatibility: Nesingwary's Trapping Apparatus (7004).
+  double resource_regen_per_second( resource_e r ) const override;
   void init_position() override;
   void init_procs() override;
   void init_rng() override;
@@ -1111,6 +1240,10 @@ public:
   void init_special_effects() override;
   void init_finished() override;
   void reset() override;
+  // BracketSim legacy compatibility: Vision of Perfection.
+  void vision_of_perfection_proc() override;
+  // BracketSim legacy compatibility: Secrets of the Unblinking Vigil.
+  void trigger_legacy_unblinking_vigil();
   void merge( player_t& other ) override;
   void arise() override;
   void combat_begin() override;
@@ -1127,6 +1260,7 @@ public:
   double composite_player_critical_damage_multiplier( const action_state_t*, school_e ) const override;
   double composite_player_multiplier( school_e school ) const override;
   double composite_player_target_multiplier( player_t* target, school_e school ) const override;
+  double composite_player_target_crit_chance( player_t* target ) const override;
   double composite_player_pet_damage_multiplier( const action_state_t*, bool ) const override;
   double composite_player_target_pet_damage_multiplier( player_t* target, bool guardian ) const override;
   double composite_leech() const override;
@@ -1193,6 +1327,7 @@ public:
   void trigger_lunar_storm( player_t* target );
   void consume_precise_shots();
   void trigger_eagles_mark( player_t* target, bool sentinel, bool force = false );
+  void legacy_trigger_wild_spirits( const action_state_t* s );
   bool consume_howl_of_the_pack_leader( player_t* target );
   void trigger_howl_of_the_pack_leader();
   void trigger_natures_ally_3();
@@ -1212,6 +1347,8 @@ public:
   bool track_cd_waste;
   maybe_bool decrements_tip_of_the_spear;
   double dire_beast_chance = 0;
+  // BracketSim legacy: does this action proc Wild Spirits (upstream shadowlands rule, from the aura's proc flags).
+  maybe_bool legacy_triggers_wild_spirits;
 
   struct {
     // Hunter
@@ -1221,6 +1358,7 @@ public:
     damage_affected_by unnatural_causes;
 
     // Beast Mastery
+    bool legacy_aspect_of_the_wild = false;
     damage_affected_by bestial_wrath;
     damage_affected_by master_of_beasts;
 
@@ -1265,6 +1403,12 @@ public:
     affected_by.bestial_wrath = parse_damage_affecting_aura( this, p->talents.bestial_wrath );
     affected_by.master_of_beasts = parse_damage_affecting_aura( this, p->mastery.master_of_beasts );
 
+    // Aspect of the Wild's retired BFA aura affected Hunter family flag 1.
+    // The current DBC no longer carries spell 193530, but current Hunter
+    // actions retain that family flag, so keep the original applicability
+    // rather than granting the effect to racials, items, or generic actions.
+    affected_by.legacy_aspect_of_the_wild = ab::data().ok() && ab::data().class_flag( 1 );
+
     affected_by.spirit_bond = parse_damage_affecting_aura( this, p->mastery.spirit_bond );
     affected_by.tip_of_the_spear = parse_damage_affecting_aura( this, p->talents.tip_of_the_spear_buff );
     affected_by.outland_venom = check_affected_by( this, p->talents.outland_venom_debuff->effectN( 1 ) );
@@ -1291,6 +1435,22 @@ public:
 
     if ( track_cd_waste )
       cd_waste = p() -> cd_waste.get( this );
+
+    // BracketSim legacy (27 Sep 2026): Wild Spirits procs from every harmful, hitting, callback-carrying,
+    // non-proc action whose proc type its aura (328837) accepts - upstream's shadowlands rule.
+    if ( p()->legacy_covenant.wild_spirits->ok() )
+    {
+      if ( legacy_triggers_wild_spirits.is_none() )
+      {
+        const spell_data_t* aura = p()->find_spell( 328837 );
+        legacy_triggers_wild_spirits = ab::harmful && ab::may_hit && ab::callbacks && !ab::proc &&
+                                       ( aura->proc_flags() & ( UINT64_C( 1 ) << ab::proc_type() ) );
+      }
+    }
+    else
+    {
+      legacy_triggers_wild_spirits = false;
+    }
 
     if ( p()->talents.tip_of_the_spear.ok() )
     {
@@ -1333,6 +1493,16 @@ public:
     if ( g == 0_ms )
       return g;
 
+    // BFA Aspect of the Wild reduced the base GCD of affected Hunter actions
+    // by 200 ms before haste. The aura was removed from the current DBC, so
+    // reproduce its original family-mask behavior explicitly.
+    if ( affected_by.legacy_aspect_of_the_wild && p()->buffs.legacy_aspect_of_the_wild->check() )
+    {
+      g = ab::trigger_gcd - 200_ms;
+      if ( ab::gcd_type != gcd_haste_type::NONE )
+        g *= ab::composite_haste();
+    }
+
     if ( g < ab::min_gcd )
       g = ab::min_gcd;
 
@@ -1351,6 +1521,9 @@ public:
   {
     ab::impact( s );
 
+    if ( legacy_triggers_wild_spirits )
+      p()->legacy_trigger_wild_spirits( s );
+
     // Tip removal and effects are triggered on impact but only once
     if ( decrements_tip_of_the_spear && s->chain_target == 0 && p()->buffs.tip_of_the_spear->check() )
     {
@@ -1363,7 +1536,21 @@ public:
 
       if ( p()->cooldowns.strike_as_one->up() )
       {
-        if ( auto pet = p()->pets.main )
+        // BracketSim: the ACTION has to exist, not just the pet.
+        //
+        // `pet->actions.strike_as_one` is only created when the Strike as One
+        // talent is taken (see hunter_main_pet_t::init_action_list), while the
+        // cooldown it is guarded by is created unconditionally and so is always
+        // up. A hunter who takes Tip of the Spear WITHOUT Strike as One therefore
+        // dereferenced a null action here on the first Raptor Strike impact.
+        //
+        // At level 30 that is every Survival hunter: Strike as One is deeper in
+        // the tree than the points available, so Tip of the Spear - a core
+        // Survival talent - crashed the sim every time it was tried. The talent
+        // search read that as "the engine will not take it", struck it off, and
+        // finished four points short of budget; the gear stage then refused the
+        // short loadout and the cell was lost entirely.
+        if ( auto pet = p()->pets.main; pet && pet->actions.strike_as_one )
         {
           pet->actions.strike_as_one->execute_on_target( p()->target );
           p()->cooldowns.strike_as_one->start();
@@ -1445,6 +1632,9 @@ public:
   double composite_crit_chance() const override
   {
     double cc = ab::composite_crit_chance();
+
+    if ( affected_by.legacy_aspect_of_the_wild )
+      cc += p()->buffs.legacy_aspect_of_the_wild->check_value();
 
     if ( affected_by.bullseye_crit_chance )
       cc += p()->buffs.bullseye->check_stack_value();
@@ -1715,6 +1905,16 @@ struct hunter_pet_t: public pet_t
     return ap;
   }
 
+  // BracketSim legacy (27 Sep 2026): Resonating Arrow's crit for the hunter's pets too (308498 effect 2).
+  double composite_player_target_crit_chance( player_t* target ) const override
+  {
+    double crit = pet_t::composite_player_target_crit_chance( target );
+    auto o = static_cast<hunter_t*>( owner );
+    if ( o->buffs.legacy_resonating_arrow )
+      crit += o->buffs.legacy_resonating_arrow->check_value();
+    return crit;
+  }
+
   void create_buffs() override
   {
     pet_t::create_buffs();
@@ -1846,7 +2046,7 @@ struct dire_critter_t : public hunter_pet_t
 
     buffs.bestial_wrath =
       make_buff( this, "bestial_wrath", o()->talents.wildspeaker_bestial_wrath )
-        ->set_default_value_from_effect( 1 );
+        ->set_default_value( o()->talents.wildspeaker_bestial_wrath->effectN( 1 ).percent() );
 
     buffs.pet_damage = 
       make_buff( this, "pet_damage", o()->specs.pet_damage )
@@ -2161,9 +2361,12 @@ struct hunter_main_pet_base_t : public stable_pet_t
   {
     stable_pet_t::create_buffs();
 
+    // BracketSim legacy compatibility: One With the Beast raises the main pet's
+    // Bestial Wrath, which is where Shadowlands applied it.
     buffs.bestial_wrath =
       make_buff( this, "bestial_wrath", find_spell( 186254 ) )
-        -> set_default_value_from_effect( 1 )
+        -> set_default_value( find_spell( 186254 ) -> effectN( 1 ).percent() +
+                              o() -> legacy_conduits.percent( 185 ) )
         -> set_cooldown( 0_ms );
   }
 
@@ -2623,12 +2826,34 @@ public:
     return am;
   }
 
+  double composite_crit_chance() const override
+  {
+    // Aspect of the Wild granted the same 10 percentage-point critical strike
+    // bonus to the Hunter's pet. Keep it scoped to Hunter pet actions instead
+    // of registering a global owner stat buff.
+    return ab::composite_crit_chance() + o()->buffs.legacy_aspect_of_the_wild->check_value();
+  }
+
   double composite_crit_damage_bonus_multiplier() const override
   {
     double cm = ab::composite_crit_damage_bonus_multiplier();
 
     if ( affected_by.stargazer && o()->buffs.stargazer->check() )
       cm *= 1 + o()->buffs.stargazer->stack_value();
+
+    // BracketSim legacy compatibility: Rylakstalker's Piercing Fangs, runeforge
+    // 7010, spell 336845. "Your pet's critical damage is increased by 35% while
+    // Bestial Wrath is active."
+    //
+    // DETECTED BUT NEVER READ, which is worse than absent: the flag was set
+    // from the bonus id on 7010 and nothing anywhere asked for it, so the
+    // legendary equipped, showed its tooltip, and did nothing. Same shape as
+    // the trinket effect-worth table that sat unread for a day.
+    if ( o()->shadowlands_legacy.rylakstalkers_piercing_fangs &&
+         o()->buffs.bestial_wrath->check() )
+    {
+      cm *= 1 + o()->find_spell( 336845 )->effectN( 1 ).percent();
+    }
 
     return cm;
   }
@@ -2736,14 +2961,53 @@ public:
 
 struct kill_command_bm_t: public hunter_pet_attack_t<hunter_main_pet_base_t>
 {
+  // Legacy Azerite: Serrated Jaws rolls per cast for extra damage and Focus.
+  struct
+  {
+    double chance = 0.0;
+    double energize_amount = 0.0;
+    double bonus_da = 0.0;
+    gain_t* gain = nullptr;
+    bool procced = false;
+  } legacy_serrated_jaws;
+
   kill_command_bm_t( hunter_main_pet_base_t* p, const spell_data_t* s ) : hunter_pet_attack_t( "kill_command", p, s )
   {
     background = dual = proc = true;
+
+    // Legacy Azerite: Dire Consequences
+    base_dd_adder += o()->legacy_azerite.dire_consequences.value( 1 );
+
+    if ( o()->legacy_azerite.serrated_jaws.ok() )
+    {
+      legacy_serrated_jaws.chance = o()->legacy_azerite.serrated_jaws.spell()->effectN( 3 ).percent();
+      legacy_serrated_jaws.energize_amount = o()->legacy_azerite.serrated_jaws.spell()->effectN( 2 ).base_value();
+      legacy_serrated_jaws.bonus_da = o()->legacy_azerite.serrated_jaws.value( 1 );
+      legacy_serrated_jaws.gain =
+          p->resource_regeneration != regen_type::DISABLED ? p->get_gain( "Serrated Jaws (Azerite)" ) : nullptr;
+    }
+  }
+
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = hunter_pet_attack_t::bonus_da( s );
+
+    if ( legacy_serrated_jaws.procced )
+      b += legacy_serrated_jaws.bonus_da;
+
+    return b;
   }
 
   void execute() override
   {
+    legacy_serrated_jaws.procced = rng().roll( legacy_serrated_jaws.chance );
+
     hunter_pet_attack_t::execute();
+
+    if ( legacy_serrated_jaws.procced && legacy_serrated_jaws.gain )
+    {
+      p()->resource_gain( RESOURCE_FOCUS, legacy_serrated_jaws.energize_amount, legacy_serrated_jaws.gain, this );
+    }
   }
 
   void impact( action_state_t* s ) override
@@ -2800,7 +3064,11 @@ struct kill_command_bm_t: public hunter_pet_attack_t<hunter_main_pet_base_t>
 
 struct kill_command_sv_t : public hunter_pet_attack_t<hunter_main_pet_t>
 {
-  kill_command_sv_t( hunter_main_pet_t* p ) : hunter_pet_attack_t( "kill_command", p, p->o()->talents.kill_command_sv_pet ) {}
+  kill_command_sv_t( hunter_main_pet_t* p ) : hunter_pet_attack_t( "kill_command", p, p->o()->talents.kill_command_sv_pet )
+  {
+    // Legacy Azerite: Dire Consequences
+    base_dd_adder += o()->legacy_azerite.dire_consequences.value( 2 );
+  }
 
   double composite_da_multiplier( const action_state_t* s ) const override
   {
@@ -3644,6 +3912,27 @@ void hunter_t::consume_precise_shots()
   buffs.precise_shots->expire();
 }
 
+// BracketSim legacy (27 Sep 2026): upstream shadowlands hunter_t::trigger_wild_spirits.
+void hunter_t::legacy_trigger_wild_spirits( const action_state_t* s )
+{
+  if ( !actions.legacy_wild_spirits_proc || !buffs.legacy_wild_spirits || !buffs.legacy_wild_spirits->check() )
+    return;
+  if ( s->chain_target != 0 )
+    return;
+  if ( !action_t::result_is_hit( s->result ) )
+    return;
+
+  actions.legacy_wild_spirits_proc->execute_on_target( s->target );
+
+  // Fragments of the Elder Antlers (356375): fewer than effect 2's targets hit -> effect 1's chance of a second proc.
+  if ( !shadowlands_legacy.elder_antlers )
+    return;
+  auto rune = find_spell( 356375 );
+  if ( actions.legacy_wild_spirits_proc->num_targets_hit < rune->effectN( 2 ).base_value() &&
+       rng().roll( rune->effectN( 1 ).percent() ) )
+    actions.legacy_wild_spirits_proc->execute_on_target( s->target );
+}
+
 void hunter_t::trigger_eagles_mark( player_t* target, bool sentinel, bool force )
 {
   if ( !talents.sentinel.ok() && !specs.spotters_mark_data.ok() )
@@ -4013,6 +4302,10 @@ struct auto_shot_base_t : public auto_attack_base_t<ranged_attack_t>
       p()->buffs.lock_and_load->trigger();
     }
 
+    // BracketSim legacy compatibility: Brutal Projectiles arms off Auto Shot.
+    if ( p()->legacy_conduits.has( 189 ) )
+      p()->buffs.legacy_brutal_projectiles->trigger();
+
     if ( p()->talents.lethal_barbs.ok() && p()->rppm.lethal_barbs->trigger() )
     {
       double amount = p()->talents.lethal_barbs_energize->effectN( 1 ).base_value();
@@ -4091,6 +4384,15 @@ struct steady_shot_t: public hunter_ranged_attack_t
     hunter_ranged_attack_t::execute();
 
     p()->cooldowns.aimed_shot->adjust( -data().effectN( 2 ).time_value() );
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    hunter_ranged_attack_t::impact( s );
+
+    // Legacy Azerite: Steady Aim stacks up for the next Aimed Shot.
+    if ( p()->legacy_azerite.steady_aim.ok() )
+      td( s->target )->debuffs.legacy_steady_aim->trigger();
   }
 };
 
@@ -4222,6 +4524,17 @@ struct counter_shot_t : public hunter_ranged_attack_t
 
 // Kill Shot (Hunter Talent) ====================================================================
 
+// BracketSim legacy compatibility: Pouch of Razor Fragments. Kill Shot spends
+// Flayer's Mark to leave a bleed worth effect 1 of the damage it just dealt.
+struct legacy_razor_fragments_t : public residual_action::residual_periodic_action_t<hunter_ranged_attack_t>
+{
+  legacy_razor_fragments_t( util::string_view n, hunter_t* p )
+    : residual_periodic_action_t( n, p, p->find_spell( 356620 ) )
+  {
+    aoe = -1;
+  }
+};
+
 struct kill_shot_base_t : hunter_ranged_attack_t
 {
   double health_threshold_pct;
@@ -4238,9 +4551,21 @@ struct kill_shot_base_t : hunter_ranged_attack_t
 
   using state_t = hunter_action_state_t<state_data_t>;
 
+  action_t* legacy_razor_fragments = nullptr;
+
   kill_shot_base_t( util::string_view n, hunter_t* p, spell_data_ptr_t s ) :
     hunter_ranged_attack_t( n, p, s ),
-    health_threshold_pct( p -> talents.kill_shot -> effectN( 2 ).base_value() ) {}
+    health_threshold_pct( p -> talents.kill_shot -> effectN( 2 ).base_value() )
+  {
+    // BracketSim legacy compatibility: Pouch of Razor Fragments.
+    if ( p->shadowlands_legacy.pouch_of_razor_fragments )
+    {
+      legacy_razor_fragments =
+          p->get_background_action<legacy_razor_fragments_t>( "pouch_of_razor_fragments" );
+      add_child( legacy_razor_fragments );
+    }
+  }
+
 
   void execute() override
   {
@@ -4252,6 +4577,30 @@ struct kill_shot_base_t : hunter_ranged_attack_t
   void impact( action_state_t* s ) override
   {
     hunter_ranged_attack_t::impact( s );
+
+    // BracketSim legacy compatibility: Pouch of Razor Fragments spends Flayer's
+    // Mark to leave a bleed worth effect 1 of the damage just dealt.
+    if ( p()->buffs.legacy_flayers_mark->check() )
+    {
+      if ( legacy_razor_fragments )
+      {
+        double amount = s->result_amount * p()->find_spell( 356618 )->effectN( 1 ).percent();
+        if ( amount > 0 )
+          residual_action::trigger( legacy_razor_fragments, s->target, amount );
+      }
+
+      // Kill Shot spends Flayer's Mark whether or not the runeforge is worn.
+      // An earlier pass nested this decrement inside the runeforge test, so a
+      // character with the covenant but not the legendary kept the buff for its
+      // whole duration and got several free, empowered Kill Shots from one proc.
+      p()->buffs.legacy_flayers_mark->decrement();
+    }
+
+    // BracketSim legacy compatibility: Empowered Release (conduit 139) is spent
+    // by the Kill Shot it empowered. Shadowlands decremented it beside Flayer's
+    // Mark and unconditionally, because the two buffs have different durations
+    // and either can outlive the other.
+    p()->buffs.legacy_empowered_release->decrement();
 
     if ( debug_cast<state_t*>( s )->empowered_by_precise_shots )
     {
@@ -4317,12 +4666,19 @@ struct kill_shot_base_t : hunter_ranged_attack_t
 
   bool target_ready( player_t* candidate_target ) override
   {
-    return hunter_ranged_attack_t::target_ready( candidate_target ) && ( candidate_target->health_percentage() <= health_threshold_pct );
+    // BracketSim legacy compatibility: Flayer's Mark lets Kill Shot be used at
+    // any health, which is the whole point of the Flayed Shot pairing.
+    return hunter_ranged_attack_t::target_ready( candidate_target ) &&
+           ( candidate_target->health_percentage() <= health_threshold_pct ||
+             p()->buffs.legacy_flayers_mark->check() );
   }
 
   double action_multiplier() const override
   {
     double am = hunter_ranged_attack_t::action_multiplier();
+
+    // BracketSim legacy compatibility: Empowered Release (conduit 139).
+    am *= 1.0 + p()->buffs.legacy_empowered_release->check_value();
 
     return am;
   }
@@ -4464,7 +4820,7 @@ struct moonlight_chakram_t final : public hunter_ranged_attack_t
       // 2026-01-23: Chakram cannot proc Sentinel's Mark
       if ( p()->cooldowns.strike_as_one->up() )
       {
-        if ( auto pet = p()->pets.main )
+        if ( auto pet = p()->pets.main; pet && pet->actions.strike_as_one )
         {
           pet->actions.strike_as_one->execute_on_target( target );
           p()->cooldowns.strike_as_one->start();
@@ -4769,12 +5125,16 @@ struct wailing_arrow_t final : public hunter_ranged_attack_t
 
   bool ready() override
   {
-    return hunter_ranged_attack_t::ready() && p()->buffs.wailing_arrow->check();
+    // The bow's Wailing Arrow is an ordinary cooldown; only the Dark Ranger's needs its buff.
+    return hunter_ranged_attack_t::ready() && ( p()->legacy_raeshalare || p()->buffs.wailing_arrow->check() );
   }
 
   void execute() override
   {
     hunter_ranged_attack_t::execute();
+
+    if ( p()->legacy_raeshalare )
+      return;
 
     p()->buffs.wailing_arrow->expire();
 
@@ -5072,6 +5432,21 @@ struct barbed_shot_base_t : public hunter_ranged_attack_t
   barbed_shot_base_t( hunter_t* p, util::string_view n, const spell_data_t* s ) : hunter_ranged_attack_t( n, p, s )
   {
     tick_zero = true;
+
+    // Legacy Azerite: Feeding Frenzy
+    base_td_adder += p->legacy_azerite.feeding_frenzy.value( 2 );
+
+    // BracketSim legacy compatibility: the conduit Bloodletting (253). Two
+    // effects, and only the FIRST is what the rank table's column holds:
+    // effect 1 is a periodic damage modifier, effect 2 is a flat -1000 ms on
+    // the recharge and is the same at every rank, read from the archived
+    // 9.2.7 row for spell 341440 because Midnight does not ship it. Barbed
+    // Shot is a dot with tick_zero, so base_td_multiplier is the damage half.
+    if ( p->legacy_conduits.has( 253 ) )
+    {
+      base_td_multiplier *= 1.0 + p->legacy_conduits.percent( 253 );
+      cooldown->duration -= timespan_t::from_seconds( 1.0 );
+    }
   }
 
   void execute() override
@@ -5079,6 +5454,11 @@ struct barbed_shot_base_t : public hunter_ranged_attack_t
     hunter_ranged_attack_t::execute();
 
     p()->buffs.barbed_shot->trigger();
+
+    // BracketSim legacy compatibility: Flamewaker's Cobra Sting.
+    if ( p()->shadowlands_legacy.flamewakers_cobra_sting &&
+         p()->rng().roll( p()->find_spell( 336822 )->proc_chance() ) )
+      p()->buffs.legacy_flamewakers_cobra_sting->trigger();
 
     auto pet = p()->pets.main;
     if ( pet && p()->rng().roll( p()->talents.brutal_companion->effectN( 1 ).percent() ) )
@@ -5133,6 +5513,10 @@ struct barbed_shot_t : public barbed_shot_base_t
     if ( p()->talents.war_orders.ok() )
       p()->cooldowns.kill_command->adjust( -p()->talents.war_orders->effectN( 3 ).time_value() );
 
+    // BracketSim legacy compatibility: Qa'pla, Eredun War Order.
+    if ( p()->shadowlands_legacy.qapla_eredun_war_order )
+      p()->cooldowns.kill_command->reset( true );
+
     for ( auto pet : pets::active<pets::hunter_main_pet_base_t>( p()->pets.main, p()->pets.animal_companion, p()->pets.natures_ally_pet.active_pet() ) )
     {
       if ( p()->talents.stomp.ok() )
@@ -5146,6 +5530,14 @@ struct barbed_shot_t : public barbed_shot_base_t
     {
       if ( p()->rng().roll( deathblow.chance ) )
         p()->trigger_deathblow();
+    }
+
+    // BracketSim legacy compatibility: Dance of Death rolls off crit chance
+    // when Barbed Shot is cast.
+    if ( p()->legacy_azerite.dance_of_death.ok() &&
+         rng().roll( p()->cache.attack_crit_chance() ) )
+    {
+      p()->buffs.dance_of_death->trigger();
     }
   }
 };
@@ -5179,6 +5571,25 @@ struct master_marksman_t : public residual_bleed_base_t
 
 struct multishot_t: public hunter_ranged_attack_t
 {
+  // Legacy Azerite: Rapid Reload
+  struct legacy_rapid_reload_t : public hunter_ranged_attack_t
+  {
+    legacy_rapid_reload_t( util::string_view n, hunter_t* p ) :
+      hunter_ranged_attack_t( n, p, p->find_spell( 278565 ) )
+    {
+      background = true;
+      aoe = -1;
+      base_dd_min = base_dd_max = p->legacy_azerite.rapid_reload.value( 1 );
+    }
+  };
+
+  struct
+  {
+    legacy_rapid_reload_t* action = nullptr;
+    int min_targets = std::numeric_limits<int>::max();
+    timespan_t reduction = 0_ms;
+  } legacy_rapid_reload;
+
   struct state_data_t
   {
     bool empowered_by_precise_shots = false;
@@ -5196,6 +5607,17 @@ struct multishot_t: public hunter_ranged_attack_t
 
     aoe = -1;
     reduced_aoe_targets = p -> find_spell( 2643 ) -> effectN( 1 ).base_value();
+
+    // Legacy Azerite: Rapid Reload
+    if ( p->legacy_azerite.rapid_reload.ok() )
+    {
+      legacy_rapid_reload.action = p->get_background_action<legacy_rapid_reload_t>( "legacy_rapid_reload" );
+      legacy_rapid_reload.min_targets =
+          as<int>( p->legacy_azerite.rapid_reload.spell()->effectN( 2 ).base_value() );
+      legacy_rapid_reload.reduction =
+          timespan_t::from_seconds( p->legacy_azerite.rapid_reload.spell()->effectN( 3 ).base_value() );
+      add_child( legacy_rapid_reload.action );
+    }
   }
 
   void execute() override
@@ -5207,7 +5629,17 @@ struct multishot_t: public hunter_ranged_attack_t
     // Delay this since secondary Aimed Shots can cleave with a Trick Shots from Volley, but will not be affected by a Trick Shots 
     // from a queued Multi-Shot that might be executed before they are since they are delayed 10 ms.
     if ( ( p() -> talents.trick_shots.ok() && num_targets_hit >= p() -> talents.trick_shots -> effectN( 2 ).base_value() ) )
-      make_event( p()->sim, 10_ms, [ this ]() { p()->buffs.trick_shots->trigger(); } );
+      make_event( p()->sim, 10_ms, [ this ]() {
+        p()->buffs.trick_shots->trigger();
+      } );
+
+    // Legacy Azerite: Rapid Reload pays out on a wide Multi-Shot. Its second
+    // half shortened Aspect of the Wild, which no longer exists in Midnight, so
+    // only the damage is modelled.
+    if ( legacy_rapid_reload.action && num_targets_hit > legacy_rapid_reload.min_targets )
+    {
+      legacy_rapid_reload.action->execute_on_target( target );
+    }
   }
 
   void schedule_travel( action_state_t* s ) override
@@ -5303,7 +5735,10 @@ struct aimed_shot_base_t : public hunter_ranged_attack_t
     trick_shots_targets( as<int>( p->talents.trick_shots_data->effectN( 1 ).base_value() ) )
   {
     radius = 8;
-    base_aoe_multiplier = p->talents.trick_shots_data->effectN( 4 ).percent();
+    // BracketSim legacy compatibility: Deadly Chain adds to the Trick Shots
+    // cleave share, exactly as it did in Shadowlands.
+    base_aoe_multiplier = p->talents.trick_shots_data->effectN( 4 ).percent() +
+                          p->legacy_conduits.percent( 192 );
   }
 
   action_state_t* new_state() override
@@ -5349,6 +5784,13 @@ struct aimed_shot_base_t : public hunter_ranged_attack_t
       target_cache.is_valid = false;
 
     hunter_ranged_attack_t::execute();
+
+    // Legacy Azerite: Surging Shots can reset Rapid Fire off an Aimed Shot.
+    if ( p()->legacy_azerite.surging_shots.ok() &&
+         rng().roll( p()->legacy_azerite.surging_shots.spell_ref().effectN( 1 ).percent() ) )
+    {
+      p()->cooldowns.rapid_fire->reset( true );
+    }
   }
 
   int n_targets() const override
@@ -5385,9 +5827,24 @@ struct aimed_shot_base_t : public hunter_ranged_attack_t
     return tl;
   }
 
+  // Legacy Azerite: Steady Aim, consumed on impact below.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = hunter_ranged_attack_t::bonus_da( s );
+
+    if ( p()->legacy_azerite.steady_aim.ok() )
+      b += td( s->target )->debuffs.legacy_steady_aim->stack_value();
+
+    return b;
+  }
+
   void impact( action_state_t* s ) override
   {
     hunter_ranged_attack_t::impact( s );
+
+    // Legacy Azerite: Steady Aim is spent by Aimed Shot.
+    if ( p()->legacy_azerite.steady_aim.ok() )
+      td( s->target )->debuffs.legacy_steady_aim->expire();
 
     hunter_td_t* target_data = td( s->target );
 
@@ -5530,6 +5987,18 @@ struct aimed_shot_t : public aimed_shot_base_t
       p()->cooldowns.rapid_fire->reset( true );
       p()->buffs.focus_fire->trigger();
     }
+
+    // BracketSim legacy compatibility: Surging Shots' own reset, a SECOND and
+    // independent roll from the modern talent's above. "Aimed Shot has a 15%
+    // chance to reset the cooldown of Rapid Fire", read off the runeforge's own
+    // proc chance. The two never coexisted in game, so letting both apply is
+    // correct as well as simpler - the same call the conduits made when several
+    // of them later became talents of the same name.
+    if ( p()->shadowlands_legacy.surging_shots &&
+         rng().roll( p()->find_spell( 336867 )->proc_chance() ) )
+    {
+      p()->cooldowns.rapid_fire->reset( true );
+    }
     
     p()->buffs.trick_shots->up(); // Benefit tracking
     p()->consume_trick_shots();
@@ -5603,14 +6072,56 @@ struct rapid_fire_t: public hunter_ranged_attack_t
       background = dual = true;
       direct_tick = true;
       radius = 8;
-      base_aoe_multiplier = p->talents.trick_shots_data->effectN( 5 ).percent();
+      // BracketSim legacy compatibility: Deadly Chain.
+      base_aoe_multiplier = p->talents.trick_shots_data->effectN( 5 ).percent() +
+                            p->legacy_conduits.percent( 192 );
+
+      // BracketSim legacy compatibility: Surging Shots (7012). "Rapid Fire deals
+      // 35% additional damage" - effects 1 and 2 of 336867, whose whitelist
+      // names Rapid Fire (257045 and 460496), so the aura applies both the
+      // direct and the periodic half without either being written here.
+      //
+      // The flag was DETECTED AND NEVER READ. Note the name is shared three
+      // ways in this module - the modern talent talents.surging_shots and the
+      // azerite trait legacy_azerite.surging_shots are both implemented, and
+      // the runeforge was the one doing nothing.
+      // This build has no apply_affecting_aura - the engine moved to the
+      // parse_effects framework - so the percentage is read off the effect and
+      // applied directly, the way every other percentage in this port is.
+      // rapid_fire_tick is direct_tick, so effect 1 is the one that applies.
+      if ( p->shadowlands_legacy.surging_shots )
+        base_dd_multiplier *= 1.0 + p->find_spell( 336867 )->effectN( 1 ).percent();
 
       // energize
       parse_effect_data( p->talents.rapid_fire_energize->effectN( 1 ) );
 
       if ( p->talents.sanctified_armaments.ok() )
         sanctified_armaments = p->get_background_action<sanctified_armaments_t>( "sanctified_armaments" );
+
+      // Legacy Azerite
+      base_dd_adder += p->legacy_azerite.focused_fire.value( 2 );
+      if ( p->legacy_azerite.focused_fire.ok() )
+      {
+        auto trigger_ = p->legacy_azerite.focused_fire.spell()->effectN( 1 ).trigger();
+        legacy_focused_fire.chance = trigger_->proc_chance();
+        legacy_focused_fire.amount = trigger_->effectN( 1 ).trigger()->effectN( 1 ).base_value();
+        legacy_focused_fire.gain   = p->get_gain( "Focused Fire (Azerite)" );
+      }
+
+      if ( p->legacy_azerite.surging_shots.ok() )
+      {
+        // The multipliers here were fitted in Battle for Azeroth; the tooltip is wrong.
+        base_dd_adder += p->legacy_azerite.surging_shots.value( 2 ) * 0.5;
+      }
     }
+
+    // Legacy Azerite: Focused Fire refunds Focus at random on a tick.
+    struct
+    {
+      double chance = 0.0;
+      double amount = 0.0;
+      gain_t* gain  = nullptr;
+    } legacy_focused_fire;
 
     int n_targets() const override
     {
@@ -5653,10 +6164,30 @@ struct rapid_fire_t: public hunter_ranged_attack_t
 
       hunter_ranged_attack_t::execute();
 
+      // BracketSim legacy compatibility: Brutal Projectiles. The first tick of
+      // a channel spends the armed buff and starts the hidden stack; every tick
+      // after that keeps stacking it.
+      if ( p()->legacy_conduits.has( 189 ) )
+      {
+        if ( p()->buffs.legacy_brutal_projectiles->check() )
+        {
+          p()->buffs.legacy_brutal_projectiles_hidden->trigger();
+          p()->buffs.legacy_brutal_projectiles->expire();
+        }
+        else if ( p()->buffs.legacy_brutal_projectiles_hidden->check() )
+        {
+          p()->buffs.legacy_brutal_projectiles_hidden->trigger();
+        }
+      }
+
       p()->buffs.trick_shots->up(); // Benefit tracking
 
       if ( p()->talents.take_aim_1.ok() )
         p()->cooldowns.aimed_shot->adjust( -p()->talents.take_aim_1->effectN( 2 ).time_value() );
+
+      // Legacy Azerite: Focused Fire
+      if ( legacy_focused_fire.gain && rng().roll( legacy_focused_fire.chance ) )
+        p()->resource_gain( RESOURCE_FOCUS, legacy_focused_fire.amount, legacy_focused_fire.gain, this );
     }
 
     void snapshot_internal( action_state_t* s, unsigned flags, result_amount_type rt ) override
@@ -5690,6 +6221,9 @@ struct rapid_fire_t: public hunter_ranged_attack_t
 
       if ( p()->buffs.focus_fire->up() )
         m *= 1 + p()->talents.focus_fire_buff->effectN( 1 ).percent();
+
+      // BracketSim legacy compatibility: Brutal Projectiles.
+      m *= 1 + p()->buffs.legacy_brutal_projectiles_hidden->check_stack_value();
 
       return m;
     }
@@ -5961,6 +6495,16 @@ struct rapid_fire_t: public hunter_ranged_attack_t
     p()->consume_trick_shots();
     p()->buffs.focus_fire->expire();
 
+    // BracketSim legacy compatibility: Brutal Projectiles ramps WITHIN a
+    // channel and resets at the end of it. Without this the hidden stack never
+    // expired and Rapid Fire measured +104% instead of the ramp it is.
+    p()->buffs.legacy_brutal_projectiles_hidden->expire();
+
+    // BracketSim legacy compatibility: In The Rhythm only pays out after a full
+    // uninterrupted Rapid Fire channel.
+    if ( p()->legacy_azerite.in_the_rhythm.ok() && d->current_tick >= d->num_ticks() )
+      p()->buffs.in_the_rhythm->trigger();
+
     // 2026-08-22: Delay this to allow Precise Shots spenders that clip Rapid Fire to steal the buff.
     make_event( sim, 10_ms, [ this ]() { execute_unload( 2 ); } );
   }
@@ -6011,7 +6555,11 @@ struct explosive_shot_base_t : public hunter_ranged_attack_t
 
   explosive_shot_base_t( util::string_view n, hunter_t* p, const spell_data_t* s ) : hunter_ranged_attack_t( n, p, s )
   {
-    cleave = p->get_background_action<cleave_t>( "explosive_shot_cleave" );
+    // BracketSim legacy compatibility: Bag of Munitions gives a Beast Mastery or
+    // Marksmanship hunter an Explosive Shot, and the cleave spell only resolves
+    // for Survival, so it is created only when its own spell data is there.
+    if ( p->talents.explosive_shot_cleave->ok() )
+      cleave = p->get_background_action<cleave_t>( "explosive_shot_cleave" );
   }
 
   void tick( dot_t* dot )
@@ -6021,7 +6569,8 @@ struct explosive_shot_base_t : public hunter_ranged_attack_t
     double amount = dot->state->result_amount;
     amount *= 1.0 - data().effectN( 3 ).percent();
 
-    cleave->execute_on_target( dot->target, amount );
+    if ( cleave )
+      cleave->execute_on_target( dot->target, amount );
 
     if ( p()->tier_set.mid_s2_mm_4pc.ok() )
     {
@@ -6279,7 +6828,32 @@ struct raptor_strike_base_t : public melee_focus_spender_t
   {
     melee_focus_spender_t::execute();
 
+    // Legacy Azerite: Wilderness Survival pulls in Wildfire Bomb. Battle for
+    // Azeroth hung this off Mongoose Bite, which Raptor Strike replaced.
+    if ( p()->legacy_azerite.wilderness_survival.ok() )
+    {
+      p()->cooldowns.wildfire_bomb->adjust(
+          -p()->legacy_azerite.wilderness_survival.spell()->effectN( 1 ).time_value() );
+    }
+
     p()->buffs.mongoose_fury->trigger();
+
+    // BracketSim legacy compatibility: Flame Infusion (conduit 252). Shadowlands
+    // hung this off Raptor Strike and Mongoose Bite's impact; Midnight folded
+    // Mongoose Bite into Raptor Strike, which is where mongoose_fury is
+    // triggered from too.
+    if ( p()->legacy_conduits.has( 252 ) )
+      p()->buffs.legacy_flame_infusion->trigger();
+
+    // Legacy Azerite: Primeval Intuition, also a Mongoose Bite effect in Battle
+    // for Azeroth. Blur of Talons shared the same host but needed Coordinated
+    // Assault, which the current kit no longer has.
+    p()->buffs.primeval_intuition->trigger();
+
+    // BracketSim legacy compatibility: Rylakstalker's Confounding Strikes.
+    if ( p()->shadowlands_legacy.rylakstalkers_confounding_strikes &&
+         p()->rng().roll( p()->find_spell( 336901 )->proc_chance() ) )
+      p()->cooldowns.wildfire_bomb->reset( true );
   }
 
   void impact( action_state_t* state ) override
@@ -6308,7 +6882,7 @@ struct raptor_strike_t : public raptor_strike_base_t
     {
       // Run before execute() as Tip is decremented in the base class
       if ( p()->talents.raptor_swipe_3.ok() && p()->buffs.tip_of_the_spear->check() )
-        if ( auto pet = p()->pets.main )
+        if ( auto pet = p()->pets.main; pet && pet->actions.strike_as_one_swipe )
           pet->actions.strike_as_one_swipe->execute_on_target( target );
 
       raptor_strike_base_t::execute();
@@ -6442,7 +7016,7 @@ struct boomstick_t : public hunter_spell_t
 
       if ( p()->cooldowns.strike_as_one->up() )
       {
-        if ( auto pet = p()->pets.main )
+        if ( auto pet = p()->pets.main; pet && pet->actions.strike_as_one )
         {
           pet->actions.strike_as_one->execute_on_target( target );
           p()->cooldowns.strike_as_one->start();
@@ -6529,7 +7103,7 @@ struct takedown_t : public hunter_spell_t
       p()->trigger_eagles_mark( target, true, true );
 
     damage->execute_on_target( target );
-    if ( auto pet = p()->pets.main )
+    if ( auto pet = p()->pets.main; pet && pet->actions.takedown )
       pet->actions.takedown->execute_on_target( target );
 
     if ( p()->talents.stampede.ok() )
@@ -6633,6 +7207,23 @@ struct trap_base_t : hunter_spell_t
     hunter_spell_t::execute();
 
     adjust_precast_cooldown( precast_time );
+  }
+
+  // BracketSim legacy compatibility: Nesingwary's Trapping Apparatus (7004).
+  // The buff existed and its chance was gated on the flag, but nothing in the
+  // engine ever triggered it. Every trap that lands pays 45 focus at once -
+  // effect 1 of spell 336744 - and arms the generation buff for five seconds.
+  void impact( action_state_t* s ) override
+  {
+    hunter_spell_t::impact( s );
+
+    if ( !p()->shadowlands_legacy.nesingwarys_apparatus )
+      return;
+
+    const double amount =
+        p()->buffs.legacy_nesingwarys_apparatus->data().effectN( 1 ).resource( RESOURCE_FOCUS );
+    p()->resource_gain( RESOURCE_FOCUS, amount, p()->gains.legacy_nesingwarys_apparatus, this );
+    p()->buffs.legacy_nesingwarys_apparatus->trigger();
   }
 
   timespan_t travel_time() const override
@@ -6741,6 +7332,32 @@ struct kill_command_t: public hunter_spell_t
       p()->procs.dire_command->occur();
     }
 
+    // BracketSim legacy compatibility: Dire Command, runeforge 7007, spell
+    // 336819. "Kill Command has a 30% chance to also summon a Dire Beast to
+    // attack your target for 8 sec."
+    //
+    // DETECTED BUT NEVER READ. The flag was set from the bonus id and nothing
+    // anywhere asked for it, so the legendary equipped, showed its tooltip, and
+    // did nothing - the same shape as Rylakstalker's Piercing Fangs above.
+    //
+    // A SEPARATE ROLL from the modern talent of the same name, deliberately.
+    // The talent uses accumulated_rng (a smoothed distribution that remembers
+    // its own misses); the legendary is a flat 30% in its own spell data, and
+    // in game the two were different sources that both got to fire. Folding
+    // the legendary's chance into the talent's accumulator would silently make
+    // a hunter WITH the talent gain less from the legendary than one without,
+    // which is the wrong shape as well as the wrong number.
+    //
+    // `procs.dire_command` is only created when the talent is taken, so it is
+    // not counted here - it would be a null dereference for a hunter wearing
+    // the legendary without the talent, which is most of them at these
+    // brackets.
+    if ( p()->shadowlands_legacy.dire_command &&
+         p()->rng().roll( p()->find_spell( 336819 )->effectN( 1 ).percent() ) )
+    {
+      p()->spawn_dire_beast( p()->talents.dire_beast_summon->duration() );
+    }
+
     if ( p()->talents.soul_drinker.ok() )
     {
       if ( rng().roll( deathblow.chance ) )
@@ -6826,6 +7443,9 @@ struct bestial_wrath_t: public hunter_ranged_attack_t
     hunter_ranged_attack_t::execute();
 
     trigger_buff( p() -> buffs.bestial_wrath, precast_time );
+
+    // Legacy Azerite: Haze of Rage.
+    trigger_buff( p()->buffs.haze_of_rage, precast_time );
 
     if ( p()->talents.natures_ally_1.ok() )
       p()->pets.natures_ally_pet.spawn( p()->talents.natures_ally_1_summon->duration() );
@@ -7008,6 +7628,240 @@ struct harriers_cry_t: public hunter_spell_t
 
 // Trueshot =================================================================
 
+// BracketSim legacy compatibility: Shadowlands covenant abilities ==========
+// Damage, cooldown and cost all come from the covenant spells themselves.
+
+struct legacy_resonating_arrow_t : public hunter_spell_t
+{
+  legacy_resonating_arrow_t( hunter_t* p, util::string_view options_str )
+    : hunter_spell_t( "resonating_arrow", p, p->legacy_covenant.resonating_arrow )
+  {
+    parse_options( options_str );
+    aoe = -1;
+    may_miss = false;
+  }
+
+  void execute() override
+  {
+    hunter_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_KYRIAN,
+                                            cooldown );
+    // BracketSim legacy (27 Sep 2026): the old port cast 308491 and nothing else - Kyrian hunters never got
+    // the +30% crit (60 Survival/BM Kyrian: 5.5 casts, 0%).
+    p()->buffs.legacy_resonating_arrow->trigger();
+
+    // BracketSim legacy compatibility: Pact of the Soulstalkers.
+    p()->buffs.legacy_pact_of_the_soulstalkers->trigger();
+  }
+};
+
+struct legacy_flayed_shot_t : public hunter_ranged_attack_t
+{
+  legacy_flayed_shot_t( hunter_t* p, util::string_view options_str )
+    : hunter_ranged_attack_t( "flayed_shot", p, p->legacy_covenant.flayed_shot )
+  {
+    parse_options( options_str );
+  }
+
+  void tick( dot_t* d ) override
+  {
+    hunter_ranged_attack_t::tick( d );
+
+    // Every tick can hand out Flayer's Mark, which resets Kill Shot. The buff
+    // carries its own chance, so no number is invented here.
+    if ( p()->buffs.legacy_flayers_mark->trigger() )
+    {
+      p()->cooldowns.kill_shot->reset( true );
+
+      // BracketSim legacy compatibility: Empowered Release (conduit 139).
+      if ( p()->legacy_conduits.has( 139 ) )
+        p()->buffs.legacy_empowered_release->trigger();
+    }
+  }
+
+  void execute() override
+  {
+    hunter_ranged_attack_t::execute();
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_VENTHYR,
+                                            cooldown );
+  }
+};
+
+struct legacy_death_chakram_t : public hunter_ranged_attack_t
+{
+  // BracketSim legacy (27 Sep 2026), from upstream's shadowlands branch: on ONE target the chakram hits once, then
+  // 325037 hits it 6 more times (850 ms, then every 630 ms), each x1.15 the last; every hit gives 3 Focus (325028
+  // effect 4) and refreshes the debuff (+10% damage taken from the hunter, pet and guardians). The old port hit once:
+  // 60 Survival/BM Necrolord 0.05-0.07% of damage.
+  struct st_hit_t final : public hunter_ranged_attack_t
+  {
+    int hit_number = 0;
+    st_hit_t( util::string_view n, hunter_t* p ) : hunter_ranged_attack_t( n, p, p->find_spell( 325037 ) )
+    {
+      background = dual = true;
+      chain_multiplier = p->legacy_covenant.death_chakram->effectN( 1 ).chain_multiplier();
+      energize_type = action_energize::PER_HIT;
+      energize_resource = RESOURCE_FOCUS;
+      energize_amount = p->legacy_covenant.death_chakram->effectN( 4 ).base_value();
+    }
+    double action_multiplier() const override
+    {
+      return hunter_ranged_attack_t::action_multiplier() * std::pow( chain_multiplier, hit_number );
+    }
+    void impact( action_state_t* st ) override
+    {
+      hunter_ranged_attack_t::impact( st );
+      td( st->target )->debuffs.legacy_death_chakram->trigger();
+    }
+  };
+  st_hit_t* st_hit = nullptr;
+  action_t* munitions;
+
+  legacy_death_chakram_t( hunter_t* p, util::string_view options_str )
+    : hunter_ranged_attack_t( "death_chakram", p, p->legacy_covenant.death_chakram ),
+      munitions( nullptr )
+  {
+    parse_options( options_str );
+
+    // The spell's effect 1 is a server-side script, so SimulationCraft builds no
+    // damage from it on its own; the attack power coefficient, chain count and
+    // chain multiplier are all still in that effect, so they are read off it.
+    attack_power_mod.direct = data().effectN( 1 ).ap_coeff();
+    aoe                     = data().effectN( 1 ).chain_target();
+    chain_multiplier        = data().effectN( 1 ).chain_multiplier();
+    school                  = data().get_school_type();
+    energize_type           = action_energize::PER_HIT;
+    energize_resource       = RESOURCE_FOCUS;
+    energize_amount         = data().effectN( 4 ).base_value();
+
+    st_hit = p->get_background_action<st_hit_t>( "death_chakram_st" );
+    add_child( st_hit );
+
+    // BracketSim legacy compatibility: Bag of Munitions.
+    if ( p->shadowlands_legacy.bag_of_munitions )
+    {
+      munitions = p->get_background_action<attacks::explosive_shot_background_t>( "explosive_shot_munitions" );
+      add_child( munitions );
+    }
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    hunter_ranged_attack_t::impact( s );
+
+    td( s->target )->debuffs.legacy_death_chakram->trigger();
+
+    // One target: 6 more hits of 325037 (upstream single_target_event_t).
+    if ( s->n_targets == 1 && st_hit )
+    {
+      const int max_hits = as<int>( data().effectN( 1 ).chain_target() );
+      player_t* t = s->target;
+      for ( int n = 1; n < max_hits; n++ )
+      {
+        make_event( *sim, 850_ms + 630_ms * ( n - 1 ), [ this, t, n ]() {
+          if ( t->is_sleeping() )
+            return;
+          st_hit->hit_number = n;
+          st_hit->execute_on_target( t );
+        } );
+      }
+    }
+
+    // Effect 1 of the runeforge is how many of the chakram's targets get an
+    // Explosive Shot.
+    if ( munitions &&
+         s->chain_target < p()->find_spell( 356264 )->effectN( 1 ).base_value() )
+      munitions->execute_on_target( s->target );
+  }
+
+  void execute() override
+  {
+    hunter_ranged_attack_t::execute();
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NECROLORD,
+                                            cooldown );
+  }
+};
+
+struct legacy_wild_spirits_t : public hunter_spell_t
+{
+  // BracketSim legacy (27 Sep 2026), ported from upstream's shadowlands branch. The cast (328231) only
+  // triggers missiles, so the old port dealt NOTHING (60 Survival/BM/MM: 3 casts, 0 damage). 328837 is the
+  // area aura: its effect 3 is the 25% AP initial hit, and for 15 s every damaging ability of the hunter or
+  // pet procs 328757 (38.5% AP). Wild Mark (328275) adds 5% damage taken from the hunter, pet and guardians.
+  struct damage_t final : hunter_spell_t
+  {
+    damage_t( util::string_view n, hunter_t* p ) : hunter_spell_t( n, p, p->find_spell( 328837 ) )
+    {
+      dual = true;
+      background = true;
+      aoe = -1;
+      legacy_triggers_wild_spirits = false;
+    }
+
+    void execute() override
+    {
+      hunter_spell_t::execute();
+      p()->buffs.legacy_wild_spirits->trigger();
+    }
+  };
+
+  struct proc_t final : hunter_spell_t
+  {
+    proc_t( util::string_view n, hunter_t* p ) : hunter_spell_t( n, p, p->find_spell( 328757 ) )
+    {
+      background = true;
+      proc = true;
+      callbacks = false;
+      legacy_triggers_wild_spirits = false;
+      // Upstream: 2020-12-07 hotfix, +25% for Marksmanship, not in the spell data.
+      if ( p->specialization() == HUNTER_MARKSMANSHIP )
+        base_multiplier *= 1.25;
+    }
+  };
+
+  legacy_wild_spirits_t( hunter_t* p, util::string_view options_str )
+    : hunter_spell_t( "wild_spirits", p, p->legacy_covenant.wild_spirits )
+  {
+    parse_options( options_str );
+    may_miss = false;
+    legacy_triggers_wild_spirits = false;
+
+    impact_action = p->get_background_action<damage_t>( "wild_spirits_damage" );
+    impact_action->stats = stats;
+    stats->action_list.push_back( impact_action );
+
+    p->actions.legacy_wild_spirits_proc = p->get_background_action<proc_t>( "wild_spirits_proc" );
+    add_child( p->actions.legacy_wild_spirits_proc );
+  }
+
+  void execute() override
+  {
+    hunter_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NIGHT_FAE,
+                                            cooldown );
+
+    // Fragments of the Elder Antlers: see hunter_t::legacy_trigger_wild_spirits (it doubles the PROC, as upstream).
+  }
+};
+
 struct trueshot_t : public hunter_spell_t
 {
   trueshot_t( hunter_t* p, util::string_view options_str ) : hunter_spell_t( "trueshot", p, p -> talents.trueshot )
@@ -7022,6 +7876,16 @@ struct trueshot_t : public hunter_spell_t
     // Applying Trueshot directly does not extend an existing Trueshot and resets Unerring Vision stacks.
     p() -> buffs.trueshot -> expire();
     p() -> buffs.trueshot -> trigger();
+
+    // BracketSim legacy compatibility: Eagletalon's True Focus lengthens
+    // Trueshot and cheapens everything cast inside it.
+    if ( p()->shadowlands_legacy.eagletalons_true_focus )
+    {
+      p()->buffs.trueshot->extend_duration(
+          timespan_t::from_millis( p()->find_spell( 336849 )->effectN( 2 ).base_value() ) );
+      p()->buffs.legacy_eagletalons_true_focus->trigger(
+          1, buff_t::DEFAULT_VALUE(), 1.0, p()->buffs.trueshot->remains() );
+    }
     
     if ( p()->talents.withering_fire.ok() )
     {
@@ -7144,6 +8008,18 @@ struct volley_t : public hunter_spell_t
 
 struct wildfire_bomb_base_t : public hunter_ranged_attack_t
 {
+  // Legacy Azerite: Wildfire Cluster
+  struct legacy_wildfire_cluster_t : public hunter_ranged_attack_t
+  {
+    legacy_wildfire_cluster_t( util::string_view n, hunter_t* p ) :
+      hunter_ranged_attack_t( n, p, p->find_spell( 272745 ) )
+    {
+      background  = true;
+      aoe         = -1;
+      base_dd_min = base_dd_max = p->legacy_azerite.wildfire_cluster.value( 1 );
+    }
+  };
+
   struct bomb_damage_t : public hunter_ranged_attack_t
   {
     struct bomb_dot_t final : public hunter_spell_t
@@ -7215,6 +8091,11 @@ struct wildfire_bomb_base_t : public hunter_ranged_attack_t
       {
         p()->buffs.shrapnel_bomb->trigger();
       }
+
+      // BracketSim legacy compatibility: Flame Infusion (conduit 252) is spent
+      // by the bomb it empowered. The multiplier is applied per stack in
+      // composite_da_multiplier below and comes off here.
+      p()->buffs.legacy_flame_infusion->expire();
     }
 
     void impact( action_state_t* s ) override
@@ -7243,9 +8124,35 @@ struct wildfire_bomb_base_t : public hunter_ranged_attack_t
         am *= 1 + p()->talents.sharpened_fangs->effectN( 2 ).percent();
       }
 
+      // BracketSim legacy compatibility: Flame Infusion (conduit 252) raises
+      // the bomb's DIRECT damage per stack, which is where Shadowlands read it
+      // too - the dot is untouched. Every target, not just the first, the same
+      // way the buff applied in Shadowlands.
+      am *= 1.0 + p()->buffs.legacy_flame_infusion->check_stack_value();
+
       return am;
     }
   };
+
+  // BracketSim legacy compatibility: the SHADOWLANDS runeforge Wildfire Cluster
+  // (7015). It shares a name with the BfA azerite trait above and is a
+  // different power: 336899 for the damage, 336895 effect 2 for where the AoE
+  // starts falling off, against the azerite trait's 272745 and a flat value.
+  // Both can be on the same hunter, so this is a second action rather than a
+  // branch inside the first.
+  struct legacy_sl_wildfire_cluster_t : public hunter_ranged_attack_t
+  {
+    legacy_sl_wildfire_cluster_t( util::string_view n, hunter_t* p ) :
+      hunter_ranged_attack_t( n, p, p->find_spell( 336899 ) )
+    {
+      background          = true;
+      aoe                 = -1;
+      reduced_aoe_targets = p->find_spell( 336895 )->effectN( 2 ).base_value();
+    }
+  };
+
+  legacy_wildfire_cluster_t* legacy_wildfire_cluster = nullptr;
+  legacy_sl_wildfire_cluster_t* legacy_sl_wildfire_cluster = nullptr;
 
   wildfire_bomb_base_t( hunter_t* p, const spell_data_t* s = spell_data_t::nil() ) : hunter_ranged_attack_t( "wildfire_bomb", p, s )
   {
@@ -7254,6 +8161,34 @@ struct wildfire_bomb_base_t : public hunter_ranged_attack_t
     harmful = false;
 
     impact_action = p->get_background_action<bomb_damage_t>( "wildfire_bomb_damage", this );
+
+    // Legacy Azerite: Wildfire Cluster
+    if ( p->legacy_azerite.wildfire_cluster.ok() )
+    {
+      legacy_wildfire_cluster =
+          p->get_background_action<legacy_wildfire_cluster_t>( "legacy_wildfire_cluster" );
+      add_child( legacy_wildfire_cluster );
+    }
+
+    // BracketSim legacy compatibility: the Shadowlands runeforge of the same
+    // name. Its flag was assigned and never read until now.
+    if ( p->shadowlands_legacy.wildfire_cluster )
+    {
+      legacy_sl_wildfire_cluster =
+          p->get_background_action<legacy_sl_wildfire_cluster_t>( "wildfire_cluster" );
+      add_child( legacy_sl_wildfire_cluster );
+    }
+  }
+
+  void execute() override
+  {
+    hunter_ranged_attack_t::execute();
+
+    if ( legacy_wildfire_cluster )
+      legacy_wildfire_cluster->execute_on_target( target );
+
+    if ( legacy_sl_wildfire_cluster )
+      legacy_sl_wildfire_cluster->execute_on_target( target );
   }
 };
 
@@ -7288,7 +8223,7 @@ struct wildfire_bomb_t: public wildfire_bomb_base_t
   {
     // Tip of the Spear is decremented in execute() so run here
     if ( p()->tier_set.mid_s1_sv_4pc.ok() && p()->buffs.tip_of_the_spear->check() )
-      if ( auto pet = p()->pets.main )
+      if ( auto pet = p()->pets.main; pet && pet->actions.strike_as_one )
         pet->actions.strike_as_one->execute_on_target( target );
 
     wildfire_bomb_base_t::execute();
@@ -7409,6 +8344,16 @@ hunter_td_t::hunter_td_t( player_t* t, hunter_t* p ) : actor_target_data_t( t, p
   double outland_venom_value = p->talents.outland_venom_debuff->effectN( 1 ).percent();
   if ( p->bugs )
     outland_venom_value /= 2; // 2026-01-24: Outland Venom is only giving half of its value.
+  // Legacy Azerite: Steady Aim
+  // BracketSim legacy (27 Sep 2026): Death Chakram's debuff, as upstream shadowlands.
+  debuffs.legacy_death_chakram = make_buff( *this, "death_chakram", p->find_spell( 325037 ) )
+    ->set_default_value_from_effect_type( A_MOD_DAMAGE_FROM_CASTER )
+    ->set_cooldown( 0_s );
+
+  debuffs.legacy_steady_aim = make_buff( *this, "legacy_steady_aim", p->find_spell( 277959 ) )
+                                  ->set_default_value( p->legacy_azerite.steady_aim.value( 1 ) )
+                                  ->set_chance( p->legacy_azerite.steady_aim.ok() ? 1.0 : 0.0 );
+
   debuffs.outland_venom = make_buff( *this, "outland_venom", p->talents.outland_venom_debuff )
     ->set_default_value( outland_venom_value )
     ->disable_ticking( true );
@@ -7532,6 +8477,16 @@ action_t* hunter_t::create_action( util::string_view name, util::string_view opt
   using namespace attacks;
   using namespace spells;
 
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  if ( name == "resonating_arrow" && legacy_covenant.resonating_arrow->ok() )
+    return new legacy_resonating_arrow_t( this, options_str );
+  if ( name == "flayed_shot" && legacy_covenant.flayed_shot->ok() )
+    return new legacy_flayed_shot_t( this, options_str );
+  if ( name == "death_chakram" && legacy_covenant.death_chakram->ok() )
+    return new legacy_death_chakram_t( this, options_str );
+  if ( name == "wild_spirits" && legacy_covenant.wild_spirits->ok() )
+    return new legacy_wild_spirits_t( this, options_str );
+
   if ( name == "aimed_shot"            ) return new             aimed_shot_t( this, options_str );
   if ( name == "aspect_of_the_eagle"   ) return new    aspect_of_the_eagle_t( this, options_str );
   if ( name == "auto_attack"           ) return new   actions::auto_attack_t( this, options_str );
@@ -7638,6 +8593,91 @@ double hunter_t::resource_loss( resource_e resource_type, double amount, gain_t*
 void hunter_t::init_spells()
 {
   player_t::init_spells();
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+  legacy_azerite.blur_of_talons      = find_azerite_spell( "Blur of Talons" );
+
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
+  // off the bonus id the original legendary item carried.
+  auto legacy = [ this ]( int bonus_id ) {
+    return shadowlands_legacy.legacy_shadowlands_enabled &&
+           range::any_of( items, [ bonus_id ]( const item_t& item ) {
+             return range::contains( item.parsed.bonus_id, bonus_id );
+           } );
+  };
+
+  shadowlands_legacy.call_of_the_wild                  = legacy( 7003 );
+  shadowlands_legacy.dire_command                      = legacy( 7007 );
+  shadowlands_legacy.eagletalons_true_focus            = legacy( 7011 );
+  shadowlands_legacy.flamewakers_cobra_sting           = legacy( 7008 );
+  shadowlands_legacy.nesingwarys_apparatus             = legacy( 7004 );
+  shadowlands_legacy.qapla_eredun_war_order            = legacy( 7009 );
+  shadowlands_legacy.rylakstalkers_confounding_strikes = legacy( 7016 );
+  shadowlands_legacy.rylakstalkers_piercing_fangs      = legacy( 7010 );
+  shadowlands_legacy.secrets_of_the_unblinking_vigil   = legacy( 7014 );
+  shadowlands_legacy.soulforge_embers                  = legacy( 7005 );
+  shadowlands_legacy.surging_shots                     = legacy( 7012 );
+  shadowlands_legacy.wildfire_cluster                  = legacy( 7015 );
+  // BracketSim legacy compatibility: Unity (bonus 8122), the 9.2 legendary whose
+  // effect is whichever covenant legendary matches the covenant you are in. A
+  // real Unity item carries 8122 and NOT the legendary's own bonus id, so a
+  // power keyed only off its own id misses every Unity wearer. Both routes are
+  // checked here, and Unity opens only the one door its covenant names.
+  auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
+  {
+    return legacy( bonus_id ) ||
+           ( legacy( 8122 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
+  };
+
+  shadowlands_legacy.bag_of_munitions                  = legacy_unity( 7715, "necrolord" );
+  shadowlands_legacy.elder_antlers                     = legacy_unity( 7716, "night_fae" );
+  shadowlands_legacy.pact_of_the_soulstalkers          = legacy_unity( 7714, "kyrian" );
+  shadowlands_legacy.pouch_of_razor_fragments          = legacy_unity( 7717, "venthyr" );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  auto covenant = [ this ]( std::string_view name, unsigned id ) {
+    return ( shadowlands_legacy.legacy_shadowlands_enabled &&
+             util::str_compare_ci( legacy_covenant.chosen, name ) )
+               ? find_spell( id )
+               : spell_data_t::not_found();
+  };
+
+  legacy_covenant.resonating_arrow = covenant( "kyrian", 308491 );
+  legacy_covenant.flayed_shot      = covenant( "venthyr", 324149 );
+  legacy_covenant.death_chakram    = covenant( "necrolord", 325028 );
+  legacy_covenant.wild_spirits     = covenant( "night_fae", 328231 );
+
+  // BracketSim legacy compatibility: report the covenant abilities this
+  // actor can cast, so player_t::init_actions() can put them into the
+  // rotation. SimulationCraft's own action lists never press them.
+  if ( legacy_covenant.resonating_arrow->ok() )
+    legacy_apl_actions.emplace_back( "resonating_arrow" );
+  if ( legacy_covenant.flayed_shot->ok() )
+    legacy_apl_actions.emplace_back( "flayed_shot" );
+  if ( legacy_covenant.death_chakram->ok() )
+    legacy_apl_actions.emplace_back( "death_chakram" );
+  if ( legacy_covenant.wild_spirits->ok() )
+    legacy_apl_actions.emplace_back( "wild_spirits" );
+
+  legacy_conduits.parse();
+
+  legacy_azerite.dance_of_death      = find_azerite_spell( "Dance of Death" );
+  legacy_azerite.dire_consequences   = find_azerite_spell( "Dire Consequences" );
+  legacy_azerite.feeding_frenzy      = find_azerite_spell( "Feeding Frenzy" );
+  legacy_azerite.focused_fire        = find_azerite_spell( "Focused Fire" );
+  legacy_azerite.haze_of_rage        = find_azerite_spell( "Haze of Rage" );
+  legacy_azerite.in_the_rhythm       = find_azerite_spell( "In The Rhythm" );
+  legacy_azerite.latent_poison       = find_azerite_spell( "Latent Poison" );
+  legacy_azerite.primal_instincts    = find_azerite_spell( "Primal Instincts" );
+  legacy_azerite.primeval_intuition  = find_azerite_spell( "Primeval Intuition" );
+  legacy_azerite.rapid_reload        = find_azerite_spell( "Rapid Reload" );
+  legacy_azerite.serrated_jaws       = find_azerite_spell( "Serrated Jaws" );
+  legacy_azerite.steady_aim          = find_azerite_spell( "Steady Aim" );
+  legacy_azerite.surging_shots       = find_azerite_spell( "Surging Shots" );
+  legacy_azerite.unerring_vision     = find_azerite_spell( "Unerring Vision" );
+  legacy_azerite.venomous_fangs      = find_azerite_spell( "Venomous Fangs" );
+  legacy_azerite.wilderness_survival = find_azerite_spell( "Wilderness Survival" );
+  legacy_azerite.wildfire_cluster    = find_azerite_spell( "Wildfire Cluster" );
 
   // Hunter Tree
   talents.combat_experience                 = find_talent_spell( talent_tree::CLASS, "Combat Experience" );
@@ -7926,6 +8966,23 @@ void hunter_t::init_spells()
     talents.wailing_arrow_buff          = talents.wailing_dead.ok() ? find_spell( 459808 ) : spell_data_t::not_found();
     talents.wailing_arrow_damage        = talents.wailing_dead.ok() ? find_spell( 392058 ) : spell_data_t::not_found();
 
+    // BracketSim legacy compatibility: Rae'shalare, Death's Whisper (186414). Its equip effect,
+    // Banshee's Lament (353511), learns Wailing Arrow 355589 (effect 3), which fires 354831:
+    // 277.5% / 112.5% of attack power, 2 s cast, 60 s cooldown, 15 Focus (Wowhead tooltip, 26 Sep
+    // 2026, matching the engine's own rows). The spells require level 60, as the bow does. The
+    // Dark Ranger's talent version wins when both are present: the game gives one Wailing Arrow.
+    if ( !talents.wailing_dead.ok() && find_item_by_id( 186414 ) && find_spell( 355589 )->ok()
+         && true_level >= as<int>( find_spell( 355589 )->level() ) )
+    {
+      legacy_raeshalare             = true;
+      talents.wailing_arrow         = find_spell( 355589 );
+      talents.wailing_arrow_damage  = find_spell( 354831 );
+      // The shipped lists only press Wailing Arrow under hero_tree.dark_ranger, which is dead
+      // below 71, so it joins the legacy queue player_t::init_actions() places in the cooldowns.
+      if ( legacy_raeshalare_press )
+        legacy_apl_actions.emplace_back( "wailing_arrow" );
+    }
+
     talents.blighted_quiver             = find_talent_spell( talent_tree::HERO, "Blighted Quiver" );
     talents.banshees_mark               = find_talent_spell( talent_tree::HERO, "Banshee's Mark" );
     talents.the_bell_tolls              = find_talent_spell( talent_tree::HERO, "The Bell Tolls" );
@@ -8152,6 +9209,126 @@ void hunter_t::create_buffs()
 {
   player_t::create_buffs();
 
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+  buffs.legacy_eagletalons_true_focus =
+      make_buff( this, "legacy_eagletalons_true_focus", find_spell( 336851 ) )
+          ->set_default_value_from_effect( 1 )
+          ->set_chance( shadowlands_legacy.eagletalons_true_focus ? 1.0 : 0.0 );
+  buffs.legacy_pact_of_the_soulstalkers =
+      make_buff( this, "legacy_pact_of_the_soulstalkers", find_spell( 356263 ) )
+          ->set_default_value_from_effect( 1 )
+          ->set_pct_buff_type( STAT_PCT_BUFF_CRIT )
+          ->set_chance( shadowlands_legacy.pact_of_the_soulstalkers ? 1.0 : 0.0 );
+  // Flayer's Mark comes off Flayed Shot and is what Pouch of Razor Fragments
+  // reads, so it only exists when the covenant is on.
+  //
+  // The chance is Flayed Shot's own effect 2 - a 15 Dummy its description
+  // names: "you have a $s2% chance to gain Flayer's Mark". An earlier pass set
+  // this to 1.0 on the belief that the buff carried its own chance; it does
+  // not, and the result was a Flayer's Mark on every tick of the dot.
+  //
+  // BracketSim legacy compatibility: Empowered Release (conduit 139) adds its
+  // effect 1 to that chance. That half is a flat five points and does NOT
+  // rank-scale; only the Kill Shot damage below does.
+  buffs.legacy_flayers_mark =
+      make_buff( this, "legacy_flayers_mark", find_spell( 324156 ) )
+          ->set_chance( legacy_covenant.flayed_shot->ok()
+                            ? legacy_covenant.flayed_shot->effectN( 2 ).percent() +
+                                  ( legacy_conduits.has( 139 )
+                                        ? find_spell( 339059 )->effectN( 1 ).percent()
+                                        : 0.0 )
+                            : 0.0 );
+
+  // BracketSim legacy compatibility: Empowered Release (conduit 139) rides
+  // along with Flayer's Mark and raises the Kill Shot it frees.
+  buffs.legacy_empowered_release =
+      make_buff( this, "legacy_empowered_release", find_spell( 339061 ) )
+          ->set_default_value( legacy_conduits.percent( 139 ) )
+          ->set_chance( legacy_conduits.has( 139 ) ? 1.0 : 0.0 );
+
+  // BracketSim legacy compatibility: Flame Infusion (conduit 252). Buff spell
+  // 341401 is absent from Midnight, so its 8 second duration and 2 stack cap
+  // come from the archived 9.2.7 client data - the same source
+  // legacy_conduits.hpp already carries its rank table from. Without the stack
+  // cap it would ramp without limit for the whole fight.
+  buffs.legacy_flame_infusion =
+      make_buff( this, "legacy_flame_infusion", find_spell( 341401 ) )
+          ->set_duration( timespan_t::from_seconds( 8.0 ) )
+          ->set_max_stack( 2 )
+          ->set_default_value( legacy_conduits.percent( 252 ) )
+          ->set_chance( legacy_conduits.has( 252 ) ? 1.0 : 0.0 );
+  buffs.legacy_flamewakers_cobra_sting =
+      make_buff( this, "legacy_flamewakers_cobra_sting", find_spell( 336826 ) )
+          ->set_chance( shadowlands_legacy.flamewakers_cobra_sting ? 1.0 : 0.0 );
+  buffs.legacy_nesingwarys_apparatus =
+      make_buff( this, "legacy_nesingwarys_apparatus", find_spell( 336744 ) )
+          ->set_default_value_from_effect( 2 )
+          ->set_chance( shadowlands_legacy.nesingwarys_apparatus ? 1.0 : 0.0 );
+  buffs.legacy_resonating_arrow =
+    make_buff( this, "resonating_arrow", find_spell( 308498 ) )
+      ->set_default_value( find_spell( 308498 )->effectN( 1 ).percent() );
+
+  buffs.legacy_wild_spirits =
+    make_buff( this, "wild_spirits", find_spell( 328837 ) )
+      ->set_default_value( find_spell( 328275 )->effectN( 2 ).percent() );
+
+  buffs.legacy_secrets_of_the_unblinking_vigil =
+      make_buff( this, "legacy_secrets_of_the_unblinking_vigil", find_spell( 336892 ) )
+          ->set_chance( shadowlands_legacy.secrets_of_the_unblinking_vigil ? 1.0 : 0.0 );
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite trait buffs.
+  buffs.blur_of_talons = make_buff<stat_buff_t>( this, "blur_of_talons", find_spell( 277969 ) )
+    ->add_stat( STAT_AGILITY, legacy_azerite.blur_of_talons.value( 1 ) )
+    ->set_trigger_spell( legacy_azerite.blur_of_talons );
+  buffs.dance_of_death = make_buff<stat_buff_t>( this, "dance_of_death", find_spell( 274443 ) )
+    ->add_stat( STAT_AGILITY, legacy_azerite.dance_of_death.value( 1 ) );
+  buffs.haze_of_rage = make_buff<stat_buff_t>( this, "haze_of_rage", find_spell( 273264 ) )
+    ->add_stat( STAT_AGILITY, legacy_azerite.haze_of_rage.value( 1 ) )
+    ->set_trigger_spell( legacy_azerite.haze_of_rage );
+  buffs.in_the_rhythm = make_buff<stat_buff_t>( this, "in_the_rhythm", find_spell( 272733 ) )
+    ->add_stat( STAT_HASTE_RATING, legacy_azerite.in_the_rhythm.value( 1 ) )
+    ->set_trigger_spell( legacy_azerite.in_the_rhythm );
+  // BracketSim legacy compatibility: spell 193530 was removed from the
+  // current DBC. The 2026-09-07 a test character combat log proves that a Vision
+  // of Perfection proc still applies Aspect of the Wild for ~35% of its old
+  // 20-second duration. The historical aura granted 10% crit and 5 Focus per
+  // second to both Hunter and main pet; action-level code above handles crit
+  // and the retired 200 ms GCD reduction with the original family flag.
+  // BracketSim legacy compatibility: Brutal Projectiles. Spells 339924, 339928
+  // and 339929 are all absent from Midnight, so the chance, the durations and
+  // the 20 stack cap are read from the archived 9.2.7 client data that
+  // legacy_conduits.hpp already carries its rank table from. The 6% per stack
+  // is rank scaled and still comes from the rank table.
+  buffs.legacy_brutal_projectiles =
+    make_buff( this, "legacy_brutal_projectiles" )
+      ->set_duration( 25_s )
+      ->set_max_stack( 1 )
+      ->set_chance( legacy_conduits.has( 189 ) ? 10.0 / 100.0 : 0.0 );
+
+  buffs.legacy_brutal_projectiles_hidden =
+    make_buff( this, "legacy_brutal_projectiles_hidden" )
+      ->set_duration( timespan_t::zero() )
+      ->set_max_stack( 20 )
+      ->set_default_value( legacy_conduits.percent( 189 ) )
+      ->set_chance( legacy_conduits.has( 189 ) ? 1.0 : 0.0 );
+
+  buffs.legacy_aspect_of_the_wild =
+    make_buff( this, "aspect_of_the_wild" )
+      ->set_duration( 20_s )
+      ->set_period( 1_s )
+      ->set_default_value( 0.10 )
+      ->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) {
+        resource_gain( RESOURCE_FOCUS, 5.0, gains.legacy_aspect_of_the_wild );
+        if ( auto pet = pets.main )
+          pet->resource_gain( RESOURCE_FOCUS, 5.0, gains.legacy_aspect_of_the_wild );
+      } );
+  buffs.primal_instincts = make_buff<stat_buff_t>( this, "primal_instincts", find_spell( 279810 ) )
+    ->add_stat( STAT_MASTERY_RATING, legacy_azerite.primal_instincts.value( 1 ) )
+    ->set_trigger_spell( legacy_azerite.primal_instincts );
+  buffs.primeval_intuition = make_buff<stat_buff_t>( this, "primeval_intuition", find_spell( 288573 ) )
+    ->add_stat( STAT_CRIT_RATING, legacy_azerite.primeval_intuition.value( 1 ) )
+    ->set_trigger_spell( legacy_azerite.primeval_intuition );
+
   // Hunter Tree
 
   buffs.deathblow = make_buff( this, "deathblow", talents.deathblow_buff );
@@ -8171,7 +9348,13 @@ void hunter_t::create_buffs()
       ->set_default_value_from_effect( 1 );
 
   buffs.trick_shots =
-    make_buff( this, "trick_shots", talents.trick_shots_buff );
+    make_buff( this, "trick_shots", talents.trick_shots_buff )
+      ->set_stack_change_callback(
+        [ this ]( buff_t*, int _old, int _new ) {
+          // BracketSim legacy compatibility: Secrets of the Unblinking Vigil.
+          if ( _new > _old )
+            trigger_legacy_unblinking_vigil();
+        } );
   
   buffs.lock_and_load =
     make_buff( this, "lock_and_load", talents.lock_and_load_buff )
@@ -8187,10 +9370,32 @@ void hunter_t::create_buffs()
       ->set_refresh_behavior( buff_refresh_behavior::EXTEND )
       ->add_invalidate( cache_e::CACHE_CRIT_CHANCE )
       ->set_stack_change_callback(
-        [ this ]( buff_t*, int, int ) {
+        [ this ]( buff_t*, int, int new_ ) {
           cooldowns.aimed_shot->adjust_recharge_multiplier();
           cooldowns.rapid_fire->adjust_recharge_multiplier();
+
+          // Legacy Azerite: Unerring Vision runs for as long as Trueshot does.
+          if ( legacy_azerite.unerring_vision.ok() )
+          {
+            if ( new_ > 0 )
+              buffs.legacy_unerring_vision_driver->trigger( 1, buff_t::DEFAULT_VALUE(), 1.0,
+                                                            buffs.trueshot->remains() );
+            else
+              buffs.legacy_unerring_vision_driver->expire();
+          }
         } );
+
+  // Legacy Azerite: Unerring Vision stacks a crit buff for as long as Trueshot
+  // is up.
+  buffs.legacy_unerring_vision =
+    make_buff<stat_buff_t>( this, "legacy_unerring_vision", find_spell( 274447 ) )
+      ->add_stat( STAT_CRIT_RATING, legacy_azerite.unerring_vision.value( 1 ) );
+  buffs.legacy_unerring_vision_driver =
+    make_buff( this, "legacy_unerring_vision_driver", find_spell( 274446 ) )
+      ->set_quiet( true )
+      ->set_tick_zero( true )
+      ->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) { buffs.legacy_unerring_vision->trigger(); } )
+      ->set_chance( legacy_azerite.unerring_vision.ok() ? 1.0 : 0.0 );
 
   buffs.unstable_trigger =
     make_buff( this, "unstable_trigger", talents.unstable_trigger_buff )
@@ -8227,10 +9432,15 @@ void hunter_t::create_buffs()
             resource_gain( RESOURCE_FOCUS, b->check_stack_value(), gains.barbed_shot, actions.barbed_shot );
           } );
 
+  // BracketSim legacy compatibility: One With the Beast also raises the
+  // hunter's own Bestial Wrath. Shadowlands did this with
+  // apply_affecting_conduit; the conduit spell is not in Midnight's data, so
+  // the rank value is added to the buff's own percent instead.
   buffs.bestial_wrath =
     make_buff( this, "bestial_wrath", talents.bestial_wrath )
       -> set_cooldown( 0_ms )
-      -> set_default_value_from_effect( 1 );
+      -> set_default_value( talents.bestial_wrath -> effectN( 1 ).percent() +
+                            legacy_conduits.percent( 185 ) );
 
   buffs.beast_cleave = 
     make_buff( this, "beast_cleave", find_spell( 268877 ) )
@@ -8436,12 +9646,30 @@ void hunter_t::init_gains()
 {
   player_t::init_gains();
 
+  gains.legacy_aspect_of_the_wild = get_gain( "Aspect of the Wild" );
   gains.barbed_shot               = get_gain( "Barbed Shot" );
   gains.pack_tactics              = get_gain( "Pack Tactics" );
   gains.invigorating_pulse        = get_gain( "Invigorating Pulse" );
   gains.serpentine_strikes        = get_gain( "Serpentine Strikes" );
   gains.lethal_barbs              = get_gain( "Lethal Barbs" );
   gains.shrapnel_bomb             = get_gain( "Shrapnel Bomb" );
+  gains.legacy_nesingwarys_apparatus = get_gain( "Nesingwary's Trapping Apparatus" );
+}
+
+// BracketSim legacy compatibility: Nesingwary's Trapping Apparatus (7004).
+// Effect 2 of spell 336744 is +100% focus generation for five seconds.
+// Shadowlands multiplied energize amounts because its Hunter model routed
+// focus through them; Midnight regenerates focus passively, so the same
+// multiplier belongs here instead. The buff carries the value read off its own
+// effect 2, so no number is written down.
+double hunter_t::resource_regen_per_second( resource_e r ) const
+{
+  double rps = player_t::resource_regen_per_second( r );
+
+  if ( r == RESOURCE_FOCUS )
+    rps *= 1.0 + buffs.legacy_nesingwarys_apparatus->check_value();
+
+  return rps;
 }
 
 void hunter_t::init_position()
@@ -8733,7 +9961,93 @@ void hunter_t::init_special_effects()
 
 void hunter_t::init_finished()
 {
+  // BracketSim legacy compatibility: Call of the Wild shortens the Aspects and
+  // Trueshot. Done here rather than in init_spells because each action sets its
+  // own cooldown duration in its constructor, which runs later.
+  if ( shadowlands_legacy.call_of_the_wild )
+  {
+    double pct = find_spell( 336742 )->effectN( 1 ).percent();
+    for ( auto cd : { cooldowns.trueshot, cooldowns.bestial_wrath } )
+      if ( cd )
+        cd->duration *= 1.0 + pct;
+  }
+
   player_t::init_finished();
+}
+
+
+// BracketSim legacy compatibility: Vision of Perfection (Heart of Azeroth major
+// essence). The engine procs it and calls this; each spec fires its signature
+// cooldown early, at the fraction of its duration the essence grants.
+// BracketSim legacy compatibility: Secrets of the Unblinking Vigil refunds an
+// Aimed Shot charge whenever Trick Shots is gained, from any source.
+void hunter_t::trigger_legacy_unblinking_vigil()
+{
+  if ( !shadowlands_legacy.secrets_of_the_unblinking_vigil )
+    return;
+
+  if ( rng().roll( find_spell( 336878 )->effectN( 1 ).percent() ) )
+  {
+    cooldowns.aimed_shot->reset( true );
+    buffs.legacy_secrets_of_the_unblinking_vigil->trigger();
+  }
+}
+
+void hunter_t::vision_of_perfection_proc()
+{
+  auto essence = find_azerite_essence( "Vision of Perfection" );
+  if ( !essence.enabled() )
+    return;
+
+  double mult = essence.spell( 1u )->effectN( 1 ).percent() +
+                essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
+
+  // The live 12.1.0.69587 a test character log records Vision of Perfection
+  // applying Aspect of the Wild (193530) and Primal Instincts (279810)
+  // together. Do not substitute the modern Bestial Wrath cooldown here.
+  if ( specialization() == HUNTER_BEAST_MASTERY )
+  {
+    if ( mult <= 0 )
+      return;
+
+    const timespan_t dur = 20_s * mult;
+    if ( legacy_azerite.primal_instincts.ok() )
+    {
+      cooldowns.barbed_shot->adjust( -cooldown_t::cooldown_duration( cooldowns.barbed_shot ) * mult );
+      if ( buffs.primal_instincts->check() )
+        buffs.primal_instincts->extend_duration( dur );
+      else
+        buffs.primal_instincts->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+    }
+
+    if ( buffs.legacy_aspect_of_the_wild->check() )
+      buffs.legacy_aspect_of_the_wild->extend_duration( dur );
+    else
+      buffs.legacy_aspect_of_the_wild->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+    return;
+  }
+
+  buff_t* window = nullptr;
+  switch ( specialization() )
+  {
+    case HUNTER_MARKSMANSHIP:
+      window = buffs.trueshot;
+      break;
+    case HUNTER_SURVIVAL:
+      window = buffs.aspect_of_the_eagle;
+      break;
+    default:
+      break;
+  }
+
+  if ( !window || mult <= 0 )
+    return;
+
+  timespan_t dur = window->buff_duration() * mult;
+  if ( window->check() )
+    window->extend_duration( dur );
+  else
+    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
 }
 
 void hunter_t::reset()
@@ -8868,9 +10182,30 @@ double hunter_t::composite_player_multiplier( school_e school ) const
   return m;
 }
 
+// BracketSim legacy (27 Sep 2026): Resonating Arrow's +30% crit chance (upstream shadowlands).
+double hunter_t::composite_player_target_crit_chance( player_t* target ) const
+{
+  double crit = player_t::composite_player_target_crit_chance( target );
+  if ( buffs.legacy_resonating_arrow )
+    crit += buffs.legacy_resonating_arrow->check_value();
+  return crit;
+}
+
 double hunter_t::composite_player_target_multiplier( player_t* target, school_e school ) const
 {
   double d = player_t::composite_player_target_multiplier( target, school );
+
+  // BracketSim legacy: Wild Mark (328275 effect 2), 5% more damage from the hunter while Wild Spirits is up.
+  if ( buffs.legacy_wild_spirits )
+    d *= 1 + buffs.legacy_wild_spirits->check_value();
+
+  // BracketSim legacy: Death Chakram's debuff (325037 effect 2, physical only - misc value 0x1).
+  if ( legacy_covenant.death_chakram->ok() )
+  {
+    auto dc = get_target_data( target )->debuffs.legacy_death_chakram;
+    if ( dc->check() && dc->has_common_school( school ) )
+      d *= 1 + dc->check_value();
+  }
 
   return d;
 }
@@ -8900,6 +10235,14 @@ double hunter_t::composite_player_pet_damage_multiplier( const action_state_t* s
 double hunter_t::composite_player_target_pet_damage_multiplier( player_t* target, bool guardian ) const
 {
   double m = player_t::composite_player_target_pet_damage_multiplier( target, guardian );
+
+  // BracketSim legacy: Death Chakram's debuff (325037 effects 3/4) for pets and guardians.
+  if ( legacy_covenant.death_chakram->ok() )
+    m *= 1 + get_target_data( target )->debuffs.legacy_death_chakram->check_value();
+
+  // BracketSim legacy: Wild Mark (328275 effects 3/4), 5% more damage from the hunter's pets and guardians.
+  if ( buffs.legacy_wild_spirits )
+    m *= 1 + buffs.legacy_wild_spirits->check_value();
 
   return m;
 }
@@ -9005,6 +10348,13 @@ void hunter_t::create_options()
 {
   player_t::create_options();
 
+  add_option( opt_bool( "hunter.legacy_shadowlands_enabled",
+                        shadowlands_legacy.legacy_shadowlands_enabled ) );
+  add_option( opt_string( "hunter.legacy_covenant", legacy_covenant.chosen ) );
+  add_option( opt_string( "hunter.legacy_conduits", legacy_conduits.option ) );
+  // Whether the rotation presses Rae'shalare's Wailing Arrow (default no - see the member). A measuring switch:
+  // a two-second cast can cost more than it deals, and a player would then leave it alone.
+  add_option( opt_bool( "hunter.legacy_raeshalare_press", legacy_raeshalare_press ) );
   add_option( opt_string( "summon_pet", options.summon_pet_str ) );
   add_option( opt_timespan( "hunter.pet_attack_speed", options.pet_attack_speed, 0.5_s, 4_s ) );
   add_option( opt_timespan( "hunter.pet_basic_attack_delay", options.pet_basic_attack_delay, 0_ms, 0.6_s ) );

@@ -6056,6 +6056,32 @@ void items::draconic_empowerment( special_effect_t& effect )
     return;
   }
 
+  /*
+   * "REQUIRES THE HEART OF AZEROTH", and until 18 September 2026 nothing checked.
+   *
+   * The cloak's own tooltip says it, the driver's description says it
+   * ("Your spells and abilities have a chance to increase your $pri ... Requires
+   * the Heart of Azeroth"), and this project's own fixture has recorded
+   * `procRequiresHeart: true` since the file was generated. Not one of the three
+   * was read by anything - the same failure this codebase has already written a
+   * lesson about: data that exists and is never read is the same as data that is
+   * missing.
+   *
+   * It matters most exactly where the cloak matters most. the author, 18 September:
+   * *"its bis for all 50s"*. A level 50 profile that takes the cloak and does NOT
+   * end up wearing the Heart would have been handed a proc the game withholds.
+   */
+  const bool wearing_heart =
+      effect.player->items[ SLOT_NECK ].parsed.data.id == 158075;
+  if ( !wearing_heart )
+  {
+    effect.player->sim->print_debug(
+        "{} has Ashjra'kamas but no Heart of Azeroth in the neck slot - "
+        "Draconic Empowerment cannot proc.", *effect.player );
+    effect.type = SPECIAL_EFFECT_NONE;
+    return;
+  }
+
   effect.custom_buff = buff_t::find( effect.player, "draconic_empowerment" );
   if ( !effect.custom_buff )
     effect.custom_buff =
@@ -6063,7 +6089,28 @@ void items::draconic_empowerment( special_effect_t& effect )
             ->add_stat( effect.player->convert_hybrid_stat( STAT_STR_AGI_INT ),
                         effect.player->find_spell( 317859 )->effectN( 1 ).average( effect.player ) );
 
-  effect.proc_flags_ = PF_ALL_DAMAGE | PF_ALL_HEAL | PF_PERIODIC;  // Proc flags are missing in spell data.
+  /*
+   * THE PROC FLAGS COME FROM THE DATA NOW.
+   *
+   * This carried `PF_ALL_DAMAGE | PF_ALL_HEAL | PF_PERIODIC` under the comment
+   * "Proc flags are missing in spell data". They are not missing: spell 317860
+   * states "Proc Flags: Cast Successful", which is once per cast. The override
+   * let it roll off every damage event, every heal and every periodic TICK -
+   * which is the mistake that made Nibelung read 21 times too high.
+   *
+   * Real PPM kept the rate roughly time-bound, so this was never as bad as
+   * Nibelung; the harm is that a DoT-heavy spec was rolling on a mechanic the
+   * game does not give it. Measured against the author's own log (5 procs in 117.8
+   * seconds on a level 50 Fury warrior, 2.5 per minute against a modelled real
+   * PPM of 1.25) the rate is consistent within a five-proc sample either way.
+   *
+   * If the parsed flags ever come back empty the effect goes silent rather than
+   * wrong, and test-legacy-legendaries.mjs asserts it still fires.
+   */
+  if ( effect.driver()->proc_flags() != 0 )
+    effect.proc_flags_ = effect.driver()->proc_flags();
+  else
+    effect.proc_flags_ = PF_ALL_DAMAGE | PF_ALL_HEAL;
 
   new dbc_proc_callback_t( effect.player, effect );
 }
@@ -6100,8 +6147,152 @@ void set_bonus::gift_of_the_loa( special_effect_t& effect )
   }
 }
 
+/*
+ * BracketSim legacy compatibility: Ashjra'kamas, Shroud of Resolve (169223).
+ *
+ * The cloak carries the SAME driver (315793) and the SAME buff (315858) as the
+ * Ny'alotha trinket pair, but as its own equip effect with its own conditions.
+ * the author's rank 15 tooltip, 17 September 2026:
+ *
+ *   "Equip: Your spells and abilities have a chance to increase your Strength
+ *    by 105 for 15 sec. (Requires the Heart of Azeroth. Requires level 50 or
+ *    below)"
+ *
+ * Both of those conditions are real gates and both are enforced here. Since the
+ * cloak itself requires level 50, "level 50 or below" makes this exactly
+ * bracket 50 - above it the cloak is a plain stat cloak, which is what the item
+ * is worth at 60, 70 and 80.
+ *
+ * The amount comes from the item's own level through the epic budget, the same
+ * way the trinket-set path computes it, rather than from the 105 on the
+ * tooltip: 105 is one reading at one item level and the budget is the rule
+ * behind it. It is checked AGAINST that reading.
+ */
+static void ashjrakamas_titanic_empowerment( special_effect_t& effect )
+{
+  auto* p = effect.player;
+
+  if ( !effect.item )
+  {
+    effect.type = SPECIAL_EFFECT_NONE;
+    return;
+  }
+
+  // "Requires level 50 or below."
+  if ( p->true_level > 50 )
+  {
+    p->sim->print_debug( "Player {} Ashjra'kamas: level {} is above 50, proc inactive.",
+                         p->name(), p->true_level );
+    effect.type = SPECIAL_EFFECT_NONE;
+    return;
+  }
+
+  // "Requires the Heart of Azeroth." The neck is what switches azerite on, and
+  // this proc with it.
+  if ( !p->find_item_by_id( 158075 ) )
+  {
+    p->sim->print_debug( "Player {} Ashjra'kamas: no Heart of Azeroth equipped, proc inactive.",
+                         p->name() );
+    effect.type = SPECIAL_EFFECT_NONE;
+    return;
+  }
+
+  /*
+   * ITS OWN BUFF, AND ITS OWN NAME.
+   *
+   * Not "titanic_empowerment": the trinket-set path makes a buff by that name,
+   * and `buff_t::find` would hand this one whatever already existed. Two
+   * sources sharing one buff is the Solace of the Defeated fault - the second
+   * item silently inherits the first one's value and the ranking is wrong with
+   * no error anywhere.
+   *
+   * THE AMOUNT. 315858 is flagged "Scales with Casting Item's Level", so the
+   * item belongs in the buff's construction and `stat_buff_t` applies the
+   * scaling itself. Computing it by hand as `p_epic[0] * m_coefficient` - which
+   * is what the trinket-set path does - gives 28 primary stat at item level 67
+   * against a tooltip that reads 105. That formula is upstream code written for
+   * Battle for Azeroth item levels in the four hundreds; at 67 it is nowhere
+   * near. The item-scaled spell value is the rule, and the author's tooltip is the
+   * check on it.
+   */
+  /*
+   * THE MAGNITUDE IS ANCHORED TO THE LIVE TOOLTIP, and this is deliberate.
+   *
+   * the author's rank 15 cloak, item level 67, on a level 50: "increase your Strength
+   * by 105". Four derivations from the engine's own data were tried against
+   * that number and none of them lands on it:
+   *
+   *     buff 315858 effect 1, item-scaled          28.2
+   *     p_epic[67] * buff effect 1 coefficient     28.2  (the trinket-set path)
+   *     driver 315793 effect 1, item-scaled       292.3
+   *     driver 315793 effect 1, player-scaled     292.3
+   *     driver 315793 effect 1, base value         15.0
+   *
+   * The driver's rows do not move with item level at all and its effect carries
+   * "Max Scaling Level: 32", which is a level-32 cap this project's brackets sit
+   * above; the buff's row is an item-budget allocation calibrated for Battle for
+   * Azeroth item levels in the four hundreds. Neither reproduces what the game
+   * shows at item level 67.
+   *
+   * So the tooltip is the source, the way it was for Uther's Guard and for the
+   * Heart of Azeroth's own item level. This is a MEASURED value, not a guess,
+   * and its conditions travel with it: rank 15, item level 67, character level
+   * 50. That is the only configuration this project builds - the cloak requires
+   * level 50 and the proc requires level 50 or below, so bracket 50 is the whole
+   * of its use.
+   *
+   * If a different item level ever arrives, the value is scaled by the epic
+   * budget ratio and SAID SO in the log, because that interpolation is an
+   * assumption and nobody has measured a second point.
+   */
+  constexpr double ASHJRAKAMAS_PRIMARY_AT_ILVL_67 = 105.0;
+  constexpr int    ASHJRAKAMAS_MEASURED_ILVL      = 67;
+
+  auto* buff = static_cast<stat_buff_t*>( buff_t::find( p, "ashjrakamas_titanic_empowerment" ) );
+  if ( !buff )
+  {
+    const int ilvl = effect.item->item_level();
+    double value   = ASHJRAKAMAS_PRIMARY_AT_ILVL_67;
+
+    if ( ilvl != ASHJRAKAMAS_MEASURED_ILVL )
+    {
+      const double here      = p->dbc->random_property( ilvl ).p_epic[ 0 ];
+      const double measured  = p->dbc->random_property( ASHJRAKAMAS_MEASURED_ILVL ).p_epic[ 0 ];
+      if ( measured > 0 )
+        value = ASHJRAKAMAS_PRIMARY_AT_ILVL_67 * here / measured;
+      p->sim->error( "Ashjra'kamas is item level {} but its proc was only ever measured at {}; "
+                     "scaling {:.0f} to {:.0f} by epic budget is an ASSUMPTION.",
+                     ilvl, ASHJRAKAMAS_MEASURED_ILVL, ASHJRAKAMAS_PRIMARY_AT_ILVL_67, value );
+    }
+
+    buff = make_buff<stat_buff_t>( p, "ashjrakamas_titanic_empowerment", p->find_spell( 315858 ) );
+    buff->add_stat( p->convert_hybrid_stat( STAT_STR_AGI_INT ), value );
+    p->sim->print_debug( "Player {} Ashjra'kamas: Titanic Empowerment grants {:.1f} primary "
+                         "stat for {:.0f}s at item level {}", p->name(), value,
+                         buff->buff_duration().total_seconds(), ilvl );
+  }
+
+  auto* titanic_cb = p->callbacks.get_first_of<titanic_empowerment_cb_t>();
+  if ( !titanic_cb )
+    titanic_cb = new titanic_empowerment_cb_t( effect, { buff } );
+  else
+    titanic_cb->proc_buffs.push_back( buff );
+}
+
 void set_bonus::titanic_empowerment( special_effect_t& effect )
 {
+  /*
+   * One driver, two sources. The cloak supplies 315793 as its own equip effect
+   * (injected in item.cpp, because the client data has no ItemEffect row for
+   * it); the Ny'alotha trinket pair supplies it as a set bonus. The item the
+   * effect arrived on decides which set of rules applies.
+   */
+  if ( effect.item && effect.item->parsed.data.id == 169223 )
+  {
+    ashjrakamas_titanic_empowerment( effect );
+    return;
+  }
+
   if ( effect.player->sim->bfa_opts.nyalotha )
   {
     auto buff = static_cast<stat_buff_t*>( buff_t::find( effect.player, "titanic_empowerment" ) );

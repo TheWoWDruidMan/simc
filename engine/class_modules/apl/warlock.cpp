@@ -89,6 +89,13 @@ void affliction( player_t* p )
   default_->add_action( "call_action_list,name=items" );
   default_->add_action( "call_action_list,name=soul_harvester,if=hero_tree.soul_harvester" );
   default_->add_action( "call_action_list,name=hellcaller,if=hero_tree.hellcaller" );
+  // BracketSim compatibility: below level 71 neither hero tree exists, so both
+  // calls above are false and the stock Affliction APL otherwise falls through
+  // to channels plus Shadow Bolt without applying its core dots. Soul Harvester
+  // contains the complete ordinary rotation; hero-only actions inside it keep
+  // their own availability checks. Measured on a real level-70 character:
+  // 3,238 -> 9,940 DPS, with Agony entering the cast list again.
+  default_->add_action( "call_action_list,name=soul_harvester,if=!hero_tree.soul_harvester&!hero_tree.hellcaller" );
   default_->add_action( "malefic_grasp,chain=1,early_chain_if=buff.nightfall.react,if=pet.darkglare.active" );
   default_->add_action( "drain_soul,chain=1,early_chain_if=buff.nightfall.react,interrupt_if=tick_time>0.5" );
   default_->add_action( "shadow_bolt" );
@@ -227,6 +234,18 @@ void demonology( player_t* p )
   default_->add_action( "call_action_list,name=items,use_off_gcd=1" );
   default_->add_action( "call_action_list,name=diabolist,if=talent.diabolic_ritual" );
   default_->add_action( "call_action_list,name=soulharvest,if=talent.demonic_soul" );
+  // BracketSim: both branches above need a HERO talent - Diabolist or Soul
+  // Harvester - and a character below level 71 has neither, so the list ended
+  // here and the warlock cast nothing but its pet summon. A real level 60
+  // Demonology warlock sat at 258 dps casting only felguard, on the same
+  // character and gear where Destruction managed 2831.
+  //
+  // The fallback is diabolist rather than a hand-written rotation: it is a
+  // list this file already maintains and its core is ordinary Demonology -
+  // Hand of Gul'dan, Call Dreadstalkers, Shadow Bolt, Demonbolt. Any
+  // hero-specific action in it that the character cannot use is skipped, so
+  // nothing is invented here. Same shape as the Marksmanship fallback.
+  default_->add_action( "call_action_list,name=diabolist,if=!talent.diabolic_ritual&!talent.demonic_soul" );
 
   diabolist->add_action( "power_siphon,if=buff.demonic_core.stack<=1|fight_remains<10" );
   diabolist->add_action( "hand_of_guldan,if=buff.dominion_of_argus.up" );

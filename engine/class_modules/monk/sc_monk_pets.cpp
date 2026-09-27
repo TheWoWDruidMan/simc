@@ -309,10 +309,18 @@ private:
       s_data_reporting =
           p->o()->talent.conduit_of_the_celestials.crackling_tiger_lightning_driver->effectN( 1 ).trigger();
 
-      dot_duration = p->o()->talent.conduit_of_the_celestials.invoke_xuen_the_white_tiger->duration();
-      cooldown->duration =
-          p->o()->talent.conduit_of_the_celestials.invoke_xuen_the_white_tiger->duration();  // we're done when Xuen
-                                                                                             // despawns
+      // BracketSim legacy compatibility (26 Sep 2026): Xuen can be summoned WITHOUT the Invoke Xuen talent -
+      // Kyrian Weapons of Order with the Call to Arms legendary summons him for 12 s. The talent's duration is
+      // then 0, so this lightning had no cooldown and no duration and recast every 0 s: the simulation hung at
+      // iteration 0 (60 Windwalker's borrowed-power stage, cloud 26 Sep). Fall back to the spell itself, whose
+      // data Midnight still exports; with the talent taken nothing changes.
+      timespan_t life = p->o()->talent.conduit_of_the_celestials.invoke_xuen_the_white_tiger->duration();
+      if ( life <= 0_ms )
+        life = p->o()->find_spell( 123904 )->duration();
+      if ( life <= 0_ms )
+        life = 20_s;
+      dot_duration       = life;
+      cooldown->duration = life;  // we're done when Xuen despawns
 
       tick_action = new crackling_tiger_lightning_tick_t( p );
     }
@@ -345,6 +353,108 @@ public:
   xuen_pet_t( monk_t *owner ) : monk_pet_t( owner, "xuen_the_white_tiger", PET_XUEN, false, true )
   {
     npc_id = as<int>( o()->talent.brewmaster.invoke_niuzao_the_black_ox_npc->effectN( 1 ).misc_value1() );
+    main_hand_weapon.type       = WEAPON_BEAST;
+    main_hand_weapon.min_dmg    = dbc->spell_scaling( o()->type, level() );
+    main_hand_weapon.max_dmg    = dbc->spell_scaling( o()->type, level() );
+    main_hand_weapon.damage     = ( main_hand_weapon.min_dmg + main_hand_weapon.max_dmg ) / 2;
+    main_hand_weapon.swing_time = timespan_t::from_seconds( 1.0 );
+    owner_coeff.ap_from_ap      = 1.00;
+  }
+
+  void init_action_list() override
+  {
+    action_list_str = "auto_attack";
+    action_list_str += "/crackling_tiger_lightning";
+
+    pet_t::init_action_list();
+  }
+
+  action_t *create_action( std::string_view name, std::string_view options_str ) override
+  {
+    if ( name == "crackling_tiger_lightning" )
+      return new crackling_tiger_lightning_t( this, options_str );
+
+    if ( name == "auto_attack" )
+      return new auto_attack_t( this, options_str );
+
+    return pet_t::create_action( name, options_str );
+  }
+};
+
+// ==========================================================================
+// Legacy Azerite: Fury of Xuen
+// ==========================================================================
+
+// Deliberately NOT xuen_pet_t. That one is the modern twenty second cooldown,
+// it takes Xuen's Bond scaling, and its lightning duration is tied to the
+// Conduit of the Celestials talent. This tiger runs for the trait's own eight
+// seconds with no modern scaling, which is the creature Battle for Azeroth
+// actually summoned.
+struct legacy_fury_of_xuen_pet_t : public monk_pet_t
+{
+private:
+  struct melee_t : public pet_melee_t
+  {
+    melee_t( std::string_view n, legacy_fury_of_xuen_pet_t *player, weapon_t *weapon )
+      : pet_melee_t( n, player, weapon )
+    {
+    }
+  };
+
+  struct crackling_tiger_lightning_tick_t : public pet_spell_t
+  {
+    crackling_tiger_lightning_tick_t( legacy_fury_of_xuen_pet_t *p )
+      : pet_spell_t( "crackling_tiger_lightning_tick", p,
+                     p->o()->find_spell( 123999 )->effectN( 1 ).trigger() )
+    {
+      // Battle for Azeroth capped this at three targets.
+      aoe          = 3;
+      background   = true;
+      merge_report = false;
+    }
+  };
+
+  struct crackling_tiger_lightning_t : public pet_spell_t
+  {
+    crackling_tiger_lightning_t( legacy_fury_of_xuen_pet_t *p, std::string_view options_str )
+      : pet_spell_t( "crackling_tiger_lightning", p, p->o()->find_spell( 123999 ) )
+    {
+      parse_options( options_str );
+      s_data_reporting = p->o()->find_spell( 123999 )->effectN( 1 ).trigger();
+
+      // 287063 is the trait's Haste buff, and its duration is how long the
+      // tiger is out. Both the dot and the cooldown use it, so the lightning
+      // runs exactly as long as the summon does.
+      dot_duration       = p->o()->find_spell( 287063 )->duration();
+      cooldown->duration = dot_duration;
+      hasted_ticks       = false;
+      may_miss           = false;
+
+      tick_action = new crackling_tiger_lightning_tick_t( p );
+    }
+
+    double last_tick_factor( const dot_t *, timespan_t, timespan_t ) const override
+    {
+      return 0.0;
+    }
+  };
+
+  struct auto_attack_t : public pet_auto_attack_t
+  {
+    auto_attack_t( legacy_fury_of_xuen_pet_t *player, std::string_view options_str )
+      : pet_auto_attack_t( player )
+    {
+      parse_options( options_str );
+
+      player->main_hand_attack = new melee_t( "melee_main_hand", player, &( player->main_hand_weapon ) );
+      player->main_hand_attack->base_execute_time = player->main_hand_weapon.swing_time;
+    }
+  };
+
+public:
+  legacy_fury_of_xuen_pet_t( monk_t *owner )
+    : monk_pet_t( owner, "fury_of_xuen", PET_XUEN, false, true )
+  {
     main_hand_weapon.type       = WEAPON_BEAST;
     main_hand_weapon.min_dmg    = dbc->spell_scaling( o()->type, level() );
     main_hand_weapon.max_dmg    = dbc->spell_scaling( o()->type, level() );
@@ -469,6 +579,8 @@ struct invoke_niuzao_pet_t : public niuzao::niuzao_pet_t
 
 monk_t::pets_t::pets_t( monk_t *p )
   : xuen( "xuen_the_white_tiger", p, []( monk_t *p ) { return new pets::xuen_pet_t( p ); } ),
+    legacy_fury_of_xuen( "fury_of_xuen", p,
+                         []( monk_t *p ) { return new pets::legacy_fury_of_xuen_pet_t( p ); } ),
     niuzao( "niuzao_the_black_ox", p, []( monk_t *p ) { return new pets::invoke_niuzao_pet_t( p ); } )
 {
 }

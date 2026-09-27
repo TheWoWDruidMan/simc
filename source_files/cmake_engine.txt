@@ -302,6 +302,7 @@ player/action_variable.cpp
 player/actor.cpp
 player/actor_target_data.cpp
 player/azerite_data.cpp
+player/legacy_soulbind_effects.cpp
 player/consumable.cpp
 player/darkmoon_deck.cpp
 player/effect_callbacks.cpp

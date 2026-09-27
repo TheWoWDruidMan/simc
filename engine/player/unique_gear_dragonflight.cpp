@@ -1372,6 +1372,9 @@ void conjured_chillglobe( special_effect_t& effect )
       : action_t( action_e::ACTION_USE, "conjured_chillglobe", e.player, e.driver() )
     {
       dual = true;
+      // BracketSim (27 Sep 2026): background, so only use_item_t can fire it. Evoker's off-GCD trinket lines
+      // queued the proxy itself at 122 s and it re-queued at the same instant forever (70 Devastation, "stuck").
+      background = true;
 
       auto value_data = e.player->find_spell( 377450 );
       mana_level = value_data->effectN( 1 ).percent();
@@ -1384,6 +1387,13 @@ void conjured_chillglobe( special_effect_t& effect )
       mana->energize_amount = value_data->effectN( 3 ).average( e.item );
       mana->harmful = false;
       mana->name_str_reporting = "conjured_chillglobe";
+
+      // BracketSim (26 Sep 2026): share the item's own cooldown. An APL that uses trinkets by slot
+      // (use_item,slot=trinket1 - Destruction, Windwalker at 80) could schedule this proxy directly, and the
+      // proxy had a cooldown object of its own with no duration: it recast at 0 s forever ("Simulation
+      // stuck" at iteration 0). The 60 s lives on the use-item cooldown; this is now the same object.
+      cooldown           = e.player->get_cooldown( e.cooldown_name() );
+      cooldown->duration = e.cooldown();
     }
 
     result_e calculate_result( action_state_t* /* state */ ) const override
@@ -4382,6 +4392,15 @@ void neltharions_call_to_chaos( special_effect_t& effect )
       effect.player->callbacks.register_callback_trigger_function(
         driver_id, dbc_proc_callback_t::trigger_fn_type::CONDITION,
         []( auto, const auto&, auto, action_state_t* s, auto ) {
+          // BracketSim: a proc attempt can arrive with NO action state. buff_t::bump
+          // calls player_t::trigger_callbacks( ..., buff_t*, ... ), which passes a
+          // null state on purpose (player.cpp), and an aura application is a legal
+          // proc trigger. With no state there is no ability to ask whether it is
+          // AoE, so the condition is simply false. Reading s->action here was a
+          // null dereference at 0x10 that killed the whole simulation: measured on
+          // a level 70 augmentation evoker wearing item 204201.
+          if ( !s || !s->action )
+            return false;
           auto _s = s->action->pre_execute_state;
           s->action->pre_execute_state = s;
           auto b = s->action->is_aoe();
@@ -4408,6 +4427,11 @@ void neltharions_call_to_chaos( special_effect_t& effect )
       effect.player->callbacks.register_callback_trigger_function(
         driver_id, dbc_proc_callback_t::trigger_fn_type::CONDITION,
         []( auto, const auto&, auto, action_state_t* s, auto ) {
+          // BracketSim: same null action state as the Evoker branch above - an
+          // aura application triggers callbacks with no state, and this read
+          // killed the simulation at level 80 on a retribution paladin.
+          if ( !s || !s->action )
+            return false;
           return s->action->n_targets() == -1;
         } );
   }

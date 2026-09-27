@@ -42,6 +42,12 @@ struct power_word_radiance_t final : public priest_heal_t
       priest().buffs.harsh_discipline->trigger();
     }
 
+    // BracketSim legacy compatibility: The Penitent One procs off this cast.
+    if ( priest().shadowlands_legacy.the_penitent_one )
+    {
+      priest().buffs.legacy_the_penitent_one->trigger();
+    }
+
     priest().buffs.evangelism->decrement();
   }
 
@@ -441,10 +447,29 @@ public:
     return static_cast<const state_t*>( s );
   }
 
+  // BracketSim legacy compatibility: The Penitent One makes the next Penance
+  // free. Effect 2 of 336009 is -100% resource cost.
+  double cost() const override
+  {
+    double c = ab::cost();
+
+    if ( p().buffs.legacy_the_penitent_one->check() )
+      c *= 1.0 + p().buffs.legacy_the_penitent_one->data().effectN( 2 ).percent();
+
+    return c;
+  }
+
   void snapshot_state( action_state_t* s, result_amount_type rt ) override
   {
     ab::snapshot_state( s, rt );
-    cast_state( s )->bolts         = as<int>( default_bolts + p().buffs.harsh_discipline->check_value() );
+    // BracketSim legacy compatibility: The Penitent One's extra bolts ride the
+    // same state Harsh Discipline uses. Its buff also carries a -60% tick time
+    // modifier saying the same thing; applying both would count it twice.
+    double legacy_bolts = p().buffs.legacy_the_penitent_one->check()
+                              ? p().shadowlands_legacy.the_penitent_one_spell->effectN( 2 ).base_value()
+                              : 0.0;
+    cast_state( s )->bolts =
+        as<int>( default_bolts + p().buffs.harsh_discipline->check_value() + legacy_bolts );
     cast_state( s )->snapshot_mult = 1.0 + priest().buffs.power_of_the_dark_side->check_value();
   }
 
@@ -584,6 +609,10 @@ public:
     priest().buffs.power_of_the_dark_side->expire();
 
     priest().buffs.harsh_discipline->decrement();
+
+    // BracketSim legacy compatibility: one Penance per proc. Decremented after
+    // the base execute, which is where the bolt count was snapshotted.
+    priest().buffs.legacy_the_penitent_one->decrement();
 
     if ( priest().talents.discipline.master_the_darkness_1.enabled() )
     {
@@ -766,6 +795,14 @@ void priest_t::create_buffs_discipline()
 
   buffs.harsh_discipline = make_buff( this, "harsh_discipline", find_spell( 373183 ) )
                                ->set_default_value( talents.discipline.harsh_discipline->effectN( 2 ).base_value() );
+
+  // BracketSim legacy compatibility: The Penitent One. The chance lives on the
+  // runeforge spell rather than on the buff, so it is set here rather than left
+  // to the buff's own data. Created for every priest and triggered only when
+  // the runeforge is worn, so it cannot depend on initialisation order.
+  buffs.legacy_the_penitent_one =
+      make_buff( this, "the_penitent_one", find_spell( 336009 ) )
+          ->set_chance( find_spell( 336011 )->effectN( 1 ).base_value() / 100.0 );
 
   buffs.borrowed_time =
       make_buff( this, "borrowed_time", find_spell( 390692 ) )->set_pct_buff_type( STAT_PCT_BUFF_HASTE );

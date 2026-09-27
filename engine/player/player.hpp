@@ -13,6 +13,9 @@
 #include "dbc/specialization.hpp"
 #include "effect_callbacks.hpp"
 #include "gear_stats.hpp"
+// BracketSim legacy compatibility: Shadowlands soulbind traits, shared by
+// every class because soulbinds never were class specific.
+#include "player/legacy_soulbind_effects.hpp"
 #include "player_collected_data.hpp"
 #include "player_processed_report_information.hpp"
 #include "player_resources.hpp"
@@ -171,6 +174,14 @@ struct player_t : public actor_t
   bool        potion_used;
   double      leech_pool;  // for leech batching
 
+  // BracketSim legacy compatibility: WEIGHTED BLADES (spell 110211), carried by
+  // the EPIC stages of the rogue legendary chain - Fear/Vengeance (set 1089) and
+  // The Sleeper/The Dreamer (set 1088). Set once in init_special_effects() and
+  // read by the rogue module; 110211 is hollow in this client so the modifier
+  // cannot be applied as an aura. Deliberately NOT set by Golad and Tiriosh
+  // (set 1087), whose set bonus is disabled in the live game.
+  bool        weighted_blades_active;
+
   std::string talents_str, id_str, target_str;
   std::string region_str, server_str, origin_str;
   std::string race_str, professions_str, position_str;
@@ -313,6 +324,74 @@ struct player_t : public actor_t
 
   player_resources_t resources;
 
+  // BracketSim legacy compatibility: Shadowlands soulbind traits.
+  legacy_soulbind::effects_t legacy_soulbinds;
+
+  // BracketSim: buffs that are REAL in game and have no spell in this build.
+  //
+  // the author, 12 September 2026: "why does it say 'buffs this engine cannot apply'
+  // MAKE it work do what you have to do", and about the Adventurer's Journal:
+  // "it works its 15% damage to specific creature type if you get it, so why
+  // cant you sim it".
+  //
+  // Searched: Fengus' Ferocity (22817), Slip'kik's Savvy (22820), Flame Cap
+  // (22788/28714) and all nine Adventurer's Journal buffs return ZERO rows from
+  // this build's spell table. They cannot be applied the ordinary way because
+  // there is no spell to find. Their EFFECTS are ordinary, though, and the
+  // engine already has both shapes:
+  //
+  //   buffs.creature_type_buffs      "+N% damage to creature type X"
+  //   stat_buff_t + timed triggers   "+N of a stat for D seconds every P"
+  //
+  // So these two options drive those directly, and nothing is invented: the app
+  // supplies the numbers, which came from the author's own client or the item's text.
+  struct bracketsim_buffs_t
+  {
+    // "<percent>/<creature type>", e.g. "15/beast". Passive - no buff to check.
+    std::string creature_damage;
+    // "<stat>/<amount>/<duration seconds>/<period seconds>",
+    // e.g. "spell_power/21/60/180" for Flame Cap.
+    std::string timed_stat;
+    // "<percent>/<duration seconds>/<period seconds>", e.g. "15/40/300" for
+    // Drums of Fury. A raid-wide HASTE percentage, which no stat buff can
+    // express: Bloodlust is a level 48 spell (the engine's own data says so, and
+    // `find_spell` returns not_found below that), so every character in the
+    // 30-45 brackets uses drums instead and had nothing at all until this.
+    std::string raid_haste;
+    // Dragonwrath, Tarecgosa's Rest: the chance a damaging class spell is
+    // duplicated. MEASURED at 8.53% from a real log (18 procs, 211 eligible
+    // hits, 95% interval 5.46-13.08%) - see item::dragonwrath. Zero turns the
+    // legendary off and sims the staff as a plain weapon.
+    double dragonwrath_chance = 0.0853;
+    buff_t* raid_haste_buff = nullptr;
+    // Kept alive for register_timed_buff_triggers, which holds the vector BY
+    // REFERENCE. A temporary here would dangle.
+    std::vector<timespan_t> timed_stat_times;
+  } bracketsim;
+
+  // BracketSim legacy compatibility: covenant abilities this actor can actually
+  // cast, filled by the class module during init_spells(). SimulationCraft's own
+  // action lists are built for current retail and never press these, so they are
+  // injected into the default list in init_actions(). It has to be a report from
+  // the class rather than a guess here: an action name the class cannot create
+  // throws at APL parse time.
+  std::vector<std::string> legacy_apl_actions;
+
+  // BracketSim legacy compatibility: press Fleshcraft DURING the fight to keep
+  // Volatile Solvent's mastery up, rather than relying on the pre-pull cast
+  // alone. An option because it is a question with a measurable answer, and the
+  // answer decides whether a Necrolord profile spends a global on it every two
+  // minutes. See player_t::init_actions().
+  bool legacy_fleshcraft_refresh = true;
+
+  // Where those actions go. "auto" puts them in the class's own cooldown list
+  // when it has one and at the top of the default list otherwise; "default" and
+  // "cds" force one or the other; "none" injects nothing, which is what a
+  // matched baseline needs. Every placement presses the ability - this exists
+  // because WHERE it is pressed changes the DPS, sometimes downwards, and the
+  // only way to know which is better for a given spec is to measure both.
+  std::string legacy_apl_placement = "auto";
+
   // Events
   action_t* executing;
   action_t* queueing;
@@ -446,7 +525,7 @@ struct player_t : public actor_t
   void sequence_add( const action_t* a, const player_t* target );
 
   // Gear
-  std::string potion_str, flask_str, food_str, rune_str;
+  std::string potion_str, flask_str, food_str, rune_str, elixir_str;
   std::string temporary_enchant_str;
   std::vector<item_t> items;
   gear_stats_t gear, enchant; // Option based stats
@@ -481,6 +560,7 @@ struct player_t : public actor_t
     action_t* flask_action;
     action_t* food_action;
     action_t* augmentation_action;
+    action_t* elixir_action;
   } consumables;
 
   struct buffs_t

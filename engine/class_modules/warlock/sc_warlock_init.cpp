@@ -8,6 +8,100 @@ namespace warlock
   {
     player_t::init_spells();
 
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
+    // off the bonus id the original legendary item carried.
+    auto legacy = [ this ]( int bonus_id ) {
+      return shadowlands_legacy.legacy_shadowlands_enabled &&
+             range::any_of( items, [ bonus_id ]( const item_t& item ) {
+               return range::contains( item.parsed.bonus_id, bonus_id );
+             } );
+    };
+
+    shadowlands_legacy.cinders_of_the_azjaqir               = legacy( 7038 );
+    shadowlands_legacy.madness_of_the_azjaqir               = legacy( 7039 );
+    shadowlands_legacy.malefic_wrath                        = legacy( 7031 );
+    shadowlands_legacy.perpetual_agony_of_azjaqir           = legacy( 7029 );
+    shadowlands_legacy.wilfreds_sigil_of_superior_summoning = legacy( 7025 );
+    shadowlands_legacy.balespiders_burning_core             = legacy( 7036 );
+    shadowlands_legacy.grim_inquisitors_dread_calling       = legacy( 7034 );
+    shadowlands_legacy.relic_of_demonic_synergy             = legacy( 7027 );
+    // BracketSim legacy compatibility: Unity (bonus 8129), the 9.2 legendary whose
+    // effect is whichever covenant legendary matches the covenant you are in. A
+    // real Unity item carries 8129 and NOT the legendary's own bonus id, so a
+    // power keyed only off its own id misses every Unity wearer. Both routes are
+    // checked here, and Unity opens only the one door its covenant names.
+    auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
+    {
+      return legacy( bonus_id ) ||
+             ( legacy( 8129 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
+    };
+
+    shadowlands_legacy.contained_perpetual_explosion        = legacy_unity( 7713, "venthyr" );
+    shadowlands_legacy.sacrolashs_dark_strike               = legacy( 7030 );
+    shadowlands_legacy.decaying_soul_satchel                = legacy_unity( 7712, "night_fae" );
+    shadowlands_legacy.shard_of_annihilation                = legacy_unity( 7711, "necrolord" );
+    shadowlands_legacy.embers_of_the_diabolic_raiment       = legacy( 7040 );
+    shadowlands_legacy.forces_of_the_horned_nightmare       = legacy( 7035 );
+    // Languishing Soul Detritus (7710) is deliberately absent: the buff Soul
+    // Rot's expiry grants, 356255, is movement speed and nothing else.
+
+    // BracketSim legacy compatibility: Shadowlands covenant abilities.
+    auto covenant = [ this ]( std::string_view name, unsigned id ) {
+      return ( shadowlands_legacy.legacy_shadowlands_enabled &&
+               util::str_compare_ci( legacy_covenant.chosen, name ) )
+                 ? find_spell( id )
+                 : spell_data_t::not_found();
+    };
+
+    legacy_covenant.scouring_tithe        = covenant( "kyrian", 312321 );
+    legacy_covenant.impending_catastrophe = covenant( "venthyr", 321792 );
+    legacy_covenant.decimating_bolt       = covenant( "necrolord", 325289 );
+    legacy_covenant.soul_rot              = covenant( "night_fae", 325640 );
+
+  // Turn the id:rank option string into ranks. Without this the option is
+  // stored and then silently ignored: has() returns false for everything and
+  // every conduit on the class quietly does nothing.
+  legacy_conduits.parse();
+
+  // BracketSim legacy compatibility: report the covenant abilities this
+  // actor can cast, so player_t::init_actions() can put them into the
+  // rotation. SimulationCraft's own action lists never press them.
+  if ( legacy_covenant.scouring_tithe->ok() )
+    legacy_apl_actions.emplace_back( "scouring_tithe" );
+  if ( legacy_covenant.impending_catastrophe->ok() )
+    legacy_apl_actions.emplace_back( "impending_catastrophe" );
+  if ( legacy_covenant.decimating_bolt->ok() )
+    legacy_apl_actions.emplace_back( "decimating_bolt" );
+  if ( legacy_covenant.soul_rot->ok() )
+    legacy_apl_actions.emplace_back( "soul_rot" );
+
+    legacy_covenant.impending_catastrophe_impact =
+        legacy_covenant.impending_catastrophe->ok() ? find_spell( 322167 ) : spell_data_t::not_found();
+    legacy_covenant.impending_catastrophe_dot =
+        legacy_covenant.impending_catastrophe->ok() ? find_spell( 322170 ) : spell_data_t::not_found();
+    legacy_covenant.decimating_bolt_damage =
+        legacy_covenant.decimating_bolt->ok() ? find_spell( 327059 ) : spell_data_t::not_found();
+
+    legacy_azerite.cascading_calamity  = find_azerite_spell( "Cascading Calamity" );
+    legacy_azerite.dreadful_calling    = find_azerite_spell( "Dreadful Calling" );
+    legacy_azerite.inevitable_demise   = find_azerite_spell( "Inevitable Demise" );
+    legacy_azerite.sudden_onset        = find_azerite_spell( "Sudden Onset" );
+    legacy_azerite.wracking_brilliance = find_azerite_spell( "Wracking Brilliance" );
+    legacy_azerite.pandemic_invocation = find_azerite_spell( "Pandemic Invocation" );
+    legacy_azerite.demonic_meteor      = find_azerite_spell( "Demonic Meteor" );
+    legacy_azerite.shadows_bite        = find_azerite_spell( "Shadow's Bite" );
+    legacy_azerite.supreme_commander   = find_azerite_spell( "Supreme Commander" );
+    legacy_azerite.umbral_blaze        = find_azerite_spell( "Umbral Blaze" );
+    legacy_azerite.explosive_potential = find_azerite_spell( "Explosive Potential" );
+    legacy_azerite.baleful_invocation  = find_azerite_spell( "Baleful Invocation" );
+    legacy_azerite.bursting_flare      = find_azerite_spell( "Bursting Flare" );
+    legacy_azerite.chaotic_inferno     = find_azerite_spell( "Chaotic Inferno" );
+    legacy_azerite.crashing_chaos      = find_azerite_spell( "Crashing Chaos" );
+    legacy_azerite.rolling_havoc       = find_azerite_spell( "Rolling Havoc" );
+    legacy_azerite.flashpoint          = find_azerite_spell( "Flashpoint" );
+    legacy_azerite.chaos_shards        = find_azerite_spell( "Chaos Shards" );
+
     // Automatic requirement checking and relevant .inc file (/engine/dbc/generated/):
     // find_class_spell - active_spells.inc
     // find_specialization_spell - specialization_spells.inc
@@ -712,7 +806,133 @@ namespace warlock
 
   void warlock_t::create_buffs()
   {
+    // BracketSim legacy compatibility: Decimating Bolt's two runeforges. Both
+    // buffs carry their own stack cap, duration and per-stack value.
+    buffs.legacy_decaying_soul_satchel =
+        make_buff( this, "decaying_soul_satchel", find_spell( 356369 ) )
+            ->set_default_value_from_effect( 1 )
+            ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+            ->set_chance( shadowlands_legacy.decaying_soul_satchel ? 1.0 : 0.0 );
+
+    // BracketSim legacy (27 Sep 2026): Decimating Bolt's own empowerment (325299) - the next 3 Shadow Bolts /
+    // Incinerates / Demonbolts +100% (Drain Soul periodic +100%), 45 s. The old port left it out.
+    buffs.legacy_decimating_bolt =
+        make_buff( this, "decimating_bolt", find_spell( 325299 ) )
+            ->set_chance( legacy_covenant.decimating_bolt->ok() ? 1.0 : 0.0 );
+
+    buffs.legacy_shard_of_annihilation =
+        make_buff( this, "shard_of_annihilation", find_spell( 356342 ) )
+            ->set_chance( shadowlands_legacy.shard_of_annihilation ? 1.0 : 0.0 );
+
     player_t::create_buffs();
+
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite trait buffs.
+    buffs.legacy_cascading_calamity = make_buff<stat_buff_t>( this, "legacy_cascading_calamity",
+                                                       legacy_azerite.cascading_calamity )
+      ->add_stat( STAT_HASTE_RATING, legacy_azerite.cascading_calamity.value() )
+      ->set_duration( find_spell( 275378 )->duration() )
+      ->set_refresh_behavior( buff_refresh_behavior::DURATION );
+    buffs.wracking_brilliance = make_buff<stat_buff_t>( this, "wracking_brilliance",
+                                                        legacy_azerite.wracking_brilliance )
+      ->add_stat( STAT_INTELLECT, legacy_azerite.wracking_brilliance.value() )
+      ->set_duration( find_spell( 272893 )->duration() )
+      ->set_refresh_behavior( buff_refresh_behavior::DURATION );
+    // Inevitable Demise has a built in 25% reduction to the value of ranks 2
+    // and 3, applied as a flat multiplier to the total.
+    buffs.inevitable_demise = make_buff( this, "inevitable_demise", legacy_azerite.inevitable_demise )
+      ->set_max_stack( std::max( 1, as<int>( find_spell( 273525 )->max_stacks() ) ) )
+      ->set_default_value( legacy_azerite.inevitable_demise.n_items()
+                             ? legacy_azerite.inevitable_demise.value() *
+                                 ( ( 1.0 + 0.75 * ( legacy_azerite.inevitable_demise.n_items() - 1 ) ) /
+                                   legacy_azerite.inevitable_demise.n_items() )
+                             : 0.0 );
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    buffs.legacy_madness_of_the_azjaqir =
+        make_buff( this, "legacy_madness_of_the_azjaqir", find_spell( 337170 ) )
+            ->set_default_value_from_effect( 1 )
+            ->set_chance( shadowlands_legacy.madness_of_the_azjaqir ? 1.0 : 0.0 );
+    buffs.legacy_malefic_wrath =
+        make_buff( this, "legacy_malefic_wrath", find_spell( 337125 ) )
+            ->set_default_value_from_effect( 1 )
+            ->set_chance( shadowlands_legacy.malefic_wrath ? 1.0 : 0.0 );
+
+    /*
+     * BALESPIDER'S BURNING CORE, runeforge 7036.
+     *
+     *   337159  the driver
+     *   337161  the buff: 20 seconds, 4 stacks, effect 1 is +15% to Demonbolt's
+     *           direct damage and names Demonbolt (264178) outright
+     *
+     * Every number is read from 337161 rather than typed here. The stack count
+     * and the percent are the spell's own.
+     */
+    buffs.legacy_balespiders_burning_core =
+        make_buff( this, "legacy_balespiders_burning_core", find_spell( 337161 ) )
+            ->set_default_value_from_effect( 1 )
+            ->set_chance( shadowlands_legacy.balespiders_burning_core ? 1.0 : 0.0 );
+
+    /*
+     * RELIC OF DEMONIC SYNERGY, runeforge 7027.
+     *
+     *   337057  the driver: Real PPM 3, proc flags "White Melee, Yellow Melee,
+     *           Magic Hostile Spell"
+     *   337060  the buff: 15 seconds, effect 1 "Modify Damage Done%" at 15
+     *
+     * "Damage done by you or your primary demon has a chance to grant THE OTHER
+     * ONE increased damage" - so the two directions are two buffs, and the one
+     * the demon wears is held here and read by every pet. See
+     * warlock_t::init_special_effects for the two drivers.
+     */
+    buffs.legacy_demonic_synergy =
+        make_buff( this, "legacy_demonic_synergy", find_spell( 337060 ) )
+            ->set_default_value_from_effect( 1 )
+            ->set_chance( shadowlands_legacy.relic_of_demonic_synergy ? 1.0 : 0.0 );
+    buffs.legacy_demonic_synergy_pet =
+        make_buff( this, "legacy_demonic_synergy_pet", find_spell( 337060 ) )
+            ->set_default_value_from_effect( 1 )
+            ->set_chance( shadowlands_legacy.relic_of_demonic_synergy ? 1.0 : 0.0 );
+
+    buffs.rolling_havoc = make_buff<stat_buff_t>( this, "rolling_havoc", find_spell( 278931 ) )
+      ->add_stat( STAT_INTELLECT, legacy_azerite.rolling_havoc.value() );
+    buffs.legacy_flashpoint = make_buff<stat_buff_t>( this, "legacy_flashpoint", find_spell( 275429 ) )
+      ->add_stat( STAT_HASTE_RATING, legacy_azerite.flashpoint.value() );
+    // Legacy Azerite
+    buffs.legacy_bursting_flare = make_buff<stat_buff_t>( this, "legacy_bursting_flare", find_spell( 279913 ) )
+      ->add_stat( STAT_MASTERY_RATING, legacy_azerite.bursting_flare.value() );
+    buffs.legacy_chaotic_inferno = make_buff( this, "legacy_chaotic_inferno", find_spell( 279673 ) )
+      ->set_default_value( legacy_azerite.chaotic_inferno.value( 1 ) )
+      ->set_chance( legacy_azerite.chaotic_inferno.ok() ? find_spell( 279672 )->proc_chance() : 0.0 );
+    buffs.legacy_crashing_chaos = make_buff( this, "legacy_crashing_chaos", find_spell( 277706 ) )
+      ->set_default_value( legacy_azerite.crashing_chaos.value() );
+    buffs.legacy_explosive_potential =
+      make_buff<stat_buff_t>( this, "legacy_explosive_potential", find_spell( 275398 ) )
+        ->add_stat( STAT_HASTE_RATING, legacy_azerite.explosive_potential.value() );
+    buffs.legacy_shadows_bite = make_buff( this, "legacy_shadows_bite", find_spell( 272945 ) )
+      ->set_default_value( legacy_azerite.shadows_bite.value() )
+      ->set_chance( legacy_azerite.shadows_bite.ok() ? 1.0 : 0.0 );
+    buffs.legacy_supreme_commander =
+      make_buff<stat_buff_t>( this, "legacy_supreme_commander", find_spell( 279885 ) )
+        ->add_stat( STAT_INTELLECT, legacy_azerite.supreme_commander.value() );
+
+    // BracketSim legacy compatibility: the conduit Tyrant's Soul (206). Spell
+    // 339784 carries the fifteen second window; the size comes from the rank
+    // table, as the conduit spells themselves are not in this build.
+    buffs.legacy_tyrants_soul =
+      make_buff( this, "legacy_tyrants_soul", find_spell( 339784 ) )
+        ->set_default_value( legacy_conduits.percent( 206 ) )
+        ->set_chance( legacy_conduits.has( 206 ) ? 1.0 : 0.0 );
+
+    // Legacy Azerite: Chaos Shards hands back a whole Soul Shard over time.
+    buffs.legacy_chaos_shards = make_buff( this, "legacy_chaos_shards", find_spell( 287660 ) )
+      ->set_period( find_spell( 287660 )->effectN( 1 ).period() )
+      ->set_tick_zero( true )
+      ->set_tick_callback( [ this ]( buff_t* b, int, timespan_t ) {
+        // player_t:: on purpose - going through warlock_t::resource_gain would
+        // let Chaos Shards re-trigger itself from inside its own tick-zero,
+        // which recurses until the stack runs out.
+        player_t::resource_gain( RESOURCE_SOUL_SHARD, b->data().effectN( 1 ).base_value() / 10.0,
+                                 gains.legacy_chaos_shards );
+      } );
 
     // Shared buffs
     buffs.grimoire_of_sacrifice = make_buff( this, "grimoire_of_sacrifice", talents.grimoire_of_sacrifice_buff )
@@ -1018,11 +1238,18 @@ namespace warlock
     init_gains_diabolist();
     init_gains_hellcaller();
     init_gains_soul_harvester();
+
+    // Legacy Azerite gains are shared - the traits are not spec-locked here.
+    gains.legacy_pandemic_invocation = get_gain( "Pandemic Invocation (Azerite)" );
+    gains.legacy_chaos_shards        = get_gain( "Chaos Shards (Azerite)" );
+    gains.legacy_demonic_meteor      = get_gain( "Demonic Meteor (Azerite)" );
+    gains.legacy_baleful_invocation  = get_gain( "Baleful Invocation (Azerite)" );
   }
 
   void warlock_t::init_gains_affliction()
   {
     gains.agony = get_gain( "agony" );
+
     gains.unstable_affliction_refund = get_gain( "unstable_affliction_refund" );
     gains.drain_soul = get_gain( "drain_soul" );
   }
@@ -1173,6 +1400,13 @@ namespace warlock
         else
           inc_max *= 1.0 + ( talents.creeping_death->effectN( 1 ).percent() * 0.5 );
       }
+
+      // BracketSim legacy compatibility: Perpetual Agony of Azj'Aqir raises
+      // Agony's chance to generate a Soul Shard by its effect 1 percent. It is
+      // applied to increment_max, which IS that chance, the same way Creeping
+      // Death is applied immediately above.
+      if ( shadowlands_legacy.perpetual_agony_of_azjaqir )
+        inc_max *= 1.0 + find_spell( 337106 )->effectN( 1 ).percent();
 
       progress_rng.agony_energize = get_threshold_rng( "agony_energize", inc_max,
         [ this ]( double increment_max, action_state_t* s ) {
@@ -1696,6 +1930,14 @@ namespace warlock
   {
     player_t::create_options();
 
+    // BracketSim: warlock had no enable option, so a profile setting
+    // warlock.legacy_shadowlands_enabled got a "Trivial: Unknown option"
+    // warning and nothing else. The flag defaults to true so nothing was
+    // broken, but it could not be turned OFF. Shaman had the same gap.
+    add_option( opt_bool( "warlock.legacy_shadowlands_enabled",
+                          shadowlands_legacy.legacy_shadowlands_enabled ) );
+    add_option( opt_string( "warlock.legacy_covenant", legacy_covenant.chosen ) );
+    add_option( opt_string( "warlock.legacy_conduits", legacy_conduits.option ) );
     add_option( opt_int( "warlock.soul_shards", initial_soul_shards ) );
     add_option( opt_deprecated( "soul_shards", "warlock.soul_shards" ) );
     add_option( opt_string( "warlock.default_pet", default_pet ) );
@@ -1728,6 +1970,39 @@ namespace warlock
     }
   }
 
+
+// BracketSim legacy compatibility: Vision of Perfection (Heart of Azeroth major
+// essence). The engine procs it and calls this; each spec fires its signature
+// cooldown early, at the fraction of its duration the essence grants.
+void warlock_t::vision_of_perfection_proc()
+{
+  auto essence = find_azerite_essence( "Vision of Perfection" );
+  if ( !essence.enabled() )
+    return;
+
+  double mult = essence.spell( 1u )->effectN( 1 ).percent() +
+                essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
+
+  buff_t* window = nullptr;
+  switch ( specialization() )
+  {
+    case WARLOCK_DEMONOLOGY:
+      window = buffs.tyrant;
+      break;
+    default:
+      break;
+  }
+
+  if ( !window || mult <= 0 )
+    return;
+
+  timespan_t dur = window->buff_duration() * mult;
+  if ( window->check() )
+    window->extend_duration( dur );
+  else
+    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+}
+
   void warlock_t::reset()
   {
     player_t::reset();
@@ -1751,5 +2026,6 @@ namespace warlock
     wild_imp_spawns.clear();
     diabolic_ritual = rng().range( 0, 3 );
     demonic_art_buff_replaced = false;
+    legacy_wracking_brilliance = false;
   }
 }

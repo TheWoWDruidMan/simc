@@ -6,6 +6,11 @@
 #include "config.hpp"
 
 #include "action/parse_effects.hpp"
+// BracketSim legacy compatibility: Shadowlands conduits. Values live in
+// legacy_conduits.hpp because Midnight ships neither the ConduitRank table nor
+// most conduit spells, and the client's own conduit tooltips are stale - a live
+// in-game test proved the archived 9.2.7 numbers are what the game runs.
+#include "player/legacy_conduits.hpp"
 #include "class_modules/apl/druid/druid.hpp"
 #include "player/pet_spawner.hpp"
 #include "report/highchart.hpp"
@@ -267,6 +272,7 @@ struct druid_td_t final : public actor_target_data_t
 {
   struct dots_t
   {
+    dot_t* adaptive_swarm;  // BracketSim legacy compatibility
     dot_t* bloodseeker_vines;
     dot_t* dreadful_wound;
     dot_t* lunar_inspiration;
@@ -459,7 +465,30 @@ static std::string get_suffix( std::string_view name, std::string_view base )
   return std::string( name.substr( std::min( name.size(), name.find( base ) + base.size() ) ) );
 }
 
-// utility to create target_effect_t compatible functions from druid_td_t member references
+/*
+ * BracketSim legacy compatibility: FRIENDLY TARGET DATA HAS NO DOTS.
+ *
+ * `druid_td_t`'s constructor builds every dot and debuff inside
+ * `if ( target.is_enemy() )`, so target data for a friendly - the druid's own
+ * data for itself, or for a pet - value-initialises all of them to NULL.
+ *
+ * The damage paths only ever ask about enemies, so this went unseen. The
+ * MITIGATION path does not: `action_t::composite_target_mitigation` calls
+ * `s->target->composite_mitigation_from_player_multiplier( s->action->player )`,
+ * and `parse_player_effects_t` then looks up target data for that source. When
+ * the druid is the one being hit, the source can be friendly, and every
+ * registered target effect below was dereferencing a null `dot_t*`.
+ *
+ * Guardian at 70 crashed on two talents this way - Rend and Tear, which reads
+ * `dots.thrash`, and Scintillating Moonlight, which reads `dots.moonfire`.
+ * `dot_t` is `sim_t& sim` then `bool ticking`, and `current_stack()` reads
+ * `ticking` first, so the fault address was exactly 0x8. Exit 139, no message.
+ *
+ * A dot that was never created is not applied, so the honest answer is zero
+ * rather than a crash - which is also what these lambdas return for a real dot
+ * that is not ticking. Guarding here covers all thirteen registration sites at
+ * once; guarding at the call sites would have to be repeated and would rot.
+ */
 template <typename T>
 static std::function<int( actor_target_data_t* )> d_fn( T d, bool stack = true )
 {
@@ -467,22 +496,26 @@ static std::function<int( actor_target_data_t* )> d_fn( T d, bool stack = true )
   {
     if ( stack )
       return [ d ]( actor_target_data_t* t ) {
-        return std::invoke( d, static_cast<druid_td_t*>( t )->debuff )->check();
+        auto b = t ? std::invoke( d, static_cast<druid_td_t*>( t )->debuff ) : nullptr;
+        return b ? b->check() : 0;
       };
     else
       return [ d ]( actor_target_data_t* t ) {
-        return std::invoke( d, static_cast<druid_td_t*>( t )->debuff )->check() > 0;
+        auto b = t ? std::invoke( d, static_cast<druid_td_t*>( t )->debuff ) : nullptr;
+        return b ? b->check() > 0 : 0;
       };
   }
   else if constexpr ( std::is_invocable_v<T, druid_td_t::dots_t> )
   {
     if ( stack )
       return [ d ]( actor_target_data_t* t ) {
-        return std::invoke( d, static_cast<druid_td_t*>( t )->dots )->current_stack();
+        auto dot = t ? std::invoke( d, static_cast<druid_td_t*>( t )->dots ) : nullptr;
+        return dot ? dot->current_stack() : 0;
       };
     else
       return [ d ]( actor_target_data_t* t ) {
-        return std::invoke( d, static_cast<druid_td_t*>( t )->dots )->is_ticking();
+        auto dot = t ? std::invoke( d, static_cast<druid_td_t*>( t )->dots ) : nullptr;
+        return dot ? static_cast<int>( dot->is_ticking() ) : 0;
       };
   }
   else
@@ -588,6 +621,12 @@ struct druid_t final : public parse_player_effects_t
 
     // Restoration
     double time_spend_healing = 0.0;
+
+    // BracketSim legacy compatibility: which covenant the Kindred Spirits
+    // partner is in, which is the only thing that decides what stat Kindred
+    // Affinity (runeforge 7477) grants. There is no partner in a solo sim, so
+    // it has to be stated. Accepts a covenant name or the stat it stands for.
+    std::string legacy_kindred_affinity_covenant = "kyrian";
   } options;
 
   struct active_actions_t
@@ -652,6 +691,10 @@ struct druid_t final : public parse_player_effects_t
     action_t* sylvan_beckoning_starfall_driver;
     action_t* the_light_of_elune;
     action_t* treants_of_the_moon_mf;
+
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+    action_t* legacy_streaking_stars;
+    action_t* legacy_lunar_shrapnel;
   } active;
 
   // Pets
@@ -760,6 +803,8 @@ struct druid_t final : public parse_player_effects_t
     buff_t* stalking_predator;
     buff_t* sudden_ambush;
     buff_t* tigers_fury;
+    // BracketSim legacy compatibility: Savage Combatant (conduit 270).
+    buff_t* legacy_savage_combatant;
     buff_t* tigers_tenacity;
     buff_t* unseen_predators_craving;
 
@@ -837,7 +882,130 @@ struct druid_t final : public parse_player_effects_t
     buff_t* b_inc_cat;     // berserk_cat or incarnation_cat
     buff_t* b_inc_bear;    // berserk_bear or incarnation_bear
     buff_t* ca_inc;        // celestial_alignment or incarnation_moonkin
+
+    // BracketSim legacy compatibility: Shadowlands covenant abilities.
+    buff_t* legacy_ravenous_frenzy;
+    // BracketSim legacy compatibility: the ten second Kindred Spirits window.
+    buff_t* legacy_kindred_empowerment;
+    buff_t* legacy_kindred_affinity;
+    // BracketSim legacy compatibility: Sinful Hysteria's lingering echo.
+    buff_t* legacy_sinful_hysteria;
+
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+    buff_t* arcanic_pulsar;
+    buff_t* dawning_sun;
+    buff_t* iron_jaws;
+    buff_t* jungle_fury;
+    buff_t* raking_ferocity;
+    buff_t* legacy_twisted_claws;
+    buff_t* legacy_burst_of_savagery;
+    buff_t* legacy_guardians_wrath;
+    buff_t* legacy_masterful_instincts;
+    buff_t* legacy_lively_spirit;
+    buff_t* legacy_layered_mane;
+
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    buff_t* legacy_apex_predators_craving;
+    buff_t* legacy_balance_of_all_things_arcane;
+    buff_t* legacy_balance_of_all_things_nature;
+    buff_t* legacy_eye_of_fearful_symmetry;
+    buff_t* legacy_oneths_clear_vision;
+    buff_t* legacy_oneths_perception;
+    buff_t* legacy_primordial_arcanic_pulsar;
+    buff_t* legacy_timeworn_dreambinder;
   } buff;
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. Named
+  // legacy_azerite because player_t already owns an "azerite" member.
+  struct legacy_azerite_t
+  {
+    azerite_power_t arcanic_pulsar;
+    azerite_power_t blood_mist;
+    azerite_power_t burst_of_savagery;
+    azerite_power_t craggy_bark;
+    azerite_power_t dawning_sun;
+    azerite_power_t gory_regeneration;
+    azerite_power_t guardians_wrath;
+    azerite_power_t gushing_lacerations;
+    azerite_power_t high_noon;
+    azerite_power_t iron_jaws;
+    azerite_power_t jungle_fury;
+    azerite_power_t layered_mane;
+    azerite_power_t lively_spirit;
+    azerite_power_t long_night;
+    azerite_power_t lunar_shrapnel;
+    azerite_power_t masterful_instincts;
+    azerite_power_t power_of_the_moon;
+    azerite_power_t primordial_rage;
+    azerite_power_t raking_ferocity;
+    azerite_power_t shredding_fury;
+    azerite_power_t streaking_stars;
+    azerite_power_t twisted_claws;
+    azerite_power_t untamed_ferocity;
+    azerite_power_t wild_fleshrending;
+  } legacy_azerite;
+
+  // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
+  // has no runeforge DBC, so each one is switched on by the bonus id its
+  // original legendary item carried and is inert on any other character. Six of
+  // these share a name with a current talent, so those carry a legacy_ prefix
+  // and both sources can be active at once.
+  // BracketSim legacy compatibility: Shadowlands covenant abilities. Midnight
+  // has no covenant DBC, but every covenant spell still resolves, so they are
+  // looked up by id and gated on the chosen covenant.
+  // BracketSim legacy compatibility: Shadowlands conduits, as id:rank pairs.
+  legacy_conduit::set_t legacy_conduits;
+
+  struct legacy_covenant_t
+  {
+    std::string chosen = "none";
+    const spell_data_t* ravenous_frenzy = spell_data_t::not_found();
+    const spell_data_t* adaptive_swarm = spell_data_t::not_found();
+    const spell_data_t* adaptive_swarm_damage = spell_data_t::not_found();
+    const spell_data_t* convoke_the_spirits = spell_data_t::not_found();
+    const spell_data_t* kindred_spirits = spell_data_t::not_found();
+  } legacy_covenant;
+
+  // Convoke the Spirits survived as a modern talent, so the covenant version
+  // reuses that implementation with the covenant spell's own cooldown.
+  bool legacy_convoke_enabled() const
+  { return talent.convoke_the_spirits.ok() || legacy_covenant.convoke_the_spirits->ok(); }
+
+  const spell_data_t* legacy_convoke_spell() const
+  { return talent.convoke_the_spirits.ok() ? talent.convoke_the_spirits.spell()
+                                           : legacy_covenant.convoke_the_spirits; }
+
+  struct shadowlands_legacy_t
+  {
+    bool legacy_shadowlands_enabled = true;
+    bool apex_predators_craving = false;
+    // These two ride a covenant ability, so they only do anything when the
+    // matching covenant is chosen as well.
+    bool unbridled_swarm = false;
+    bool sinful_hysteria = false;
+    bool kindred_affinity = false;
+    bool balance_of_all_things = false;
+    bool celestial_spirits = false;
+    // BracketSim legacy: the shared convoke cooldown has had Celestial Spirits applied (once per character).
+    bool celestial_spirits_cd_applied = false;
+    bool circle_of_life_and_death = false;
+    bool draught_of_deep_focus = false;
+    bool eye_of_fearful_symmetry = false;
+    bool frenzyband = false;
+    bool legacy_of_the_sleeper = false;
+    bool luffa_infused_embrace = false;
+    bool lycaras_fleeting_glimpse = false;
+    bool oath_of_the_elder_druid = false;
+    bool oneths_clear_vision = false;
+    bool primordial_arcanic_pulsar = false;
+    bool the_natural_orders_will = false;
+    bool timeworn_dreambinder = false;
+    bool ursocs_fury_remembered = false;
+  } shadowlands_legacy;
+
+  // Legacy Azerite: Streaking Stars only fires when the spell differs from the
+  // last one cast. Combat state, cleared every iteration.
+  unsigned legacy_previous_streaking_star = 0;
 
   struct hots_t
   {
@@ -1348,6 +1516,8 @@ struct druid_t final : public parse_player_effects_t
   void init_procs() override;
   void init_uptimes() override;
   void init_special_effects() override;
+  // BracketSim legacy compatibility: Vision of Perfection.
+  void vision_of_perfection_proc() override;
   void init_spells() override;
   void init_items() override;
   void init_scaling() override;
@@ -1372,6 +1542,11 @@ struct druid_t final : public parse_player_effects_t
   double composite_block() const override { return 0; }
   double composite_dodge_rating() const override;
   double composite_parry() const override { return 0; }
+  // BracketSim legacy compatibility: the conduit Endless Thirst (280) adds
+  // crit per stack of Ravenous Frenzy, to melee and spells alike.
+  double legacy_endless_thirst_crit() const;
+  double composite_melee_crit_chance() const override;
+  double composite_spell_crit_chance() const override;
   std::unique_ptr<expr_t> create_action_expression(action_t& a, std::string_view name_str) override;
   std::unique_ptr<expr_t> create_expression( std::string_view name ) override;
   action_t* create_action( std::string_view name, std::string_view options ) override;
@@ -1784,6 +1959,35 @@ public:
     }
   }
 
+  // BracketSim legacy compatibility: Circle of Life and Death squeezes every
+  // damage over time effect into a shorter window, which raises its rate
+  // without changing its total. Applied as a multiplier rather than by editing
+  // dot_duration, which derived constructors set after this one runs.
+  timespan_t composite_dot_duration( const action_state_t* s ) const override
+  {
+    auto d = ab::composite_dot_duration( s );
+
+    if ( p_legacy_circle() )
+      d *= 1.0 + p()->find_spell( 338657 )->effectN( 1 ).percent();
+
+    return d;
+  }
+
+  timespan_t tick_time( const action_state_t* s ) const override
+  {
+    auto t = ab::tick_time( s );
+
+    if ( p_legacy_circle() )
+      t *= 1.0 + p()->find_spell( 338657 )->effectN( 1 ).percent();
+
+    return t;
+  }
+
+  bool p_legacy_circle() const
+  {
+    return static_cast<const druid_t*>( ab::player )->shadowlands_legacy.circle_of_life_and_death;
+  }
+
   druid_t* p() { return static_cast<druid_t*>( ab::player ); }
 
   const druid_t* p() const { return static_cast<druid_t*>( ab::player ); }
@@ -1868,6 +2072,12 @@ public:
       check_unshift();
 
     ab::execute();
+
+    // BracketSim legacy compatibility: Ravenous Frenzy gains a stack on every
+    // successful cast, matching the covenant aura's Cast Successful proc flags.
+    // bump(), not increment(): the stacks never refreshed the 20s window.
+    if ( !ab::background && !ab::proc && p()->buff.legacy_ravenous_frenzy->check() )
+      p()->buff.legacy_ravenous_frenzy->bump();
 
     if ( !has_flag( flag_e::ALLOWSTEALTH ) )
     {
@@ -2051,11 +2261,58 @@ public:
     : BASE( n, p, s, f )
   {}
 
+  // BracketSim legacy compatibility: Draught of Deep Focus raises Moonfire,
+  // Rake and Rip by 40% while only ONE target carries the dot.
+  //
+  // SimulationCraft's own Shadowlands build tested get_dot_count() <= 1 on
+  // exactly these actions. This build has no get_dot_count(), but every action
+  // that can be affected already maintains dot_list, so its size is the same
+  // test without walking the target list. The gate is the dot name rather than
+  // "uses a dot list", because Thrash, Sunfire, Regrowth and Ravage keep lists
+  // too and the legendary does not touch them.
+  //
+  // Rejuvenation is named in the tooltip and is deliberately absent: it is a
+  // heal, and this port measures damage.
+  bool draught_of_deep_focus = false;
+  double draught_of_deep_focus_pct = 0.0;
+
+  double draught_multiplier() const
+  {
+    if ( !draught_of_deep_focus || dot_list->size() > 1 )
+      return 1.0;
+
+    return 1.0 + draught_of_deep_focus_pct;
+  }
+
   void init() override
   {
     assert( dot_list );
 
+    auto* druid = static_cast<druid_t*>( BASE::player );
+    if ( druid->shadowlands_legacy.draught_of_deep_focus &&
+         ( BASE::dot_name == "moonfire" || BASE::dot_name == "rake" || BASE::dot_name == "rip" ) )
+    {
+      draught_of_deep_focus     = true;
+      draught_of_deep_focus_pct = druid->find_spell( 338658 )->effectN( 1 ).percent();
+    }
+
+    // BracketSim legacy compatibility: Fury of the Skies (conduit 263) raises
+    // Moonfire and Sunfire. SimulationCraft applied it as a dot debuff on those
+    // two spells, which is the same thing as raising their tick damage.
+    if ( BASE::dot_name == "moonfire" || BASE::dot_name == "sunfire" )
+      BASE::base_td_multiplier *= 1.0 + druid->legacy_conduits.percent( 263 );
+
     BASE::init();
+  }
+
+  double composite_da_multiplier( const action_state_t* s ) const override
+  {
+    return BASE::composite_da_multiplier( s ) * draught_multiplier();
+  }
+
+  double composite_ta_multiplier( const action_state_t* s ) const override
+  {
+    return BASE::composite_ta_multiplier( s ) * draught_multiplier();
   }
 
   void trigger_dot( action_state_t* s ) override
@@ -2542,6 +2799,23 @@ public:
   druid_spell_t( std::string_view n, druid_t* p, const spell_data_t* s = spell_data_t::nil(), flag_e f = flag_e::NONE )
     : ab( n, p, s, f )
   {}
+
+  void execute() override
+  {
+    ab::execute();
+
+    // Legacy Azerite: Streaking Stars fires whenever a Balance spell is cast
+    // that differs from the one before it, while Celestial Alignment or
+    // Incarnation is up.
+    if ( !ab::background && ab::harmful && p()->legacy_azerite.streaking_stars.ok() &&
+         p()->active.legacy_streaking_stars && p()->buff.ca_inc->check() )
+    {
+      if ( p()->legacy_previous_streaking_star != ab::data().id() )
+        p()->active.legacy_streaking_stars->execute_on_target( ab::target );
+
+      p()->legacy_previous_streaking_star = ab::data().id();
+    }
+  }
 };
 
 struct druid_heal_t : public druid_spell_base_t<heal_t>
@@ -2661,9 +2935,32 @@ struct cat_attack_t : public druid_attack_t<melee_attack_t>
   double bleed_mul = 0.0;
   bool snapshot_tigers_fury = false;
 
+  // Legacy Azerite: Wild Fleshrending and Untamed Ferocity both add flat damage
+  // to the builders. Wild Fleshrending only pays out into a Thrash.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = base_t::bonus_da( s );
+
+    if ( p()->legacy_azerite.wild_fleshrending.ok() && get_td( s->target )->dots.thrash->is_ticking() )
+      da += p()->legacy_azerite.wild_fleshrending.value( 2 );
+
+    if ( legacy_untamed_ferocity )
+      da += p()->legacy_azerite.untamed_ferocity.value( 2 );
+
+    return da;
+  }
+
+  bool legacy_untamed_ferocity = false;
+
   cat_attack_t( std::string_view n, druid_t* p, const spell_data_t* s = spell_data_t::nil(), flag_e f = flag_e::NONE )
     : base_t( n, p, s, f ), energy_refund_gain( p->get_gain( "Energy Refund" ) )
   {
+    // Legacy Azerite: Untamed Ferocity names the abilities it boosts in its own
+    // effect 2 whitelist.
+    legacy_untamed_ferocity =
+        p->legacy_azerite.untamed_ferocity.ok() && data().ok() &&
+        data().affected_by( p->legacy_azerite.untamed_ferocity.spell()->effectN( 2 ) );
+
     if ( p->specialization() == DRUID_BALANCE || p->specialization() == DRUID_RESTORATION )
     {
       ap_type = attack_power_type::NO_WEAPON;
@@ -2759,6 +3056,20 @@ struct cat_attack_t : public druid_attack_t<melee_attack_t>
 
   virtual bool parse_tigers_fury()
   {
+    // BracketSim legacy compatibility: Carnivorous Instinct (conduit 268) adds
+    // FLATLY to Tiger's Fury's own damage effects rather than multiplying on
+    // top of them - A_ADD_FLAT_MODIFIER against P_EFFECT_1, _3 and _4 - so it
+    // is applied as a value override on the parse instead of a second
+    // multiplier, which would land 0.8% high.
+    if ( p()->legacy_conduits.has( 268 ) )
+    {
+      return parse_persistent_effects( p()->buff.tigers_fury, PARSE_CALLBACK_POST_SNAPSHOT,
+        p()->talent.tigers_fury->effectN( 1 ).percent() + p()->legacy_conduits.percent( 268 ),
+        [ this ]( action_state_t* s ) {
+          cast_state( s )->snapshots |= snapshot_e::TIGERS_FURY;
+        } );
+    }
+
     return parse_persistent_effects( p()->buff.tigers_fury, PARSE_CALLBACK_POST_SNAPSHOT,
       [ this ]( action_state_t* s ) {
         cast_state( s )->snapshots |= snapshot_e::TIGERS_FURY;
@@ -2882,6 +3193,18 @@ struct bear_attack_t : public druid_attack_t<melee_attack_t>
   {
     if ( p->specialization() == DRUID_BALANCE || p->specialization() == DRUID_RESTORATION )
       ap_type = attack_power_type::NO_WEAPON;
+  }
+
+  // Legacy Azerite: Wild Fleshrending pays out into a target already carrying
+  // Thrash. Feral has no Thrash in Midnight, so Guardian is where this lands.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = base_t::bonus_da( s );
+
+    if ( p()->legacy_azerite.wild_fleshrending.ok() && get_td( s->target )->dots.thrash->is_ticking() )
+      da += p()->legacy_azerite.wild_fleshrending.value( 2 );
+
+    return da;
   }
 };
 
@@ -3162,6 +3485,12 @@ struct celestial_alignment_buff_t final : public druid_buff_t
   celestial_alignment_buff_t( druid_t* p, std::string_view n, const spell_data_t* s ) : base_t( p, n, s )
   {
     set_cooldown( 0_ms );
+
+    // BracketSim legacy compatibility: Precise Alignment lengthens this buff.
+    // time_value() reads the rank value straight from the rank table, so no
+    // conduit spell is needed.
+    if ( p->legacy_conduits.has( 262 ) )
+      modify_duration( timespan_t::from_millis( p->legacy_conduits.value( 262 ) ) );
   }
 
   bool trigger( int s, double v, double c, timespan_t d ) override
@@ -3207,6 +3536,15 @@ struct eclipse_buff_base_t : public druid_buff_t
       harmony_cap( p->talent.harmony_of_the_heavens->effectN( 2 ).percent() )
   {
     set_default_value_from_effect_type( A_ADD_PCT_MODIFIER, P_GENERIC );
+
+    // BracketSim legacy compatibility: the conduit Umbral Intensity (264)
+    // makes Eclipse's own damage bonus to Wrath and Starfire larger. This is
+    // the same multiply-the-default-value Shadowlands did, one line later than
+    // it did because Midnight reads the value from the effect type rather than
+    // naming the effect.
+    if ( p->legacy_conduits.has( 264 ) )
+      set_default_value( default_value * ( 1.0 + p->legacy_conduits.percent( 264 ) ) );
+
     set_refresh_behavior( buff_refresh_behavior::DURATION );
     set_constant_behavior( buff_constant_behavior::NEVER_CONSTANT );
 
@@ -3250,6 +3588,16 @@ struct eclipse_buff_base_t : public druid_buff_t
       return false;
 
     harmony_cur = 0.0;
+
+    // BracketSim legacy compatibility: Balance of All Things. Entering an
+    // Eclipse grants a decaying crit stack, one set per school.
+    if ( p()->shadowlands_legacy.balance_of_all_things )
+    {
+      auto boat = p()->buff.legacy_balance_of_all_things_arcane;
+      if ( this == p()->buff.eclipse_solar )
+        boat = p()->buff.legacy_balance_of_all_things_nature;
+      boat->trigger( boat->max_stack() );
+    }
 
     p()->buff.starlord->expire();
     p()->buff.elunes_challenge->expire();
@@ -3758,6 +4106,15 @@ public:
     if ( !proc )
       trigger_primal_fury();
 
+    // BracketSim legacy compatibility: Frenzyband.
+    if ( p()->shadowlands_legacy.frenzyband && !proc )
+    {
+      timespan_t cdr = timespan_t::from_millis( p()->find_spell( 340053 )->effectN( 1 ).base_value() );
+      for ( auto name : { "berserk", "berserk_cat", "incarnation_avatar_of_ashamane" } )
+        if ( auto a = p()->find_action( name ) )
+          a->cooldown->adjust( -cdr, false );
+    }
+
     return ret;
   }
 };
@@ -3842,6 +4199,12 @@ public:
     trigger_with_chance_per_cp( p()->buff.frantic_momentum, cp );
     trigger_with_chance_per_cp( p()->buff.predatory_swiftness, cp );
     trigger_with_chance_per_cp( p()->buff.sudden_ambush, cp );
+
+    // BracketSim legacy compatibility: the Sudden Ambush CONDUIT (267) rolls
+    // its own chance per combo point spent, on top of the talent's.
+    if ( p()->legacy_conduits.has( 267 ) )
+      p()->buff.sudden_ambush->trigger( this, 1, buff_t::DEFAULT_VALUE(),
+                                        p()->legacy_conduits.percent( 267 ) * cp );
 
     if ( consumed )
     {
@@ -4163,6 +4526,27 @@ struct feral_frenzy_t final : public trigger_aggravate_wounds_t<DRUID_FERAL, cat
 // Ferocious Bite ===========================================================
 struct ferocious_bite_base_t : public cp_spender_t
 {
+  // BracketSim legacy compatibility: Taste for Blood. Shadowlands multiplied
+  // Ferocious Bite's damage by the rank value ONCE PER BLEED on the target, so
+  // the value is per-bleed and not a flat bonus. Shadowlands counted five
+  // bleeds; Midnight keeps rake, rip and thrash, and the other two
+  // (frenzied_assault, sickle_of_the_lion) no longer exist, so three is the
+  // real ceiling here rather than an approximation.
+  double composite_target_multiplier( player_t* t ) const override
+  {
+    double tm = cp_spender_t::composite_target_multiplier( t );
+
+    if ( p()->legacy_conduits.has( 265 ) )
+    {
+      auto t_td = p()->get_target_data( t );
+      int bleeds = t_td->dots.rake->is_ticking() + t_td->dots.rip->is_ticking() +
+                   t_td->dots.thrash->is_ticking();
+      tm *= 1.0 + p()->legacy_conduits.percent( 265 ) * bleeds;
+    }
+
+    return tm;
+  }
+
   struct rampant_ferocity_t final : public cat_attack_t
   {
     double energy_mod_pct;
@@ -4449,7 +4833,24 @@ struct ferocious_bite_t final : public ferocious_bite_base_t
       return;
     }
 
+    // Legacy Azerite: Iron Jaws banks a Maim bonus, at a chance scaled by the
+    // Combo Points being spent.
+    int cp = as<int>( p()->resources.current[ RESOURCE_COMBO_POINT ] );
+
+    // BracketSim legacy compatibility: Apex Predator's Craving is spent here.
+    bool legacy_apex = p()->buff.legacy_apex_predators_craving->check() != 0;
+    if ( legacy_apex )
+      p()->buff.legacy_apex_predators_craving->expire();
+
     ferocious_bite_base_t::execute();
+
+    if ( p()->legacy_azerite.iron_jaws.ok() )
+    {
+      double n = std::max( 1.0, as<double>( p()->legacy_azerite.iron_jaws.n_items() ) );
+      p()->buff.iron_jaws->trigger(
+          1, p()->legacy_azerite.iron_jaws.value( 1 ) * ( 0.5 + 0.5 / n ),
+          p()->legacy_azerite.iron_jaws.spell()->effectN( 2 ).percent() * cp );
+    }
   }
 };
 
@@ -4512,6 +4913,24 @@ struct maim_t final : public cp_spender_t
   {
     return cp_spender_t::composite_da_multiplier( s ) * cast_state( s )->combo_points;
   }
+
+  // Legacy Azerite: Iron Jaws
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = cp_spender_t::bonus_da( s );
+
+    if ( p()->buff.iron_jaws->up() )
+      da += p()->buff.iron_jaws->check_value();
+
+    return da;
+  }
+
+  void execute() override
+  {
+    cp_spender_t::execute();
+
+    p()->buff.iron_jaws->expire();
+  }
 };
 
 // Rake =====================================================================
@@ -4519,6 +4938,16 @@ struct rake_t final : public use_fluid_form_t<CAT_FORM, trigger_call_of_the_elde
 {
   struct rake_bleed_t final : public trigger_thriving_growth_t<use_dot_list_t<cat_attack_t>>
   {
+    // Legacy Azerite: Blood Mist
+    double bonus_ta( const action_state_t* s ) const override
+    {
+      double ta = base_t::bonus_ta( s );
+
+      ta += p()->legacy_azerite.blood_mist.value( 2 );
+
+      return ta;
+    }
+
     rake_bleed_t( druid_t* p, std::string_view n, flag_e f, rake_t* r ) : base_t( n, p, find_trigger( r ).trigger(), f )
     {
       background = dual = proc = true;
@@ -4721,6 +5150,16 @@ struct rip_t final : public trigger_thriving_growth_t<use_dot_list_t<cp_spender_
     }
   }
 
+  // Legacy Azerite: Gushing Lacerations
+  double bonus_ta( const action_state_t* s ) const override
+  {
+    double ta = base_t::bonus_ta( s );
+
+    ta += p()->legacy_azerite.gushing_lacerations.value( 2 );
+
+    return ta;
+  }
+
   void tick( dot_t* d ) override
   {
     base_t::tick( d );
@@ -4729,6 +5168,25 @@ struct rip_t final : public trigger_thriving_growth_t<use_dot_list_t<cp_spender_
 
     if ( rng().roll( c ) )
       p()->buff.apex_predators_craving->trigger();
+
+    // BracketSim legacy compatibility: the Apex Predator's Craving legendary
+    // shares its name with the current talent and rolls its own flat chance.
+    if ( p()->shadowlands_legacy.apex_predators_craving &&
+         rng().roll( p()->find_spell( 339139 )->effectN( 1 ).percent() ) )
+    {
+      p()->buff.legacy_apex_predators_craving->trigger();
+    }
+
+    // BracketSim legacy compatibility: the conduit Incessant Hunter (266).
+    // The RANKED half is the chance, not the payout: spell 340688's energize
+    // is a flat 3 Energy at every rank, read from the archived 9.2.7 row
+    // because Midnight does not ship that spell. Shadowlands read it the same
+    // way, straight off the triggered spell rather than through the rank.
+    if ( p()->legacy_conduits.has( 266 ) &&
+         rng().roll( p()->legacy_conduits.percent( 266 ) ) )
+    {
+      p()->resource_gain( RESOURCE_ENERGY, 3.0, p()->get_gain( "Incessant Hunter" ) );
+    }
   }
 };
 
@@ -4870,6 +5328,20 @@ struct tigers_fury_t final : public cat_attack_t
     p()->buff.strategic_infusion->trigger();
     p()->buff.savage_fury->trigger();
 
+    // BracketSim legacy compatibility: Eye of Fearful Symmetry.
+    p()->buff.legacy_eye_of_fearful_symmetry->trigger(
+        p()->buff.legacy_eye_of_fearful_symmetry->max_stack() );
+
+    // BracketSim legacy compatibility: Jungle Fury rides along with Tiger's
+    // Fury. Its own spell has no duration, so it takes Tiger's Fury's - which
+    // is what the Battle for Azeroth implementation did by triggering it from
+    // inside the Tiger's Fury buff.
+    if ( p()->legacy_azerite.jungle_fury.enabled() )
+    {
+      p()->buff.jungle_fury->trigger( 1, buff_t::DEFAULT_VALUE(), 1.0,
+                                      p()->buff.tigers_fury->remains() );
+    }
+
     if ( p()->buff.killing_strikes_combat->check() )
     {
       p()->buff.killing_strikes_combat->expire();
@@ -4894,7 +5366,11 @@ struct unseen_attack_t : public cat_attack_t
   bool parse_tigers_fury() override
   {
     // unseen attacks do not snapshot tiger's fury
-    parse_effects( p()->buff.tigers_fury );
+    // BracketSim legacy compatibility: Carnivorous Instinct (conduit 268).
+    if ( p()->legacy_conduits.has( 268 ) )
+      parse_effects( p()->buff.tigers_fury, p()->talent.tigers_fury->effectN( 1 ).percent() + p()->legacy_conduits.percent( 268 ) );
+    else
+      parse_effects( p()->buff.tigers_fury );
     return false;
   }
 
@@ -4942,7 +5418,11 @@ struct unseen_slash_t final : public unseen_attack_t
     bool parse_tigers_fury() override
     {
       // unseen attacks do not snapshot tiger's fury
-      parse_effects( p()->buff.tigers_fury );
+      // BracketSim legacy compatibility: Carnivorous Instinct (conduit 268).
+      if ( p()->legacy_conduits.has( 268 ) )
+        parse_effects( p()->buff.tigers_fury, p()->talent.tigers_fury->effectN( 1 ).percent() + p()->legacy_conduits.percent( 268 ) );
+      else
+        parse_effects( p()->buff.tigers_fury );
       return false;
     }
 
@@ -5220,7 +5700,23 @@ struct berserk_bear_base_t : public bear_attack_t
   berserk_bear_base_t( std::string_view n, druid_t* p, const spell_data_t* s, flag_e f ) : bear_attack_t( n, p, s, f )
   {
     harmful   = false;
+    // Upstream changed autoshift on the 19 September 2026 merge: it now takes a
+    // form directly rather than an action, and handles form_mask itself.
     autoshift = BEAR_FORM;
+
+    // BracketSim legacy compatibility: Legacy of the Sleeper shortens Berserk
+    // and Incarnation: Guardian of Ursoc by 30 seconds. Effect 1 is a flat
+    // cooldown modifier already carrying its own sign (-30000 ms), so it is
+    // added rather than subtracted.
+    //
+    // Its other two halves are not ported. The Leech is defensive, and the
+    // damage half rode a Shadowlands-only spec spell (berserk_bear_2) that has
+    // no equivalent here - so this models the cooldown and nothing else.
+    if ( p->shadowlands_legacy.legacy_of_the_sleeper )
+    {
+      cooldown->duration +=
+          timespan_t::from_millis( p->find_spell( 339062 )->effectN( 1 ).base_value() );
+    }
   }
 
   void execute() override
@@ -5349,6 +5845,28 @@ struct ironfur_t final : public rage_spender_t<druid_spell_t>
     }
 
     p()->buff.ironfur->trigger( dur );
+
+    // Legacy Azerite: Layered Mane. Current client data reads "Ironfur
+    // increases your Agility by <e1>, and has a <e2>% chance to grant <e3>
+    // applications" - effect 3 is the number of extra stacks, not one.
+    if ( p()->legacy_azerite.layered_mane.ok() &&
+         rng().roll( p()->legacy_azerite.layered_mane.spell()->effectN( 2 ).percent() ) )
+    {
+      p()->buff.ironfur->trigger(
+          as<int>( p()->legacy_azerite.layered_mane.spell()->effectN( 3 ).base_value() ),
+          buff_t::DEFAULT_VALUE(), 1.0, dur );
+      p()->buff.legacy_layered_mane->trigger();
+    }
+
+    // BracketSim legacy compatibility: the CONDUIT Layered Mane (272). Same
+    // name as the azerite trait above and a separate thing - the trait grants
+    // several extra applications off its own effect 3, the conduit grants
+    // exactly one more. A character can carry both.
+    if ( p()->legacy_conduits.has( 272 ) &&
+         rng().roll( p()->legacy_conduits.percent( 272 ) ) )
+    {
+      p()->buff.ironfur->trigger( 1, buff_t::DEFAULT_VALUE(), 1.0, dur );
+    }
   }
 };
 
@@ -5487,6 +6005,14 @@ struct mangle_t final : public use_fluid_form_t<BEAR_FORM,
     p()->buff.guardian_of_elune->trigger( this );
 
     p()->buff.gore->consume( this );
+
+    // Legacy Azerite: Burst of Savagery
+    if ( p()->legacy_azerite.burst_of_savagery.ok() )
+      p()->buff.legacy_burst_of_savagery->trigger();
+
+    // BracketSim legacy compatibility: Savage Combatant (conduit 270).
+    if ( p()->legacy_conduits.has( 270 ) )
+      p()->buff.legacy_savage_combatant->trigger();
 
     if ( p()->specialization() == DRUID_GUARDIAN && p()->buff.killing_strikes_combat->check() )
     {
@@ -5672,6 +6198,14 @@ struct maul_base_t : public trigger_vicious_brambles_t<
 
     base_t::execute();
 
+    // BracketSim legacy compatibility: Savage Combatant (conduit 270) is spent
+    // by the Maul it empowered. Shadowlands never expired it, which left it
+    // parked at three stacks for the whole fight - the same defect that made
+    // Brutal Projectiles read +103% earlier in this port. The buff's tooltip
+    // says "your next Maul", so it comes off here.
+    if ( p()->buff.legacy_savage_combatant->check() )
+      p()->buff.legacy_savage_combatant->expire();
+
     if ( p()->buff.dream_conduit->consume( this ) )
       consume_rage_wild_guardian( 1.0 );
   }
@@ -5707,7 +6241,13 @@ struct maul_base_t : public trigger_vicious_brambles_t<
 
   double composite_da_multiplier( const action_state_t* s ) const override
   {
-    return base_t::composite_da_multiplier( s ) * ( 1.0 + cast_state( s )->rage_mod );
+    double m = base_t::composite_da_multiplier( s ) * ( 1.0 + cast_state( s )->rage_mod );
+
+    // BracketSim legacy compatibility: Savage Combatant (conduit 270) raises
+    // this hit by its value per stack.
+    m *= 1.0 + p()->buff.legacy_savage_combatant->check_stack_value();
+
+    return m;
   }
 };
 
@@ -5814,6 +6354,28 @@ struct maul_t final : public maul_ravage_base_t<maul_base_t>
   bool ready() override
   {
     return p()->talent.raze.ok() ? false : base_t::ready();
+  }
+
+  // Legacy Azerite: Guardian's Wrath
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = base_t::bonus_da( s );
+
+    if ( p()->legacy_azerite.guardians_wrath.ok() )
+      da += p()->legacy_azerite.guardians_wrath.value( 2 );
+
+    return da;
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    base_t::impact( s );
+
+    if ( result_is_hit( s->result ) && p()->legacy_azerite.guardians_wrath.ok() )
+    {
+      p()->buff.legacy_guardians_wrath->up();  // benefit tracking
+      p()->buff.legacy_guardians_wrath->trigger();
+    }
   }
 
   double rage_modifier() const override
@@ -5960,6 +6522,15 @@ struct thrash_t final : public trigger_claw_rampage_t<DRUID_GUARDIAN,
     replace_stats( this, impact_action );
     track_cd_waste = true;
 
+    // BracketSim legacy compatibility: Luffa-Infused Embrace makes Thrash hit
+    // harder and reach further.
+    if ( p->shadowlands_legacy.luffa_infused_embrace )
+    {
+      const spell_data_t* luffa = p->find_spell( 339060 );
+      base_multiplier *= 1.0 + luffa->effectN( 1 ).percent();
+      radius *= 1.0 + luffa->effectN( 3 ).percent();
+    }
+
     dot_name = "thrash";
 
     set_tracked_cooldown( p->cooldown.thrash );
@@ -5968,6 +6539,24 @@ struct thrash_t final : public trigger_claw_rampage_t<DRUID_GUARDIAN,
   void execute() override
   {
     base_t::execute();
+
+    // Legacy Azerite: Twisted Claws
+    if ( p()->legacy_azerite.twisted_claws.ok() )
+      p()->buff.legacy_twisted_claws->trigger();
+
+    // BracketSim legacy compatibility: Ursoc's Fury Remembered. A Bear Thrash
+    // can swing a second time; the copy is stopped from chaining by the guard.
+    if ( p()->shadowlands_legacy.ursocs_fury_remembered && !proc &&
+         p()->form == BEAR_FORM &&
+         rng().roll( p()->find_spell( 339056 )->effectN( 1 ).percent() ) )
+    {
+      auto extra = this;
+      make_event( *sim, 250_ms, [ extra, t = target ] {
+        extra->proc = true;
+        extra->execute_on_target( t );
+        extra->proc = false;
+      } );
+    }
 
     p()->buff.gorestained_claws->trigger( this );
 
@@ -6847,6 +7436,39 @@ public:
   {
     assert( weaver_buff );
 
+    // BracketSim legacy compatibility: Primordial Arcanic Pulsar counts every
+    // point of Astral Power spent and hands out a Celestial Alignment window
+    // once it fills, and Timeworn Dreambinder stacks off the same casts.
+    if ( p()->shadowlands_legacy.primordial_arcanic_pulsar && last_resource_cost > 0 )
+    {
+      const spell_data_t* pulsar = p()->find_spell( 338668 );
+      p()->buff.legacy_primordial_arcanic_pulsar->trigger( 1, buff_t::DEFAULT_VALUE(), 1.0 );
+      p()->buff.legacy_primordial_arcanic_pulsar->current_value += last_resource_cost;
+
+      if ( p()->buff.legacy_primordial_arcanic_pulsar->current_value >= pulsar->effectN( 1 ).base_value() )
+      {
+        p()->buff.legacy_primordial_arcanic_pulsar->current_value -= pulsar->effectN( 1 ).base_value();
+        timespan_t dur = timespan_t::from_seconds( pulsar->effectN( 2 ).base_value() );
+        if ( p()->buff.ca_inc->check() )
+          p()->buff.ca_inc->extend_duration( dur );
+        else
+          p()->buff.ca_inc->trigger( dur );
+      }
+    }
+
+    p()->buff.legacy_timeworn_dreambinder->trigger();
+
+    // BracketSim legacy compatibility: Oneth's Clear Vision. Each Astral Power
+    // spender has a chance to make the other one free.
+    if ( p()->shadowlands_legacy.oneths_clear_vision && last_resource_cost > 0 )
+    {
+      const spell_data_t* oneth = p()->find_spell( 338661 );
+      if ( rng().roll( oneth->effectN( 1 ).percent() ) )
+        p()->buff.legacy_oneths_perception->trigger();
+      if ( rng().roll( oneth->effectN( 2 ).percent() ) )
+        p()->buff.legacy_oneths_clear_vision->trigger();
+    }
+
     druid_spell_t::execute();
 
     p()->buff.starlord->trigger( this );
@@ -7474,6 +8096,10 @@ struct innervate_t final : public druid_spell_t
   {
     druid_spell_t::execute();
 
+    // Legacy Azerite: Lively Spirit
+    if ( p()->legacy_azerite.lively_spirit.ok() )
+      p()->buff.legacy_lively_spirit->trigger();
+
     p()->buff.innervate->trigger();
   }
 };
@@ -7831,6 +8457,16 @@ struct moonfire_t final : public druid_spell_t
 
       if ( get_dot( s->target )->remains() > li_dot->remains() )
         li_dot->cancel();
+    }
+
+    // Legacy Azerite: Power of the Moon
+    double bonus_ta( const action_state_t* s ) const override
+    {
+      double ta = base_t::bonus_ta( s );
+
+      ta += p()->legacy_azerite.power_of_the_moon.value( 2 );
+
+      return ta;
     }
 
     void tick( dot_t* d ) override
@@ -8268,6 +8904,18 @@ struct starfall_t final : public ap_spender_t
       background = proc = dual = true;
     }
 
+    void impact( action_state_t* s ) override
+    {
+      druid_spell_t::impact( s );
+
+      // Legacy Azerite: Lunar Shrapnel splinters off targets carrying Moonfire.
+      if ( p()->legacy_azerite.lunar_shrapnel.ok() && p()->active.legacy_lunar_shrapnel &&
+           get_td( s->target )->dots.moonfire->is_ticking() )
+      {
+        p()->active.legacy_lunar_shrapnel->execute_on_target( s->target );
+      }
+    }
+
     double action_multiplier() const override
     {
       auto am = druid_spell_t::action_multiplier();
@@ -8446,8 +9094,17 @@ struct starfall_t final : public ap_spender_t
   {
     if ( p()->talent.aetherial_kindling.ok() )
     {
-      range::for_each( p()->dot_lists.moonfire, [ this ]( dot_t* d ) { d->adjust_duration( dot_ext, max_ext ); } );
-      range::for_each( p()->dot_lists.sunfire, [ this ]( dot_t* d ) { d->adjust_duration( dot_ext, max_ext ); } );
+      // BracketSim legacy compatibility: Stellar Inspiration (conduit 261)
+      // duplicates the extension. In Shadowlands it duplicated two of them,
+      // Starfall's of Moonfire and Sunfire and Starsurge's of Eclipse;
+      // Midnight's Starsurge does not extend Eclipse at all, so only this half
+      // has a host and only this half is ported.
+      auto ext = dot_ext;
+      if ( p()->legacy_conduits.has( 261 ) && rng().roll( p()->legacy_conduits.percent( 261 ) ) )
+        ext *= 2;
+
+      range::for_each( p()->dot_lists.moonfire, [ this, ext ]( dot_t* d ) { d->adjust_duration( ext, max_ext ); } );
+      range::for_each( p()->dot_lists.sunfire, [ this, ext ]( dot_t* d ) { d->adjust_duration( ext, max_ext ); } );
     }
 
     base_t::execute();
@@ -8559,6 +9216,11 @@ struct starfire_t : public use_fluid_form_t<MOONKIN_FORM, ap_generator_t>
         p()->buff.owlkin_frenzy->expire();
 
     p()->buff.lunar_eclipse_override->trigger();
+
+    // Legacy Azerite: Dawning Sun. Hung off Lunar Strike in Battle for Azeroth,
+    // which is the current Starfire.
+    if ( p()->legacy_azerite.dawning_sun.ok() )
+      p()->buff.dawning_sun->trigger( 1, p()->legacy_azerite.dawning_sun.value() );
   }
 
   void impact( action_state_t* s ) override
@@ -8723,6 +9385,27 @@ struct starsurge_t final : public trigger_call_of_the_elder_druid_t<ap_spender_t
 
     if ( rng().roll( mid1_4pc_chance ) )
       p()->active.shooting_stars_mid1->execute_on_target( s->target );
+
+    // Legacy Azerite: Arcanic Pulsar. Every eighth Starsurge extends the
+    // Celestial Alignment window - Incarnation when that is talented.
+    if ( p()->legacy_azerite.arcanic_pulsar.ok() )
+    {
+      p()->buff.arcanic_pulsar->trigger();
+
+      if ( p()->buff.arcanic_pulsar->check() == p()->buff.arcanic_pulsar->max_stack() )
+      {
+        timespan_t dur = timespan_t::from_seconds(
+          p()->legacy_azerite.arcanic_pulsar.spell()->effectN( 3 ).base_value() );
+        buff_t* proc_buff = p()->buff.ca_inc;
+
+        if ( proc_buff->check() )
+          proc_buff->extend_duration( dur );
+        else
+          proc_buff->trigger( dur );
+
+        p()->buff.arcanic_pulsar->expire();
+      }
+    }
   }
 };
 
@@ -8746,6 +9429,20 @@ struct sunfire_t final : public druid_spell_t
       {
         shroom_rng = p->get_rppm( "sunseeker_mushroom", p->talent.sunseeker_mushroom );
       }
+
+      // Legacy Azerite: High Noon widens Sunfire.
+      if ( p->legacy_azerite.high_noon.ok() )
+        radius += p->legacy_azerite.high_noon.value();
+    }
+
+    // Legacy Azerite: High Noon
+    double bonus_ta( const action_state_t* s ) const override
+    {
+      double ta = base_t::bonus_ta( s );
+
+      ta += p()->legacy_azerite.high_noon.value( 2 );
+
+      return ta;
     }
 
     void tick( dot_t* d ) override
@@ -8801,6 +9498,10 @@ struct survival_instincts_t final : public druid_spell_t
     druid_spell_t::execute();
 
     p()->buff.survival_instincts->trigger();
+
+    // Legacy Azerite: Masterful Instincts
+    if ( p()->legacy_azerite.masterful_instincts.ok() )
+      p()->buff.legacy_masterful_instincts->trigger();
 
     p()->buff.matted_fur->trigger();
   }
@@ -9123,6 +9824,17 @@ struct wrath_t : public use_fluid_form_t<MOONKIN_FORM, ap_generator_t>
     if ( !p()->talent.lunar_calling.ok() )
       p()->buff.lunar_eclipse_override->expire();
   }
+
+  // Legacy Azerite: the other half of Dawning Sun. Battle for Azeroth's Solar
+  // Wrath is the current Wrath.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = base_t::bonus_da( s );
+
+    da += p()->buff.dawning_sun->value();
+
+    return da;
+  }
 };
 
 // Heart of the Wild ========================================================
@@ -9146,6 +9858,14 @@ struct heart_of_the_wild_t final : public druid_spell_t
 
     if ( p()->active.hotw_cat )
       p()->active.hotw_cat->tick_action->gain = p()->active.hotw_cat->gain;
+
+    // BracketSim legacy compatibility: the conduit Born of the Wilds (260)
+    // shortens the cooldown - its rank value is NEGATIVE twenty, so the
+    // multiply is a reduction. Applied in init() and not in the constructor
+    // because the constructor asserts the cooldown still matches the buff's
+    // own, and changing it there would trip that assert.
+    if ( p()->legacy_conduits.has( 260 ) )
+      cooldown->duration *= 1.0 + p()->legacy_conduits.percent( 260 );
   }
 
   void execute() override
@@ -9188,10 +9908,154 @@ struct heart_of_the_wild_t final : public druid_spell_t
   }
 };
 
+// BracketSim legacy compatibility: Shadowlands covenant abilities ==========
+// Cost, cooldown, duration and damage all come from the covenant spells, which
+// still resolve in current client data.
+
+struct legacy_adaptive_swarm_damage_t final : public druid_spell_t
+{
+  legacy_adaptive_swarm_damage_t( druid_t* p )
+    : druid_spell_t( "adaptive_swarm_damage", p, p->legacy_covenant.adaptive_swarm_damage )
+  {
+    background = true;
+    may_miss = false;
+
+    // BracketSim legacy compatibility: Evolved Swarm (conduit 278) adds to the
+    // damage Adaptive Swarm deals.
+    base_td_multiplier *= 1.0 + p->legacy_conduits.percent( 278 );
+  }
+};
+
+struct legacy_adaptive_swarm_t final : public druid_spell_t
+{
+  action_t* damage;
+
+  legacy_adaptive_swarm_t( druid_t* p )
+    : druid_spell_t( "adaptive_swarm", p, p->legacy_covenant.adaptive_swarm ),
+      damage( new legacy_adaptive_swarm_damage_t( p ) )
+  {
+    may_miss = false;
+    add_child( damage );
+  }
+
+  void execute() override
+  {
+    druid_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NECROLORD,
+                                            cooldown );
+
+    // The swarm's bounce between friend and foe is not modelled: a solo sim has
+    // no second host for it to alternate onto.
+    damage->execute_on_target( target );
+
+    // BracketSim legacy compatibility: Locust Swarm. Effect 1 of the runeforge
+    // is the chance the swarm splits, and the split lands on a second enemy -
+    // so on a single target it correctly does nothing.
+    if ( !p()->shadowlands_legacy.unbridled_swarm ||
+         !rng().roll( p()->find_spell( 354123 )->effectN( 1 ).percent() ) )
+      return;
+
+    for ( auto t : target_list() )
+    {
+      if ( t != target )
+      {
+        damage->execute_on_target( t );
+        break;
+      }
+    }
+  }
+};
+
+// BracketSim legacy compatibility: Kindred Spirits. The bond itself is free and
+// lasts an hour; what matters is the ten second empowerment, which is what the
+// action models. It deals no damage of its own - see the file header.
+struct legacy_kindred_spirits_t : public druid_spell_t
+{
+  legacy_kindred_spirits_t( druid_t* p )
+    : druid_spell_t( "kindred_spirits", p, p->legacy_covenant.kindred_spirits )
+  {
+    harmful = may_miss = false;
+    target = p;
+
+    // The driver's own duration is the 3600 second BOND, not the empowerment,
+    // and its cooldown is the bond's. The empowerment is "every 1 min" per the
+    // live tooltip, so the cooldown is set here rather than read from data
+    // that describes a different thing.
+    cooldown->duration = 60_s;
+
+    // BracketSim legacy compatibility: the conduit Deep Allegiance (277)
+    // shortens that minute. Its rank value is NEGATIVE twenty, so this
+    // multiply is a reduction.
+    if ( p->legacy_conduits.has( 277 ) )
+      cooldown->duration *= 1.0 + p->legacy_conduits.percent( 277 );
+  }
+
+  void execute() override
+  {
+    druid_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_KYRIAN,
+                                            cooldown );
+    p()->buff.legacy_kindred_empowerment->trigger();
+  }
+};
+
+struct legacy_ravenous_frenzy_t final : public druid_spell_t
+{
+  legacy_ravenous_frenzy_t( druid_t* p )
+    : druid_spell_t( "ravenous_frenzy", p, p->legacy_covenant.ravenous_frenzy )
+  {
+    harmful = may_miss = false;
+    target = p;
+  }
+
+  void execute() override
+  {
+    druid_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_VENTHYR,
+                                            cooldown );
+    p()->buff.legacy_ravenous_frenzy->trigger();
+  }
+};
+
 // Convoke the Spirits ======================================================
 // NOTE must be defined after all other spells
 struct convoke_the_spirits_t final : public trigger_control_of_the_dream_t<druid_spell_t>
 {
+  // BracketSim legacy compatibility: Celestial Spirits shortens both the
+  // cooldown and the channel. Applied in init_finished so it lands after the
+  // action's own cooldown and duration are set up.
+  void init_finished() override
+  {
+    druid_spell_t::init_finished();
+
+    if ( p()->shadowlands_legacy.celestial_spirits )
+    {
+      const spell_data_t* cs = p()->find_spell( 354118 );
+      // BracketSim legacy (27 Sep 2026): every convoke_the_spirits APL line is its own action object but they
+      // SHARE one cooldown, so this ran once per line: 60 Balance halved it four more times after Elune's
+      // Guidance - 120 s -> 3.75 s, 50 casts a fight, Convoke over half the damage, Night Fae 2x every other
+      // covenant. The cooldown takes it once; the channel (per action) still takes it every time.
+      if ( !p()->shadowlands_legacy.celestial_spirits_cd_applied )
+      {
+        cooldown->duration *= 1.0 + ( cs->effectN( 1 ).base_value() / 120000.0 );
+        p()->shadowlands_legacy.celestial_spirits_cd_applied = true;
+      }
+      dot_duration *= 1.0 + cs->effectN( 2 ).percent();
+    }
+  }
+
   enum convoke_cast_e
   {
     CAST_NONE = 0,
@@ -9251,12 +10115,12 @@ struct convoke_the_spirits_t final : public trigger_control_of_the_dream_t<druid
   unsigned off_count = 0;
   bool guidance;
 
-  DRUID_ABILITY( convoke_the_spirits_t, base_t, "convoke_the_spirits", p->talent.convoke_the_spirits ),
+  DRUID_ABILITY( convoke_the_spirits_t, base_t, "convoke_the_spirits", p->legacy_convoke_spell() ),
     actions(),
     guidance( p->talent.elunes_guidance.ok() || p->talent.ursocs_guidance.ok() ||
               p->talent.ashamanes_guidance.ok() || p->talent.cenarius_guidance.ok() )
   {
-    if ( !p->talent.convoke_the_spirits.ok() )
+    if ( !p->legacy_convoke_enabled() )
       return;
 
     channeled = true;
@@ -9608,6 +10472,15 @@ struct convoke_the_spirits_t final : public trigger_control_of_the_dream_t<druid
     // Generic routine
     base_t::execute();
 
+    // BracketSim legacy compatibility: Convoke the Spirits is the Night Fae
+    // druid ability. The covenant spell drives the modern talent'''s
+    // implementation, so the gate is the covenant spell.
+    //
+    // Fires the soulbind traits that ride this covenant'''s class ability.
+    if ( p()->legacy_covenant.convoke_the_spirits->ok() )
+      player->legacy_soulbinds.covenant_ability_cast(
+          player, legacy_soulbind::COVENANT_NIGHT_FAE, cooldown );
+
     cast_list.clear();
     main_count = 0;
 
@@ -9783,7 +10656,14 @@ public:
     p->parse_action_target_effects( this );
 
     // Auto attack mods
-    ab::parse_effects( p->buff.tigers_fury );
+    // BracketSim legacy compatibility: Carnivorous Instinct (conduit 268)
+    // raises Tiger's Fury's auto attack effect too - effect 4, which its third
+    // effect names.
+    if ( p->legacy_conduits.has( 268 ) )
+      ab::parse_effects( p->buff.tigers_fury,
+                         p->talent.tigers_fury->effectN( 1 ).percent() + p->legacy_conduits.percent( 268 ) );
+    else
+      ab::parse_effects( p->buff.tigers_fury );
 
     // 7.00 PPM via community testing (~368k auto attacks)
     // https://docs.google.com/spreadsheets/d/1vMvlq1k3aAuwC1iHyDjqAneojPZusdwkZGmatuWWZWs/edit#gid=1097586165
@@ -10212,6 +11092,14 @@ action_t* druid_t::create_action( std::string_view name, std::string_view opt )
   else if ( name == "tranquility"                   ) a =                  new tranquility_t( this );
 
   // Multi-spec Talents
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  else if ( name == "adaptive_swarm" && legacy_covenant.adaptive_swarm->ok() )
+    a = new legacy_adaptive_swarm_t( this );
+  else if ( name == "kindred_spirits" && legacy_covenant.kindred_spirits->ok() )
+    a = new legacy_kindred_spirits_t( this );
+  else if ( name == "ravenous_frenzy" && legacy_covenant.ravenous_frenzy->ok() )
+    a = new legacy_ravenous_frenzy_t( this );
+
   else if ( name == "convoke_the_spirits"           ) a =          new convoke_the_spirits_t( this );
   else if ( name == "survival_instincts"            ) a =           new survival_instincts_t( this );
 
@@ -10299,6 +11187,107 @@ void druid_t::init_spells()
 
   player_t::init_spells();
 
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. These
+  // must be looked up here, after player_t::init_spells() has parsed the
+  // actor's selected Azerite powers - doing it in create_buffs() is too late
+  // for the buff chance checks that read them.
+  legacy_azerite.dawning_sun         = find_azerite_spell( "Dawning Sun" );
+  legacy_azerite.high_noon           = find_azerite_spell( "High Noon" );
+  legacy_azerite.lively_spirit       = find_azerite_spell( "Lively Spirit" );
+  legacy_azerite.long_night          = find_azerite_spell( "Long Night" );
+  legacy_azerite.lunar_shrapnel      = find_azerite_spell( "Lunar Shrapnel" );
+  legacy_azerite.power_of_the_moon   = find_azerite_spell( "Power of the Moon" );
+  legacy_azerite.streaking_stars     = find_azerite_spell( "Streaking Stars" );
+  legacy_azerite.arcanic_pulsar      = find_azerite_spell( "Arcanic Pulsar" );
+
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
+  // off the bonus id the original legendary item carried.
+  auto legacy = [ this ]( int bonus_id ) {
+    return shadowlands_legacy.legacy_shadowlands_enabled &&
+           range::any_of( items, [ bonus_id ]( const item_t& item ) {
+             return range::contains( item.parsed.bonus_id, bonus_id );
+           } );
+  };
+
+  shadowlands_legacy.apex_predators_craving   = legacy( 7091 );
+  shadowlands_legacy.balance_of_all_things    = legacy( 7107 );
+  // BracketSim legacy compatibility: Unity (bonus 8121), the 9.2 legendary whose
+  // effect is whichever covenant legendary matches the covenant you are in. A
+  // real Unity item carries 8121 and NOT the legendary's own bonus id, so a
+  // power keyed only off its own id misses every Unity wearer. Both routes are
+  // checked here, and Unity opens only the one door its covenant names.
+  auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
+  {
+    return legacy( bonus_id ) ||
+           ( legacy( 8121 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
+  };
+
+  shadowlands_legacy.celestial_spirits        = legacy_unity( 7571, "night_fae" );
+  shadowlands_legacy.circle_of_life_and_death = legacy( 7085 );
+  shadowlands_legacy.draught_of_deep_focus    = legacy( 7086 );
+  shadowlands_legacy.eye_of_fearful_symmetry  = legacy( 7090 );
+  shadowlands_legacy.frenzyband               = legacy( 7109 );
+  shadowlands_legacy.legacy_of_the_sleeper    = legacy( 7095 );
+  shadowlands_legacy.luffa_infused_embrace    = legacy( 7092 );
+  shadowlands_legacy.lycaras_fleeting_glimpse = legacy( 7110 );
+  shadowlands_legacy.oath_of_the_elder_druid  = legacy( 7084 );
+  shadowlands_legacy.oneths_clear_vision      = legacy( 7087 );
+  shadowlands_legacy.primordial_arcanic_pulsar = legacy( 7088 );
+  shadowlands_legacy.the_natural_orders_will  = legacy( 7093 );
+  shadowlands_legacy.timeworn_dreambinder     = legacy( 7108 );
+  shadowlands_legacy.ursocs_fury_remembered   = legacy( 7094 );
+  shadowlands_legacy.unbridled_swarm          = legacy_unity( 7472, "necrolord" );
+  shadowlands_legacy.kindred_affinity         = legacy_unity( 7477, "kyrian" );
+  shadowlands_legacy.sinful_hysteria          = legacy_unity( 7474, "venthyr" );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  auto covenant = [ this ]( std::string_view name, unsigned id ) {
+    return ( shadowlands_legacy.legacy_shadowlands_enabled &&
+             util::str_compare_ci( legacy_covenant.chosen, name ) )
+               ? find_spell( id )
+               : spell_data_t::not_found();
+  };
+
+  legacy_covenant.ravenous_frenzy       = covenant( "venthyr", 323546 );
+  legacy_covenant.adaptive_swarm        = covenant( "necrolord", 325727 );
+  legacy_covenant.adaptive_swarm_damage =
+      legacy_covenant.adaptive_swarm->ok() ? find_spell( 325733 ) : spell_data_t::not_found();
+  legacy_covenant.convoke_the_spirits   = covenant( "night_fae", 323764 );
+  legacy_covenant.kindred_spirits       = covenant( "kyrian", 326434 );
+
+  // Turn the id:rank option string into ranks. Without this the option is
+  // stored and then silently ignored: has() returns false for everything and
+  // every conduit on the class quietly does nothing.
+  legacy_conduits.parse();
+
+  // BracketSim legacy compatibility: report the covenant abilities this
+  // actor can cast, so player_t::init_actions() can put them into the
+  // rotation. SimulationCraft's own action lists never press them.
+  if ( legacy_covenant.adaptive_swarm->ok() )
+    legacy_apl_actions.emplace_back( "adaptive_swarm" );
+  if ( legacy_covenant.kindred_spirits->ok() )
+    legacy_apl_actions.emplace_back( "kindred_spirits" );
+  if ( legacy_covenant.ravenous_frenzy->ok() )
+    legacy_apl_actions.emplace_back( "ravenous_frenzy" );
+  // Kindred Spirits (326434) is deliberately absent: every one of its effects
+  // targets the bonded ally, so a solo sim has nothing to model.
+  legacy_azerite.blood_mist          = find_azerite_spell( "Blood Mist" );
+  legacy_azerite.gushing_lacerations = find_azerite_spell( "Gushing Lacerations" );
+  legacy_azerite.iron_jaws           = find_azerite_spell( "Iron Jaws" );
+  legacy_azerite.primordial_rage     = find_azerite_spell( "Primordial Rage" );
+  legacy_azerite.raking_ferocity     = find_azerite_spell( "Raking Ferocity" );
+  legacy_azerite.shredding_fury      = find_azerite_spell( "Shredding Fury" );
+  legacy_azerite.wild_fleshrending   = find_azerite_spell( "Wild Fleshrending" );
+  legacy_azerite.jungle_fury         = find_azerite_spell( "Jungle Fury" );
+  legacy_azerite.untamed_ferocity    = find_azerite_spell( "Untamed Ferocity" );
+  legacy_azerite.craggy_bark         = find_azerite_spell( "Craggy Bark" );
+  legacy_azerite.gory_regeneration   = find_azerite_spell( "Gory Regeneration" );
+  legacy_azerite.guardians_wrath     = find_azerite_spell( "Guardian's Wrath" );
+  legacy_azerite.layered_mane        = find_azerite_spell( "Layered Mane" );
+  legacy_azerite.masterful_instincts = find_azerite_spell( "Masterful Instincts" );
+  legacy_azerite.twisted_claws       = find_azerite_spell( "Twisted Claws" );
+  legacy_azerite.burst_of_savagery   = find_azerite_spell( "Burst of Savagery" );
+
   // Talents ================================================================
 
   auto CT = [ this ]( std::string_view n, auto... s ) {
@@ -10377,6 +11366,18 @@ void druid_t::init_spells()
   // Multi-Spec
   sim->print_debug( "Initializing multi-spec talents..." );
   talent.convoke_the_spirits            = ST( "Convoke the Spirits" );
+
+  // BracketSim legacy compatibility: Convoke the Spirits is a modern talent as
+  // well as the Night Fae ability, and legacy_convoke_spell() already resolves
+  // to whichever the druid has. It is injected ONLY when the covenant is the
+  // sole source: with the talent taken the class's own action list presses it,
+  // and a second line would double-cast it.
+  //
+  // This sits AFTER the talent is looked up on purpose. Read from the covenant
+  // block above, the talent is still empty, so the test always passed and the
+  // line was never added - a silent no-op rather than a crash.
+  if ( !talent.convoke_the_spirits.ok() && legacy_covenant.convoke_the_spirits->ok() )
+    legacy_apl_actions.emplace_back( "convoke_the_spirits" );
   talent.survival_instincts             = ST( "Survival Instincts" );
 
   // Balance
@@ -10960,6 +11961,66 @@ void druid_t::create_buffs()
 
   using namespace buffs;
 
+  buff.jungle_fury = make_buff<stat_buff_t>( this, "jungle_fury", find_spell( 274425 ) )
+    ->add_stat( STAT_CRIT_RATING, legacy_azerite.jungle_fury.value( 1 ) )
+    ->set_chance( legacy_azerite.jungle_fury.enabled() ? 1.0 : 0.0 );
+  buff.iron_jaws = make_buff( this, "iron_jaws", find_spell( 276026 ) );
+  buff.raking_ferocity = make_buff( this, "raking_ferocity", find_spell( 273340 ) );
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+  buff.legacy_apex_predators_craving =
+      make_buff( this, "legacy_apex_predators_craving", find_spell( 391882 ) )
+          ->set_chance( shadowlands_legacy.apex_predators_craving ? 1.0 : 0.0 );
+  buff.legacy_balance_of_all_things_arcane =
+      make_buff( this, "legacy_balance_of_all_things_arcane", find_spell( 339946 ) )
+          ->set_default_value_from_effect( 1, 1.0 )
+          ->set_reverse( true )
+          ->set_chance( shadowlands_legacy.balance_of_all_things ? 1.0 : 0.0 );
+  buff.legacy_balance_of_all_things_nature =
+      make_buff( this, "legacy_balance_of_all_things_nature", find_spell( 339943 ) )
+          ->set_default_value_from_effect( 1, 1.0 )
+          ->set_reverse( true )
+          ->set_chance( shadowlands_legacy.balance_of_all_things ? 1.0 : 0.0 );
+  buff.legacy_eye_of_fearful_symmetry =
+      make_buff( this, "legacy_eye_of_fearful_symmetry", find_spell( 339142 ) )
+          ->set_chance( shadowlands_legacy.eye_of_fearful_symmetry ? 1.0 : 0.0 );
+  buff.legacy_oneths_clear_vision =
+      make_buff( this, "legacy_oneths_clear_vision", find_spell( 339797 ) )
+          ->set_chance( shadowlands_legacy.oneths_clear_vision ? 1.0 : 0.0 );
+  buff.legacy_oneths_perception =
+      make_buff( this, "legacy_oneths_perception", find_spell( 339800 ) )
+          ->set_chance( shadowlands_legacy.oneths_clear_vision ? 1.0 : 0.0 );
+  buff.legacy_primordial_arcanic_pulsar =
+      make_buff( this, "legacy_primordial_arcanic_pulsar", find_spell( 338825 ) )
+          ->set_chance( shadowlands_legacy.primordial_arcanic_pulsar ? 1.0 : 0.0 );
+  buff.legacy_timeworn_dreambinder =
+      make_buff( this, "legacy_timeworn_dreambinder", find_spell( 340049 ) )
+          ->set_default_value_from_effect( 2 )
+          ->set_refresh_behavior( buff_refresh_behavior::DURATION )
+          ->set_chance( shadowlands_legacy.timeworn_dreambinder ? 1.0 : 0.0 );
+
+  buff.dawning_sun = make_buff( this, "dawning_sun",
+      legacy_azerite.dawning_sun.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() );
+  buff.arcanic_pulsar = make_buff( this, "arcanic_pulsar",
+      legacy_azerite.arcanic_pulsar.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() );
+  buff.legacy_twisted_claws = make_buff<stat_buff_t>( this, "legacy_twisted_claws", find_spell( 275909 ) )
+    ->add_stat( STAT_AGILITY, legacy_azerite.twisted_claws.value( 1 ) )
+    ->set_chance( legacy_azerite.twisted_claws.ok() ? find_spell( 275908 )->proc_chance() : 0.0 );
+  buff.legacy_burst_of_savagery = make_buff<stat_buff_t>( this, "legacy_burst_of_savagery", find_spell( 289315 ) )
+    ->add_stat( STAT_MASTERY_RATING, legacy_azerite.burst_of_savagery.value( 1 ) );
+  buff.legacy_guardians_wrath = make_buff( this, "legacy_guardians_wrath", find_spell( 279541 ) );
+  buff.legacy_masterful_instincts =
+      make_buff<stat_buff_t>( this, "legacy_masterful_instincts", find_spell( 273349 ) )
+          ->add_stat( STAT_MASTERY_RATING, legacy_azerite.masterful_instincts.value( 1 ) )
+          ->add_stat( STAT_ARMOR, legacy_azerite.masterful_instincts.value( 2 ) );
+  buff.legacy_lively_spirit = make_buff<stat_buff_t>( this, "legacy_lively_spirit", find_spell( 279648 ) )
+    ->add_stat( STAT_INTELLECT, legacy_azerite.lively_spirit.value() );
+  // Legacy Azerite: Layered Mane grants flat Agility while Ironfur is up, and a
+  // proc tracker so the extra applications are visible in the report.
+  buff.legacy_layered_mane = make_buff<stat_buff_t>( this, "legacy_layered_mane", find_spell( 279552 ) )
+    ->add_stat( STAT_AGILITY, legacy_azerite.layered_mane.value( 1 ) )
+    ->set_duration( find_spell( 192081 )->duration() )
+    ->set_chance( legacy_azerite.layered_mane.ok() ? 1.0 : 0.0 );
+
   // Baseline
   buff.barkskin = make_buff<druid_buff_t>( this, "barkskin", find_class_spell( "Barkskin" ) )
     ->set_cooldown( 0_ms )
@@ -11103,6 +12164,88 @@ void druid_t::create_buffs()
 
   buff.ca_inc = talent.incarnation_moonkin.ok() ? buff.incarnation_moonkin : buff.celestial_alignment;
 
+  // BracketSim legacy compatibility: Ravenous Frenzy. Every stack is worth the
+  // damage and haste in the covenant aura's own effects; the stacks themselves
+  // come from its Cast Successful proc flags, applied in druid_action_t.
+  buff.legacy_ravenous_frenzy =
+      make_fallback( legacy_covenant.ravenous_frenzy->ok(), this, "ravenous_frenzy",
+                     legacy_covenant.ravenous_frenzy );
+
+  // BracketSim legacy compatibility: Kindred Empowerment. Ten seconds, measured
+  // three times in a live log at 9.924, 9.938 and 9.969 - spell 338142 is not
+  // in current data, so this is the log's number rather than a read one.
+  //
+  // The value is the share of a BOND PARTNER's damage the druid receives, which
+  // a single-actor sim cannot observe. It defaults to zero, which reproduces
+  // the measured solo log exactly.
+  // BracketSim legacy compatibility: Kindred Affinity (runeforge 7477). The
+  // stat it grants is the BONDED PARTNER'S, so it is named by an option -
+  // there is no partner in a solo sim to read one from. Spell 357564 carries
+  // all four: mastery as a rating in effect 2, and haste, crit and versatility
+  // as percent auras in effects 3 to 5.
+  {
+    auto ka = make_buff<stat_buff_t>( this, "legacy_kindred_affinity",
+                                      find_spell( 357564 ) );
+    const std::string& bonded = options.legacy_kindred_affinity_covenant;
+    auto is = [ &bonded ]( std::string_view a, std::string_view b )
+    { return util::str_compare_ci( bonded, a ) || util::str_compare_ci( bonded, b ); };
+
+    // Kyrian is mastery RATING, which stat_buff_t has already parsed out of
+    // effect 2 - so that case is left exactly as constructed. The other three
+    // are percent auras and stat_buff_t does not pick those up.
+    if ( !is( "kyrian", "mastery" ) )
+    {
+      ka->stats.clear();
+      if ( is( "necrolord", "versatility" ) )
+      {
+        ka->set_default_value_from_effect_type( A_MOD_VERSATILITY_PCT, P_MAX, 0.01 );
+        ka->set_pct_buff_type( STAT_PCT_BUFF_VERSATILITY );
+      }
+      else if ( is( "night_fae", "haste" ) )
+      {
+        ka->set_default_value_from_effect_type( A_HASTE_ALL, P_MAX, 0.01 );
+        ka->set_pct_buff_type( STAT_PCT_BUFF_HASTE );
+      }
+      else if ( is( "venthyr", "crit" ) )
+      {
+        ka->set_default_value_from_effect_type( A_MOD_ALL_CRIT_CHANCE, P_MAX, 0.01 );
+        ka->set_pct_buff_type( STAT_PCT_BUFF_CRIT );
+      }
+      else
+      {
+        sim->error( "druid.legacy_kindred_affinity_covenant must be one of "
+                    "kyrian, necrolord, night_fae, venthyr, or the stat they "
+                    "stand for: mastery, versatility, haste, crit" );
+      }
+    }
+    buff.legacy_kindred_affinity = ka;
+  }
+
+  buff.legacy_kindred_empowerment =
+      make_buff( this, "kindred_empowerment" )
+          ->set_duration( 10_s )
+          ->set_default_value( 0.0 )
+          ->set_chance( legacy_covenant.kindred_spirits->ok() ? 1.0 : 0.0 );
+
+  // BracketSim legacy compatibility: Sinful Hysteria. When the frenzy ends the
+  // stacks live on for the 3s in spell 355315, and every stack gained while it
+  // is running adds the time in the runeforge's own effect 1.
+  buff.legacy_sinful_hysteria =
+      make_fallback( shadowlands_legacy.sinful_hysteria, this, "sinful_hysteria",
+                     find_spell( 355315 ) );
+
+  if ( shadowlands_legacy.sinful_hysteria )
+  {
+    buff.legacy_ravenous_frenzy->set_stack_change_callback(
+        [ this ]( buff_t* b, int old_, int new_ ) {
+          if ( old_ && new_ )
+            b->extend_duration( timespan_t::from_seconds(
+                find_spell( 354109 )->effectN( 1 ).base_value() ) );
+          else if ( old_ )
+            buff.legacy_sinful_hysteria->trigger( old_ );
+        } );
+  }
+
   buff.denizen_of_the_dream =
     make_fallback( talent.denizen_of_the_dream.ok(), this, "denizen_of_the_dream", find_spell( 394076 ) )
       ->set_stack_behavior( buff_stack_behavior::ASYNCHRONOUS )
@@ -11184,7 +12327,7 @@ void druid_t::create_buffs()
       ->set_default_value( find_spell( 343647 )->effectN( 1 ).percent() );
 
   // lookup via spell_id for convoke
-  buff.starfall = make_fallback( spec.starfall->ok() || ( talent.convoke_the_spirits.ok() && talent.moonkin_form.ok() ),
+  buff.starfall = make_fallback( spec.starfall->ok() || ( legacy_convoke_enabled() && talent.moonkin_form.ok() ),
     this, "starfall", find_spell( 191034 ) )
       ->set_stack_behavior( buff_stack_behavior::ASYNCHRONOUS )
       ->set_freeze_stacks( true )
@@ -11315,13 +12458,37 @@ void druid_t::create_buffs()
       ->set_initial_stack_to_max_stack()
       ->set_consume_all_stacks( false );
 
+  // BracketSim legacy compatibility: the Sudden Ambush CONDUIT (267) fills the
+  // same buff the modern talent of the same name does, so the buff has to
+  // exist for a character who socketed the conduit without taking the talent.
+  // Buff spell 1244483 is named directly in that case; with the talent taken
+  // nothing about this line changes.
+  //
+  // The talent's chance stays on the buff and the conduit rolls separately in
+  // consume_resource(), which is what Shadowlands did - two independent rolls,
+  // not one summed chance, because those are not the same probability.
   buff.sudden_ambush =
-    make_fallback( talent.sudden_ambush.ok(), this, "sudden_ambush", find_trigger( talent.sudden_ambush ).trigger() )
-      ->set_chance( talent.sudden_ambush->effectN( 1 ).percent() )
-      ->set_trigger_spell( talent.sudden_ambush );
+    make_fallback( talent.sudden_ambush.ok() || legacy_conduits.has( 267 ), this, "sudden_ambush",
+                   talent.sudden_ambush.ok() ? find_trigger( talent.sudden_ambush ).trigger()
+                                             : find_spell( 1244483 ) )
+      ->set_chance( talent.sudden_ambush->effectN( 1 ).percent() );
+
+  if ( talent.sudden_ambush.ok() )
+    buff.sudden_ambush->set_trigger_spell( talent.sudden_ambush );
 
   buff.tigers_fury = make_fallback( talent.tigers_fury.ok(), this, "tigers_fury", talent.tigers_fury )
     ->set_cooldown( 0_ms );
+
+  // BracketSim legacy compatibility: Savage Combatant (conduit 270). Buff
+  // spell 340613 is absent from Midnight, so its 15 second duration and 3
+  // stack cap come from the archived 9.2.7 client data - the same source
+  // legacy_conduits.hpp already carries its rank table from.
+  buff.legacy_savage_combatant =
+    make_buff( this, "legacy_savage_combatant", find_spell( 340613 ) )
+      ->set_duration( timespan_t::from_seconds( 15.0 ) )
+      ->set_max_stack( 3 )
+      ->set_default_value( legacy_conduits.percent( 270 ) )
+      ->set_chance( legacy_conduits.has( 270 ) ? 1.0 : 0.0 );
 
   buff.tigers_tenacity = make_fallback( talent.tigers_tenacity.ok(),
     this, "tigers_tenacity", find_trigger( talent.tigers_tenacity ).trigger() )
@@ -11360,6 +12527,9 @@ void druid_t::create_buffs()
     ->set_cooldown( 0_ms )
     ->set_refresh_behavior( buff_refresh_behavior::EXTEND );
 
+  // NOTE: Unchecked Aggression is applied to BOTH bear cooldowns further down,
+  // once incarnation_bear exists - see the block after buff.b_inc_bear.
+
   buff.incarnation_bear =
     make_fallback( talent.incarnation_bear.ok(), this, "incarnation_guardian_of_ursoc", talent.incarnation_bear )
       ->set_cooldown( 0_ms )
@@ -11374,6 +12544,23 @@ void druid_t::create_buffs()
         } );
 
   buff.b_inc_bear = talent.incarnation_bear.ok() ? buff.incarnation_bear : buff.berserk_bear;
+
+  // BracketSim legacy compatibility: the conduit Unchecked Aggression (269)
+  // grants Haste for as long as Berserk is up in Bear Form. Shadowlands built
+  // Berserk and Incarnation from one buff class and applied the conduit inside
+  // it, so BOTH forms of the cooldown carried it; Midnight builds them
+  // separately and a Guardian with spec_talents=all takes Incarnation, so
+  // applying it to Berserk alone leaves it dead for exactly the character the
+  // harness measures. b_inc_bear is whichever one this druid actually has.
+  //
+  // Midnight's Berserk carries no haste effect of its own to read, so unlike
+  // Shadowlands - which read A_HASTE_ALL off the buff and then overwrote its
+  // value - the value here IS the conduit.
+  if ( legacy_conduits.has( 269 ) )
+  {
+    buff.b_inc_bear->set_default_value( legacy_conduits.percent( 269 ) )
+                   ->set_pct_buff_type( STAT_PCT_BUFF_HASTE );
+  }
   if ( sets->has_set_bonus( DRUID_GUARDIAN, MID2, B4 ) )
   {
     buff.b_inc_bear->set_expire_callback( [ this ]( auto, auto, auto ) {
@@ -12033,6 +13220,31 @@ void druid_t::create_actions()
   if ( talent.star_cascade.ok() )
     active.star_cascade = get_secondary_action<starsurge_cascade_t>( "starsurge_cascade" );
 
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+  if ( legacy_azerite.streaking_stars.ok() )
+  {
+    auto ss = new druid_spell_t( "legacy_streaking_star", this, find_spell( 272873 ) );
+    ss->background = ss->proc = true;
+    ss->base_dd_min = ss->base_dd_max = legacy_azerite.streaking_stars.value( 1 );
+    // Battle for Azeroth measured lower damage under Incarnation than the spell
+    // data described.
+    if ( talent.incarnation_moonkin.ok() )
+    {
+      ss->base_dd_min *= 0.6667;
+      ss->base_dd_max *= 0.6667;
+    }
+    active.legacy_streaking_stars = ss;
+  }
+
+  if ( legacy_azerite.lunar_shrapnel.ok() )
+  {
+    auto ls = new druid_spell_t( "legacy_lunar_shrapnel", this, find_spell( 279641 ) );
+    ls->background = ls->proc = true;
+    ls->aoe = -1;
+    ls->base_dd_min = ls->base_dd_max = legacy_azerite.lunar_shrapnel.value( 1 );
+    active.legacy_lunar_shrapnel = ls;
+  }
+
   if ( talent.sylvan_beckoning.ok() )
   {
     active.sylvan_beckoning = new sylvan_beckoning_t( this );
@@ -12172,6 +13384,18 @@ void druid_t::init_scaling()
 
   scaling->disable( STAT_STRENGTH );
 
+  // BracketSim (26 Sep 2026): Balance weighs Intellect, not Agility. Armory and addon exports write
+  // role=attack for every druid, and player_t::init_scaling reads the role - so a Balance profile measured
+  // Agility/AP/weapon DPS scale factors and NO Intellect (+100 Int = +35% DPS at 30). DPS is unchanged
+  // (role only sets which stats are scaled); only the stat weights the builder prunes and ranks with move.
+  if ( specialization() == DRUID_BALANCE )
+  {
+    scaling->disable( STAT_AGILITY );
+    scaling->disable( STAT_ATTACK_POWER );
+    scaling->disable( STAT_WEAPON_DPS );
+    scaling->enable( STAT_INTELLECT );
+    scaling->enable( STAT_SPELL_POWER );
+  }
   // workaround for resto dps scaling
   if ( specialization() == DRUID_RESTORATION )
   {
@@ -12407,7 +13631,7 @@ void druid_t::init_rng()
 {
   player_t::init_rng();
 
-  if ( talent.convoke_the_spirits.ok() )
+  if ( legacy_convoke_enabled() )
   {
     bool guidance = talent.elunes_guidance.ok() || talent.ashamanes_guidance.ok() ||
                     talent.ursocs_guidance.ok() || talent.cenarius_guidance.ok();
@@ -13041,6 +14265,45 @@ parsed_assisted_combat_rule_t druid_t::parse_assisted_combat_rule( const assiste
 }
 
 // druid_t::reset ===========================================================
+
+// BracketSim legacy compatibility: Vision of Perfection (Heart of Azeroth major
+// essence). The engine procs it and calls this; each spec fires its signature
+// cooldown early, at the fraction of its duration the essence grants.
+void druid_t::vision_of_perfection_proc()
+{
+  auto essence = find_azerite_essence( "Vision of Perfection" );
+  if ( !essence.enabled() )
+    return;
+
+  double mult = essence.spell( 1u )->effectN( 1 ).percent() +
+                essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
+
+  buff_t* window = nullptr;
+  switch ( specialization() )
+  {
+    case DRUID_BALANCE:
+      window = buff.ca_inc;
+      break;
+    case DRUID_FERAL:
+      window = buff.b_inc_cat;
+      break;
+    case DRUID_GUARDIAN:
+      window = buff.b_inc_bear;
+      break;
+    default:
+      break;
+  }
+
+  if ( !window || mult <= 0 )
+    return;
+
+  timespan_t dur = window->buff_duration() * mult;
+  if ( window->check() )
+    window->extend_duration( dur );
+  else
+    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+}
+
 void druid_t::reset()
 {
   player_t::reset();
@@ -13048,6 +14311,7 @@ void druid_t::reset()
   // Reset druid_t variables to their original state.
   form = CASTER_FORM;
   base_gcd = 1.5_s;
+  legacy_previous_streaking_star = 0;
 
   // Restore main hand attack / weapon to normal state
   main_hand_attack = caster_melee_attack;
@@ -13203,6 +14467,12 @@ void druid_t::combat_begin()
 {
   player_t::combat_begin();
 
+  // BracketSim legacy compatibility: Kindred Affinity is a permanent aura
+  // while bonded, so it is incremented rather than triggered - it has no proc
+  // chance and trigger() would return false without ever applying it.
+  if ( shadowlands_legacy.kindred_affinity && buff.legacy_kindred_affinity )
+    buff.legacy_kindred_affinity->increment();
+
   if ( specialization() == DRUID_BALANCE )
   {
     if ( !options.raid_combat )
@@ -13302,6 +14572,48 @@ void druid_t::invalidate_cache( cache_e c )
 // Composite combat stat override functions =================================
 
 // Defense ==================================================================
+// BracketSim legacy compatibility: the conduit Endless Thirst (280) grants
+// crit per stack of Ravenous Frenzy, the Venthyr ability. Shadowlands divided
+// the rank value by ten because the table holds the value for a FULL stack bar
+// rather than per stack; both halves are copied exactly as they stood, and both
+// crit paths are covered because a druid's damage runs through each of them.
+double druid_t::legacy_endless_thirst_crit() const
+{
+  if ( !legacy_conduits.has( 280 ) || !buff.legacy_ravenous_frenzy )
+    return 0.0;
+
+  return buff.legacy_ravenous_frenzy->check() * legacy_conduits.percent( 280 ) / 10.0;
+}
+
+/*
+ * BracketSim legacy compatibility: the conduit Endless Thirst (280).
+ *
+ * THESE MUST CALL parse_player_effects_t, NOT player_t.
+ *
+ * `parse_player_effects_t` overrides both of these to apply every crit effect
+ * `parse_effects` collected - talents, buffs, set bonuses. Jumping straight to
+ * player_t skips that list entirely, so a druid keeps its crit RATING and loses
+ * every modifier the framework was told about.
+ *
+ * Found on 18 September 2026 by sweeping for the same fault in
+ * `warlock_t::composite_player_pet_damage_multiplier`, which had been deleting
+ * the whole of Demonology's mastery since 17 September. That one was worth
+ * +4.6% DPS and moved the mastery stat weight from -0.11 to 5.70. the author:
+ * *"makes me question what other overrides we did have destroyed a spec's stat
+ * weight or something worse without realising it!"* - these two were the
+ * answer, and `test-parsed-effects-bypass.mjs` now fails the build if a third
+ * appears.
+ */
+double druid_t::composite_melee_crit_chance() const
+{
+  return parse_player_effects_t::composite_melee_crit_chance() + legacy_endless_thirst_crit();
+}
+
+double druid_t::composite_spell_crit_chance() const
+{
+  return parse_player_effects_t::composite_spell_crit_chance() + legacy_endless_thirst_crit();
+}
+
 double druid_t::composite_armor() const
 {
   double a = player_t::composite_armor();
@@ -13634,6 +14946,16 @@ void druid_t::create_options()
   player_t::create_options();
 
   // General
+  // BracketSim: druid had no enable option, so a profile setting
+  // druid.legacy_shadowlands_enabled got a "Trivial: Unknown option"
+  // warning and nothing else. The flag defaults to true so nothing was
+  // broken, but it could not be turned OFF. Shaman had the same gap.
+  add_option( opt_bool( "druid.legacy_shadowlands_enabled",
+                        shadowlands_legacy.legacy_shadowlands_enabled ) );
+  add_option( opt_string( "druid.legacy_covenant", legacy_covenant.chosen ) );
+  add_option( opt_string( "druid.legacy_kindred_affinity_covenant",
+                          options.legacy_kindred_affinity_covenant ) );
+  add_option( opt_string( "druid.legacy_conduits", legacy_conduits.option ) );
   add_option( opt_bool( "druid.no_cds", options.no_cds ) );
   add_option( opt_bool( "druid.raid_combat", options.raid_combat ) );
 
@@ -13835,6 +15157,7 @@ druid_td_t::druid_td_t( player_t& target, druid_t& source )
     dots.rake                  = target.get_dot( "rake", &source );
     dots.rip                   = target.get_dot( "rip", &source );
     dots.thrash                = target.get_dot( "thrash", &source );
+    dots.adaptive_swarm        = target.get_dot( "adaptive_swarm_damage", &source );
 
     debuff.atmospheric_exposure = make_debuff( source.talent.atmospheric_exposure.ok(),
       *this, "atmospheric_exposure", source.spec.atmospheric_exposure )
@@ -14220,6 +15543,22 @@ void druid_t::parse_action_effects( action_t* action )
 
   _a->parse_effects( buff.elunes_challenge );
 
+  // BracketSim legacy compatibility: Conflux of Elements (conduit 279) is NOT
+  // ported, and the attempt is recorded here so it is not retried blindly.
+  //
+  // Convoke's spell (323764) carries exactly the right shape: effects 3 and 4
+  // are a direct and a periodic damage modifier whose base values are zero,
+  // which is the slot a ConduitRank value fills. Feeding the rank value in
+  // through parse_effects compiles, runs, and produces a number that is far
+  // too big: with the cast count identical at 22.8 either way, Convoke's Wrath
+  // went from 9,669 to 22,377 at rank 1 and 35,086 at rank 11. Those two points
+  // fit 1 + 8.77 x value, not the 1 + value the conduit describes, and the
+  // per-cast spread blows open too (10,955 to 32,816 at rank 1 against a flat
+  // 9,526 to 10,097 without it), so the multiplier is landing more than once.
+  //
+  // The cause was not found, so nothing is applied. A conduit that multiplies
+  // Convoke by three and a half is worse than one that is missing.
+
   _a->parse_effects( buff.incarnation_moonkin, effect_mask_t( false ).enable( 1, 2, 3, 4 ) );
   // additional effects if astral_insight is talented
   if ( talent.astral_insight.ok() )
@@ -14305,6 +15644,10 @@ void druid_t::parse_action_target_effects( action_t* action )
                             talent.sabertooth->effectN( 2 ).percent() );
   _a->parse_target_effects( d_fn( &druid_td_t::debuffs_t::stellar_amplification ), spec.stellar_amplification );
   _a->parse_target_effects( d_fn( &druid_td_t::dots_t::thrash ), spec.thrash_bleed );
+  // BracketSim legacy compatibility: Adaptive Swarm's own effect 2 raises the
+  // damage its target takes from the druid's spells while the swarm is on it.
+  _a->parse_target_effects( d_fn( &druid_td_t::dots_t::adaptive_swarm ),
+                            legacy_covenant.adaptive_swarm_damage );
 
   if ( talent.exacerbating_wounds.ok() )
     _a->parse_target_effects( d_fn( &druid_td_t::dots_t::dreadful_wound ), spec.dreadful_wound );
@@ -14327,6 +15670,12 @@ void druid_t::parse_player_effects()
     parse_effects( buff.bear_form, effect_mask_t( false ).enable( 13, 14 ) );
     parse_effects( buff.moonkin_form, effect_mask_t( false ).enable( 12, 13 ) );
   }
+
+  // BracketSim legacy compatibility: only the self effects of Ravenous Frenzy.
+  // Effects 6 and 7 buff the rest of the party, so they are masked out.
+  parse_effects( buff.legacy_ravenous_frenzy, effect_mask_t( false ).enable( 1, 2, 4 ) );
+  // Sinful Hysteria's echo carries the same three self effects.
+  parse_effects( buff.legacy_sinful_hysteria, effect_mask_t( false ).enable( 1, 2, 4 ) );
 
   parse_effects( buff.barkskin );
   parse_effects( buff.celestial_alignment );

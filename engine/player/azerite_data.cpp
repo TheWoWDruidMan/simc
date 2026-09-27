@@ -1271,6 +1271,14 @@ std::unique_ptr<expr_t> azerite_essence_state_t::create_expression( util::span<c
   return {};
 }
 
+unsigned azerite_essence_state_t::major_essence_id() const
+{
+  auto it = range::find_if( m_state, []( const slot_state_t& slot ) {
+    return slot.enabled() && slot.type() == essence_type::MAJOR;
+  } );
+  return it != m_state.end() ? it->id() : 0u;
+}
+
 std::vector<unsigned> azerite_essence_state_t::enabled_essences() const
 {
   std::vector<unsigned> spells;
@@ -4801,6 +4809,20 @@ void ripple_in_space(special_effect_t& effect)
   timespan_t period = 1_s;
   buff_t* rs = buff_t::find( effect.player, "reality_shift" );
 
+  // BracketSim: the Reality Shift buff is only ever CREATED by the major
+  // action's constructor, so an actor carrying Ripple in Space as a MINOR has
+  // no buff here and rs is null - and the repeating event below dereferences
+  // it for rs->sim and rs->rng(). That is an access violation the moment
+  // combat starts, and it is what an essence survey hit first: essence 15 was
+  // the only one of 22 that crashed the sim outright.
+  //
+  // Nothing is invented by bailing out: with no buff there is nothing for the
+  // event to trigger, so the minor simply does nothing rather than killing
+  // the run. Building the buff here instead would need the essence's own
+  // item and rank, which this special effect does not carry.
+  if ( !rs )
+    return;
+
   effect.player->register_combat_begin( [ rs, period ] ( player_t* )
   {
     make_repeating_event( rs->sim, period, [ rs ]
@@ -5897,6 +5919,39 @@ void touch_of_the_everlasting( special_effect_t& effect )
 }
 
 } // Namespace azerite essences ends
+
+// BracketSim legacy compatibility.
+//
+// Eleven essences put a BUTTON in the major slot, and this is the only place
+// that says which button belongs to which essence. Every name here is one
+// create_action() below answers to, and every id is the essence that owns it -
+// anima_of_death is Anima of Life and Death (7), not Nullification Dynamo. An
+// essence absent from this table has a passive major and nothing to press.
+//
+// Without it a major essence was equipped, modelled, and then never cast,
+// because azerite_data.cpp pushes nothing into legacy_apl_actions the way the
+// class modules do for covenant abilities. The app's Top Gear ranking over the
+// major slot then read as though every pressable major were worthless and only
+// the passive ones did anything, which is exactly the plausible-but-wrong shape
+// this port exists to avoid.
+std::string_view major_action_name( unsigned essence_id )
+{
+  switch ( essence_id )
+  {
+    case 4:  return "worldvein_resonance";
+    case 5:  return "focused_azerite_beam";
+    case 6:  return "purifying_blast";
+    case 7:  return "anima_of_death";
+    case 12: return "concentrated_flame";
+    case 14: return "guardian_of_azeroth";
+    case 15: return "ripple_in_space";
+    case 23: return "blood_of_the_enemy";
+    case 27: return "memory_of_lucid_dreams";
+    case 28: return "the_unbound_force";
+    case 35: return "reaping_flames";
+    default: return {};
+  }
+}
 
 action_t* create_action( player_t* player, util::string_view name, util::string_view options )
 {

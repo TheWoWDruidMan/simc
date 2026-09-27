@@ -398,8 +398,84 @@ int sim_t::main( const std::vector<std::string>& args )
 // MAIN
 // ==========================================================================
 
+#if defined( SC_BRACKETSIM_CRASH_TRACE ) && defined( _WIN32 )
+/*
+ * BRACKETSIM DIAGNOSTIC ONLY - not part of SimulationCraft.
+ *
+ * Built solely into `build-dbg` (RelWithDebInfo with
+ * -DSC_BRACKETSIM_CRASH_TRACE=1). BracketSim has one reproducible segfault - an
+ * Unholy death knight whose talents include Scourge Strike, identical at levels
+ * 30, 60 and 80 - and no debugger is installed on this machine, so the fault
+ * address was all that had ever been available.
+ *
+ * DbgHelp ships with Windows, so a handler can symbolise the stack itself from
+ * the PDB this build already writes. It prints and exits; it changes no
+ * simulation behaviour, and it must never be enabled in the build the app uses.
+ */
+#include <windows.h>
+#include <dbghelp.h>
+#pragma comment( lib, "dbghelp.lib" )
+
+static LONG WINAPI bracketsim_crash_trace( EXCEPTION_POINTERS* ep )
+{
+  const DWORD code = ep->ExceptionRecord->ExceptionCode;
+  if ( code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION &&
+       code != EXCEPTION_STACK_OVERFLOW )
+    return EXCEPTION_CONTINUE_SEARCH;
+
+  HANDLE proc = GetCurrentProcess();
+  SymSetOptions( SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS );
+  SymInitialize( proc, nullptr, TRUE );
+
+  fprintf( stderr, "\n==== BracketSim crash trace ====\n" );
+  fprintf( stderr, "exception 0x%08lx at %p\n", (unsigned long)code,
+           ep->ExceptionRecord->ExceptionAddress );
+  if ( code == EXCEPTION_ACCESS_VIOLATION )
+  {
+    fprintf( stderr, "%s address %p\n",
+             ep->ExceptionRecord->ExceptionInformation[ 0 ] ? "writing" : "reading",
+             (void*)ep->ExceptionRecord->ExceptionInformation[ 1 ] );
+  }
+
+  CONTEXT ctx = *ep->ContextRecord;
+  STACKFRAME64 frame = {};
+  frame.AddrPC.Offset = ctx.Rip;     frame.AddrPC.Mode = AddrModeFlat;
+  frame.AddrFrame.Offset = ctx.Rbp;  frame.AddrFrame.Mode = AddrModeFlat;
+  frame.AddrStack.Offset = ctx.Rsp;  frame.AddrStack.Mode = AddrModeFlat;
+
+  char buffer[ sizeof( SYMBOL_INFO ) + 512 ];
+  SYMBOL_INFO* sym = reinterpret_cast<SYMBOL_INFO*>( buffer );
+  sym->SizeOfStruct = sizeof( SYMBOL_INFO );
+  sym->MaxNameLen = 511;
+
+  for ( int i = 0; i < 40; ++i )
+  {
+    if ( !StackWalk64( IMAGE_FILE_MACHINE_AMD64, proc, GetCurrentThread(), &frame, &ctx,
+                       nullptr, SymFunctionTableAccess64, SymGetModuleBase64, nullptr ) )
+      break;
+    if ( !frame.AddrPC.Offset )
+      break;
+    DWORD64 disp = 0;
+    const char* name = SymFromAddr( proc, frame.AddrPC.Offset, &disp, sym ) ? sym->Name : "??";
+    IMAGEHLP_LINE64 line = {};
+    line.SizeOfStruct = sizeof( line );
+    DWORD lineDisp = 0;
+    if ( SymGetLineFromAddr64( proc, frame.AddrPC.Offset, &lineDisp, &line ) )
+      fprintf( stderr, "  %2d  %s   (%s:%lu)\n", i, name, line.FileName, line.LineNumber );
+    else
+      fprintf( stderr, "  %2d  %s\n", i, name );
+  }
+  fprintf( stderr, "==== end trace ====\n" );
+  fflush( stderr );
+  return EXCEPTION_EXECUTE_HANDLER;
+}
+#endif
+
 int main( int argc, char** argv )
 {
+#if defined( SC_BRACKETSIM_CRASH_TRACE ) && defined( _WIN32 )
+  SetUnhandledExceptionFilter( bracketsim_crash_trace );
+#endif
   std::locale::global( std::locale( "C" ) );
 
   sim_t sim;

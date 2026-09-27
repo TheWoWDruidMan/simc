@@ -54,6 +54,12 @@ void fury( player_t* p )
   default_->add_action( "run_action_list,name=slayer_aoe,if=talent.slayers_dominance&active_enemies>1" );
   default_->add_action( "run_action_list,name=thane,if=talent.lightning_strikes&active_enemies=1" );
   default_->add_action( "run_action_list,name=thane_aoe,if=talent.lightning_strikes&active_enemies>1" );
+  // BracketSim legacy compatibility: hero talent trees do not exist below
+  // level 71, so on a level 50 or 60 character every condition above is
+  // false and the rotation is never reached. slayer carries the plainest
+  // rotation of the alternatives; its hero-specific lines fail their own
+  // conditions when the tree is absent.
+  default_->add_action( "run_action_list,name=slayer,if=!talent.slayers_dominance&!talent.lightning_strikes" );
 
   slayer->add_action( "recklessness" );
   slayer->add_action( "rampage,if=buff.enrage.remains<gcd" );
@@ -203,6 +209,12 @@ void arms( player_t* p )
   default_->add_action( "run_action_list,name=slayer_aoe,if=talent.slayers_dominance&active_enemies>2" );
   default_->add_action( "run_action_list,name=slayer_execute,target_if=min:target.health.pct,if=talent.slayers_dominance&variable.execute_phase" );
   default_->add_action( "run_action_list,name=slayer_st,if=talent.slayers_dominance" );
+  // BracketSim legacy compatibility: hero talent trees do not exist below
+  // level 71, so on a level 50 or 60 character every condition above is
+  // false and the rotation is never reached. colossus_st carries the plainest
+  // rotation of the alternatives; its hero-specific lines fail their own
+  // conditions when the tree is absent.
+  default_->add_action( "run_action_list,name=colossus_st,if=!talent.demolish&!talent.slayers_dominance" );
 
   colossus_aoe->add_action( "sweeping_strikes" );
   colossus_aoe->add_action( "ravager" );
@@ -372,6 +384,12 @@ void protection( player_t* p )
   default_->add_action( "run_action_list,name=thane_aoe,if=hero_tree.mountain_thane&spell_targets.thunder_clap>=3" );
   default_->add_action( "run_action_list,name=colossus_st,if=talent.demolish" );
   default_->add_action( "run_action_list,name=thane_st,if=talent.lightning_strikes" );
+  // BracketSim legacy compatibility: hero talent trees do not exist below
+  // level 71, so on a level 50 or 60 character every condition above is
+  // false and the rotation is never reached. colossus_st carries the plainest
+  // rotation of the alternatives; its hero-specific lines fail their own
+  // conditions when the tree is absent.
+  default_->add_action( "run_action_list,name=colossus_st,if=!hero_tree.colossus&!hero_tree.mountain_thane&!talent.demolish&!talent.lightning_strikes" );
 
   colossus_aoe->add_action( "thunder_clap,if=buff.ravager.up&!dot.rend_dot.ticking" );
   colossus_aoe->add_action( "revenge,if=buff.revenge.up" );

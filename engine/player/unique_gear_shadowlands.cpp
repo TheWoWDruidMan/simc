@@ -4657,6 +4657,22 @@ void soulwarped_seal_of_wrynn( special_effect_t& effect )
       assert( rppm );
       assert( s->target );
 
+      // BracketSim: those asserts are compiled out of the release build, and the
+      // state really can be null - buff_t::bump calls
+      // player_t::trigger_callbacks( ..., buff_t*, ... ), which passes a null
+      // state (player.cpp), and PF2_ALL_HIT accepts that attempt. Reading
+      // s->target then read address 0x18 and killed the simulation: measured on
+      // a level 60 shadow priest wearing item 189839.
+      //
+      // With no state there is no target whose health can be read, so the rppm
+      // modifier is left exactly as it is and the attempt is passed on
+      // unchanged. Nothing else in this callback needs the state.
+      if ( !s || !s->target )
+      {
+        dbc_proc_callback_t::trigger( data, t, s, type );
+        return;
+      }
+
       double mod = 1;
 
       // Appears to be roughly 2 rppm + hasted above 30% HP
@@ -4882,6 +4898,101 @@ void sephuzs_proclamation( special_effect_t& effect )
   new dbc_proc_callback_t( effect.player, effect );
 }
 
+/*
+ * THE FIRST SIGIL (367241) - and the half of it that was doing nothing.
+ *
+ * Until now this trinket had no handler at all, so the engine fell back to the
+ * generic on-use path: it read effect #1 and granted the versatility. That part
+ * was right, and it is why the trinket still looked sensible in a report.
+ *
+ * The other half never fired. The spell's own description carries four covenant
+ * branches, selected by which signature ability you own:
+ *
+ *   ?pc91397  Kyrian    - a free Phial of Serenity        (a heal)
+ *   ?pc91400  Venthyr   - reset Door of Shadows           (a teleport)
+ *   ?pc91398  Necrolord - "Channel your Fleshcraft, gaining its benefits"
+ *   ?pc91399  Night Fae - reset Soulshape                 (movement speed)
+ *
+ * Three of those four are utility and cannot move a damage number by any route.
+ * The Necrolord one can, because Fleshcraft carries Volatile Solvent's mastery -
+ * which is the only reason this is worth implementing and the only branch below.
+ *
+ * WHY IT COULD NOT BE DONE BEFORE: Fleshcraft did not exist in this engine. It
+ * does now (legacy_soulbind_effects.cpp), so the free cast has something to
+ * cast.
+ *
+ * THE CANCEL. Fleshcraft is a three second channel whose buff lands at the
+ * START, in full. Holding the channel therefore buys nothing and costs casts,
+ * so the free one is cancelled on the next event. That is not a shortcut -
+ * it is Shadowlands\' own default for this exact trinket
+ * (`shadowlands.the_first_sigil_fleshcraft_cancel_time = 50ms`), and it matches
+ * what every Shadowlands action list did with a manual Fleshcraft.
+ */
+void the_first_sigil( special_effect_t& effect )
+{
+  if ( unique_gear::create_fallback_buffs( effect, { "the_first_sigil" } ) )
+    return;
+
+  auto buff = buff_t::find( effect.player, "the_first_sigil" );
+  if ( !buff )
+  {
+    buff = make_buff<stat_buff_t>( effect.player, "the_first_sigil", effect.driver() )
+               ->add_stat( STAT_VERSATILITY_RATING,
+                           effect.driver()->effectN( 1 ).average( effect.item ) );
+  }
+
+  struct the_first_sigil_t : public generic_proc_t
+  {
+    action_t* fleshcraft;
+
+    the_first_sigil_t( const special_effect_t& effect )
+      : generic_proc_t( effect, "the_first_sigil", effect.driver() ), fleshcraft( nullptr )
+    {
+      // The versatility rides effect.custom_buff; this action exists only to
+      // carry the covenant half, so it must not also deal or report damage.
+      harmful = may_crit = may_miss = false;
+      base_dd_min = base_dd_max = 0.0;
+    }
+
+    void init_finished() override
+    {
+      generic_proc_t::init_finished();
+
+      // Owning a Fleshcraft is what being Necrolord amounts to here, and it is
+      // read from the action list rather than from a covenant string so that
+      // this cannot disagree with what the actor can actually cast. If the
+      // actor is any other covenant the branch is a heal, a teleport or a
+      // sprint, and nothing below runs.
+      for ( auto a : player->action_list )
+      {
+        if ( a->data().id() == 324631 )
+        {
+          fleshcraft = a;
+          break;
+        }
+      }
+    }
+
+    void execute() override
+    {
+      generic_proc_t::execute();
+
+      if ( !fleshcraft )
+        return;
+
+      sim->print_debug( "{} casts a free fleshcraft from the_first_sigil.", player->name() );
+      fleshcraft->execute();
+
+      // Cancel on the next event. The mastery is already banked by execute();
+      // the remaining channel would only stop the actor casting.
+      make_event( *sim, [ this ] { fleshcraft->cancel(); } );
+    }
+  };
+
+  effect.custom_buff    = buff;
+  effect.execute_action = create_proc_action<the_first_sigil_t>( "the_first_sigil", effect );
+}
+
 void third_eye_of_the_jailer( special_effect_t& /* effect */ )
 {
 
@@ -5100,6 +5211,9 @@ void register_special_effects()
     unique_gear::register_special_effect( 339340, items::norgannons_sagacity );
     unique_gear::register_special_effect( 339348, items::sephuzs_proclamation );
     unique_gear::register_special_effect( 339058, items::third_eye_of_the_jailer );
+    // BracketSim legacy compatibility: The First Sigil. `true` because the
+    // covenant half has to run on USE, not as a passive proc.
+    unique_gear::register_special_effect( 367241, items::the_first_sigil, true );
     unique_gear::register_special_effect( 338743, items::vitality_sacrifice );
 
     // Disabled effects

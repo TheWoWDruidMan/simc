@@ -29,6 +29,9 @@
 
 #include "simulationcraft.hpp"
 
+// BracketSim legacy compatibility: Shadowlands conduits.
+#include "player/legacy_conduits.hpp"
+
 namespace monk
 {
 struct monk_t;
@@ -112,6 +115,7 @@ public:
   void trigger_mystic_touch( action_state_t *state );
 
   double composite_persistent_multiplier( const action_state_t *state ) const override;
+  double composite_target_multiplier( player_t *target ) const override;
   size_t total_effects_count() const override;
   void print_parsed_custom_type( report::sc_html_stream &os ) const override;
 };
@@ -394,6 +398,24 @@ struct monk_td_t : public actor_target_data_t
 
     // Tier
     propagate_const<buff_t *> mid2_brm_4pc;
+
+    // Legacy Azerite (Battle for Azeroth)
+    propagate_const<buff_t *> legacy_sunrise_technique;
+
+    // BracketSim legacy compatibility: Keefer's Skyreach. The runeforge's own
+    // surviving effect is spell range, which a patchwerk sim never uses; the
+    // crit window it opened on the target is 344021, gated by the 60s
+    // exhaustion on 337341.
+    propagate_const<buff_t *> legacy_keefers_skyreach;
+
+    // BracketSim legacy compatibility: Faeline Harmony (7721) marks everything
+    // Faeline Stomp hits, and the mark makes it take more of the monk's damage.
+    propagate_const<buff_t *> legacy_fae_exposure;
+    propagate_const<buff_t *> legacy_skyreach_exhaustion;
+
+    // BracketSim legacy compatibility: Shadowlands covenant abilities.
+    propagate_const<buff_t *> legacy_weapons_of_order;
+    propagate_const<buff_t *> legacy_bonedust_brew;
   } debuff;
 
   monk_t &monk;
@@ -511,6 +533,14 @@ public:
 
     // Tier
     propagate_const<action_t *> mid2_brm_4pc;
+
+    // BracketSim legacy compatibility: Shadowlands covenant abilities.
+    action_t *legacy_bonedust_brew_damage = nullptr;
+
+    // Legacy Azerite (Battle for Azeroth)
+    action_t *legacy_glory_of_the_dawn;
+    action_t *legacy_fit_to_burst;
+    action_t *legacy_sunrise_technique;
   } action;
 
   std::vector<action_t *> combo_strike_actions;
@@ -598,10 +628,98 @@ public:
     // Tier
     propagate_const<buff_t *> mid2_ww_4pc;
     propagate_const<buff_t *> mid2_brm_2pc;
+
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+    buff_t *swift_roundhouse;
+    buff_t *legacy_pressure_point;
+    buff_t *legacy_iron_fists;
+    buff_t *legacy_fury_of_xuen_stacks;
+    buff_t *legacy_fury_of_xuen_haste;
+    buff_t *legacy_dance_of_chiji;
+    buff_t *legacy_fit_to_burst;
+    buff_t *legacy_sunrise_technique;
+    buff_t *legacy_training_of_niuzao;
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    buff_t *legacy_invokers_delight;
+    // BracketSim legacy compatibility: Shadowlands covenant abilities.
+    buff_t *legacy_weapons_of_order;
   } buff;
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. Named
+  // legacy_azerite because player_t already owns an "azerite" member.
+  struct legacy_azerite_t
+  {
+    // Windwalker
+    azerite_power_t dance_of_chiji;
+    azerite_power_t fury_of_xuen;
+    azerite_power_t iron_fists;
+    azerite_power_t meridian_strikes;
+    azerite_power_t open_palm_strikes;
+    azerite_power_t pressure_point;
+    azerite_power_t swift_roundhouse;
+
+    // Brewmaster
+    azerite_power_t boiling_brew;
+    azerite_power_t elusive_footwork;
+    azerite_power_t fit_to_burst;
+    azerite_power_t niuzaos_blessing;
+    azerite_power_t staggering_strikes;
+    azerite_power_t training_of_niuzao;
+
+    // Shared
+    azerite_power_t glory_of_the_dawn;
+    azerite_power_t strength_of_spirit;
+    azerite_power_t sunrise_technique;
+    azerite_power_t sweep_the_leg;
+  } legacy_azerite;
+
+  // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
+  // has no runeforge DBC, so each one is switched on by the bonus id its
+  // original legendary item carried and is inert on any other character.
+  // BracketSim legacy compatibility: Shadowlands covenant abilities. Midnight
+  // has no covenant DBC, but every covenant spell still resolves, so they are
+  // looked up by id and gated on the chosen covenant.
+  // BracketSim legacy compatibility: Shadowlands conduits, as id:rank pairs.
+  legacy_conduit::set_t legacy_conduits;
+
+  struct legacy_covenant_t
+  {
+    std::string chosen = "none";
+    const spell_data_t *weapons_of_order = spell_data_t::not_found();
+    const spell_data_t *weapons_of_order_debuff = spell_data_t::not_found();
+    const spell_data_t *bonedust_brew = spell_data_t::not_found();
+    const spell_data_t *bonedust_brew_damage = spell_data_t::not_found();
+    const spell_data_t *faeline_stomp = spell_data_t::not_found();
+    const spell_data_t *faeline_stomp_damage = spell_data_t::not_found();
+    const spell_data_t *fallen_order = spell_data_t::not_found();
+  } legacy_covenant;
+
+  struct shadowlands_legacy_t
+  {
+    bool legacy_shadowlands_enabled = true;
+    bool fatal_touch = false;
+    bool invokers_delight = false;
+    bool xuens_battlegear = false;
+    bool keefers_skyreach = false;
+    bool stormstouts_last_keg = false;
+    // These three ride a covenant ability, so they only do anything when the
+    // matching covenant is chosen as well.
+    bool bountiful_brew = false;
+    bool faeline_harmony = false;
+    bool sinister_teachings = false;
+    bool call_to_arms = false;
+  } shadowlands_legacy;
+
+  // Legacy Azerite: Boiling Brew's healing sphere proc is RPPM driven.
+  real_ppm_t *legacy_boiling_brew_rppm = nullptr;
+
+  // BracketSim legacy compatibility: Bountiful Brew (7707) is an RPPM proc with
+  // its own internal cooldown, both read from 356592.
+  real_ppm_t *legacy_bountiful_brew_rppm = nullptr;
 
   struct
   {
+    propagate_const<gain_t *> legacy_open_palm_strikes;
     propagate_const<gain_t *> black_ox_brew_energy;
     propagate_const<gain_t *> chi_refund;
     propagate_const<gain_t *> combo_breaker;
@@ -632,6 +750,12 @@ public:
     propagate_const<cooldown_t *> expel_harm;
     propagate_const<cooldown_t *> fists_of_fury;
     propagate_const<cooldown_t *> rising_sun_kick;
+
+    // BracketSim legacy compatibility: Fallen Order's own cooldown, which
+    // Sinister Teachings (7726) shortens, and that legendary's internal
+    // cooldown so a burst of crits cannot cut it eight times at once.
+    propagate_const<cooldown_t *> legacy_fallen_order;
+    propagate_const<cooldown_t *> legacy_sinister_teachings;
   } cooldown;
 
   struct
@@ -1138,6 +1262,8 @@ public:
   struct pets_t
   {
     spawner::pet_spawner_t<pet_t, monk_t> xuen;
+    // Legacy Azerite: Fury of Xuen summons its own, smaller tiger.
+    spawner::pet_spawner_t<pet_t, monk_t> legacy_fury_of_xuen;
     spawner::pet_spawner_t<pets::niuzao::niuzao_pet_t, monk_t> niuzao;
 
     pets_t( monk_t *p );
@@ -1173,6 +1299,8 @@ public:
   bool validate_fight_style( fight_style_e style ) const override;
 
   // Init / Reset
+  // BracketSim legacy compatibility: Vision of Perfection.
+  void vision_of_perfection_proc() override;
   void init_spells() override;
   void init_background_actions() override;
   void init_base_stats() override;

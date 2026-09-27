@@ -57,6 +57,9 @@ void register_special_effect( unsigned spell_id, const T& cb, bool fallback = fa
 bool create_fallback_buffs( const special_effect_t& effect, const std::vector<util::string_view>& names );
 void init_feast( special_effect_t& effect, std::initializer_list<std::pair<stat_e, int>> stat_map);
 void DISABLED_EFFECT( special_effect_t& effect );
+// BracketSim legacy compatibility: a proc whose real trigger this sim
+// cannot represent, so the data's 100% chance would fire it constantly.
+void UNREPRESENTABLE_TRIGGER( special_effect_t& effect );
 
 // A scoped special effect callback that validates against a player class or specialization.
 struct class_scoped_callback_t : public scoped_callback_t

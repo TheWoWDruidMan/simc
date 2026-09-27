@@ -189,6 +189,28 @@ void dbc_proc_callback_t::trigger( const proc_data_t& source_data, player_t* tar
       return;
     }
 
+    // BracketSim: nor from the application of their own aura. Solarian's
+    // Sapphire (item 30446) carries Improved Battle Shout (37536), whose proc
+    // flags include Generic Helpful and whose trigger is its own buff,
+    // Solarian's Grace (58157). Applying that buff raised an aura_applied proc
+    // attempt, which scheduled a dbc_proc_event at the same timestamp, which
+    // refreshed the buff, which raised another attempt - forever, at t=0, until
+    // the event manager aborted with "Simulation stuck". It killed the level 30
+    // Arms best-in-slot search twice. The check above already stops a proc
+    // triggering from its own action; this is the same rule for its own aura.
+    //
+    // Deliberately narrow: only an AURA_APPLIED attempt whose source is this
+    // callback's own proc buff. A first version also matched the trigger spell
+    // id on any attempt type, and the shipped-number regression check flagged
+    // two characters, so nothing broader than the proven loop is blocked.
+    if ( type == proc_trigger_type_e::TRIGGER_AURA_APPLIED && proc_buff && source_data.spell &&
+         source_data.spell->id() != 0 && source_data.spell->id() == proc_buff->data().id() )
+    {
+      listener->sim->print_debug( "{} BracketSim: {} not re-triggered by its own aura {}", *listener, effect,
+                                  *source_data.spell );
+      return;
+    }
+
     if ( proc_action && proc_action->harmful )
     {
       // Don't allow players to harm other players, and enemies harm other enemies

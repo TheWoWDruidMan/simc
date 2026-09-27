@@ -178,6 +178,7 @@ struct sim_t : private sc_thread_t
   bool challenge_mode; // if active, players will get scaled down to 620 and set bonuses are deactivated
   bool scale_itemlevel_down_only; // Items below the value of scale_to_itemlevel will not be scaled up.
   bool disable_set_bonuses; // Disables all set bonuses.
+  bool bracketsim_legacy_set_bonuses; // BracketSim: also simulate set bonuses from before The War Within.
   bool enable_taunts;
   bool use_item_verification;  // Disable use-item action verification in the simulator
   std::string disable_2_set; // Disables all 2 set bonuses for the tier that this is set as

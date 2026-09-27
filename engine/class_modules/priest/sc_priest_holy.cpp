@@ -211,6 +211,17 @@ struct holy_fire_t final : public priest_spell_t
     parse_options( options_str );
   }
 
+  // Legacy Azerite: Sacred Flame
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double d = priest_spell_t::bonus_da( s );
+
+    if ( priest().legacy_azerite.sacred_flame.enabled() )
+      d += priest().legacy_azerite.sacred_flame.value( 1 );
+
+    return d;
+  }
+
   void queue_execute( execute_type type ) override
   {
     cooldown_t* original_cd = cooldown;

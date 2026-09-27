@@ -33,6 +33,17 @@ namespace spells
 // ==========================================================================
 // Mind Flay
 // ==========================================================================
+// BracketSim legacy compatibility: Eternal Call to the Void. The runeforge's
+// own spell carries both the proc rate and the damage.
+struct legacy_eternal_call_to_the_void_t final : public priest_spell_t
+{
+  legacy_eternal_call_to_the_void_t( priest_t& p )
+    : priest_spell_t( "eternal_call_to_the_void", p, p.find_spell( 336214 ) )
+  {
+    background = true;
+  }
+};
+
 struct mind_flay_base_t : public priest_spell_t
 {
   mind_flay_base_t( util::string_view n, priest_t& p, const spell_data_t* s ) : priest_spell_t( n, p, s )
@@ -64,6 +75,15 @@ struct mind_flay_base_t : public priest_spell_t
   {
     priest_spell_t::tick( d );
 
+    // BracketSim legacy compatibility: Eternal Call to the Void rolls off every
+    // Mind Flay tick, at the rate on the runeforge's own spell.
+    if ( priest().rppm.legacy_eternal_call_to_the_void &&
+         priest().background_actions.legacy_eternal_call_to_the_void &&
+         priest().rppm.legacy_eternal_call_to_the_void->trigger() )
+    {
+      priest().background_actions.legacy_eternal_call_to_the_void->execute_on_target( d->target );
+    }
+
     priest().trigger_idol_of_cthun( d->state );
 
     if ( priest().talents.shadow.psychic_link.enabled() )
@@ -75,6 +95,32 @@ struct mind_flay_base_t : public priest_spell_t
     {
       priest().buffs.shattered_psyche->trigger();
     }
+
+    // BracketSim legacy compatibility: Dissonant Echoes (conduit 115) is
+    // DELIBERATELY not hooked here, and this comment exists so nobody wires it
+    // up again without reading why.
+    //
+    // In Shadowlands the conduit's rank value was a chance, on each Mind Flay
+    // tick outside Voidform, to trigger buff 343144, which let you press Void
+    // Bolt while not in Voidform. In Midnight there is nothing for either half
+    // to act on:
+    //
+    //   - Void Bolt is `background = true` here. It is not a player pressed
+    //     ability and holds no cooldown of its own, so there is no gate to open
+    //     and nothing to reset. An earlier attempt reset a cooldown fetched by
+    //     name; it compiled, ran, produced no procs at all and measured +0.03%,
+    //     which is a no-op wearing an implementation's clothes.
+    //   - Both of its spells, 338342 and the 343144 buff, are absent from
+    //     current data.
+    //
+    // Its tooltip also claims a flat 15% Void Bolt damage bonus, which WOULD
+    // have a host. That number is not used either: conduit tooltips in this
+    // client are demonstrably stale - all four of the rank 11 conduits checked
+    // against the archived table printed numbers matching neither rank 1 nor
+    // rank 11 - and there is no second source to confirm this one against.
+    //
+    // To revive it: a combat log from a priest with the conduit socketed,
+    // showing Void Bolt damage with and without it, would settle the 15%.
   }
 
   void last_tick( dot_t* d ) override
@@ -370,6 +416,10 @@ public:
       may_miss                   = false;
       may_crit                   = true;
       base_mod                   = _mod;
+
+      // BracketSim legacy compatibility: Haunting Apparitions, applied exactly
+      // where Shadowlands applied it.
+      base_dd_multiplier *= 1.0 + priest().legacy_conduits.percent( 107 );
     }
 
     double composite_target_multiplier( player_t* t ) const override
@@ -395,6 +445,21 @@ public:
       m *= base_mod * apparition_state->damage_modifier;
 
       return m;
+    }
+
+    // Legacy Azerite: Spiteful Apparitions hits harder into a Vampiric Touch.
+    double bonus_da( const action_state_t* s ) const override
+    {
+      double d = priest_spell_t::bonus_da( s );
+
+      if ( priest().legacy_azerite.spiteful_apparitions.enabled() )
+      {
+        auto vampiric_touch_dot = s->target->get_dot( "vampiric_touch", player );
+        if ( vampiric_touch_dot != nullptr && vampiric_touch_dot->is_ticking() )
+          d += priest().legacy_azerite.spiteful_apparitions.value( 1 );
+      }
+
+      return d;
     }
 
     action_state_t* new_state() override
@@ -576,6 +641,13 @@ struct shadow_word_pain_t final : public priest_spell_t
       idol_of_nzoth_execute_stacks = 3;
     }
 
+    // Legacy Azerite: Torment of Torments lengthens Shadow Word: Pain.
+    if ( priest().legacy_azerite.torment_of_torments.enabled() )
+    {
+      dot_duration += timespan_t::from_millis(
+          as<int>( priest().legacy_azerite.torment_of_torments.spell()->effectN( 1 ).base_value() ) );
+    }
+
     if ( priest().talents.holy.divine_image.enabled() )
     {
       child_searing_light = priest().background_actions.searing_light;
@@ -605,6 +677,7 @@ struct shadow_word_pain_t final : public priest_spell_t
     if ( result_is_hit( s->result ) )
     {
       priest().refresh_insidious_ire_buff( s );
+      priest().refresh_legacy_talbadars_buff( s );
 
       if ( child_searing_light && priest().buffs.divine_image->up() )
       {
@@ -622,6 +695,33 @@ struct shadow_word_pain_t final : public priest_spell_t
         }
       }
     }
+  }
+
+  // Legacy Azerite: Death Throes adds flat damage to every Shadow Word: Pain tick.
+  double bonus_ta( const action_state_t* s ) const override
+  {
+    double d = priest_spell_t::bonus_ta( s );
+
+    if ( priest().legacy_azerite.death_throes.enabled() )
+    {
+      double value = priest().legacy_azerite.death_throes.value( 1 );
+      if ( priest().specs.discipline_priest->ok() )
+        value *= ( 100.0 + priest().specs.discipline_priest->effectN( 8 ).base_value() ) / 100.0;
+      d += value;
+    }
+
+    return d;
+  }
+
+  // Legacy Azerite: Torment of Torments also adds to the initial hit.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double d = priest_spell_t::bonus_da( s );
+
+    if ( casted && priest().legacy_azerite.torment_of_torments.enabled() )
+      d += priest().legacy_azerite.torment_of_torments.value( 2 );
+
+    return d;
   }
 
   void tick( dot_t* d ) override
@@ -792,6 +892,7 @@ struct vampiric_touch_t final : public priest_spell_t
     priest_spell_t::impact( s );
 
     priest().refresh_insidious_ire_buff( s );
+    priest().refresh_legacy_talbadars_buff( s );
   }
 
   void tick( dot_t* d ) override
@@ -1300,6 +1401,7 @@ struct shadow_word_madness_t final : public priest_spell_t
       shadow_word_madness_heal->trigger( s->result_amount );
       priest().trigger_psychic_link( s );
       priest().refresh_insidious_ire_buff( s );
+      priest().refresh_legacy_talbadars_buff( s );
     }
   }
 
@@ -1969,6 +2071,14 @@ struct voidform_t final : public priest_buff_t<buff_t>
       priest().buffs.shadowform->trigger();
     }
 
+    // Legacy Azerite: Chorus of Insanity converts the Voidform stacks into a
+    // decaying critical strike buff.
+    if ( priest().legacy_azerite.chorus_of_insanity.enabled() )
+    {
+      priest().buffs.legacy_chorus_of_insanity->expire();
+      priest().buffs.legacy_chorus_of_insanity->trigger( expiration_stacks );
+    }
+
     base_t::expire_override( expiration_stacks, remaining_duration );
 
     if ( remaining_duration == 0_ms )
@@ -2183,6 +2293,13 @@ void priest_t::create_buffs_shadow()
   buffs.shadowform_state = make_buff<buffs::shadowform_state_t>( *this );
   buffs.vampiric_embrace = make_buff( this, "vampiric_embrace", specs.vampiric_embrace );
   buffs.voidform         = make_buff<buffs::voidform_t>( *this );
+  // Legacy Azerite: Chorus of Insanity. One stack per Voidform stack held when
+  // it drops, decaying away. Voidform no longer stacks in Midnight, so this is
+  // one stack rather than the twenty-plus it saw in Battle for Azeroth.
+  buffs.legacy_chorus_of_insanity = make_buff<stat_buff_t>( this, "legacy_chorus_of_insanity", find_spell( 279572 ) )
+                                        ->add_stat( STAT_CRIT_RATING, legacy_azerite.chorus_of_insanity.value( 1 ) )
+                                        ->set_reverse( true )
+                                        ->set_tick_behavior( buff_tick_behavior::REFRESH );
   buffs.dispersion       = make_buff<buffs::dispersion_t>( *this );
 
   // Talents
@@ -2311,6 +2428,11 @@ void priest_t::init_rng_shadow()
 {
   rppm.idol_of_cthun          = get_rppm( "idol_of_cthun", talents.shadow.idol_of_cthun );
   rppm.power_of_the_dark_side = get_rppm( "power_of_the_dark_side", talents.discipline.power_of_the_dark_side );
+  // BracketSim legacy compatibility: Eternal Call to the Void's own proc rate.
+  rppm.legacy_eternal_call_to_the_void =
+      shadowlands_legacy.eternal_call_to_the_void
+          ? get_rppm( "legacy_eternal_call_to_the_void", find_spell( 336214 ) )
+          : nullptr;
 
   // Deck of cards model for void_apparitions_3 random idol selection: 3/4/1/2/7 out of 17.
   deck_rng.random_idol = get_shuffled_rng( "void_apparitions_3_random_idol",
@@ -2561,6 +2683,11 @@ std::unique_ptr<expr_t> priest_t::create_expression_shadow( util::string_view na
 
 void priest_t::init_background_actions_shadow()
 {
+  // BracketSim legacy compatibility: Eternal Call to the Void.
+  if ( shadowlands_legacy.eternal_call_to_the_void )
+    background_actions.legacy_eternal_call_to_the_void =
+        new actions::spells::legacy_eternal_call_to_the_void_t( *this );
+
   if ( talents.shadow.shadowy_apparitions.enabled() )
   {
     background_actions.shadowy_apparitions = new actions::spells::shadowy_apparition_spell_t( *this );
@@ -2742,6 +2869,35 @@ void priest_t::trigger_ancient_madness_extension()
 }
 
 // Helper function to refresh insidious ire buff
+// BracketSim legacy compatibility: Talbadar's Stratagem. Shadowlands gated this
+// on Shadow Word: Pain, Vampiric Touch and Devouring Plague. Devouring Plague is
+// gone, but Shadow Word: Madness took its place and the module's own Insidious
+// Ire is already gated on the same three; a live combat log confirms it, with
+// the legendary's buff applying one millisecond after all eleven Shadow Word:
+// Madness casts and never without one.
+void priest_t::refresh_legacy_talbadars_buff( action_state_t* s )
+{
+  if ( !shadowlands_legacy.talbadars_stratagem )
+    return;
+
+  const priest_td_t* td = find_target_data( s->target );
+
+  if ( !td )
+    return;
+
+  if ( td->dots.shadow_word_pain->is_ticking() && td->dots.vampiric_touch->is_ticking() &&
+       td->dots.shadow_word_madness->is_ticking() )
+  {
+    timespan_t min_length = std::min( { td->dots.shadow_word_pain->remains(), td->dots.vampiric_touch->remains(),
+                                        td->dots.shadow_word_madness->remains() } );
+
+    if ( buffs.legacy_talbadars_stratagem->up() && min_length <= buffs.legacy_talbadars_stratagem->remains() )
+      return;
+
+    buffs.legacy_talbadars_stratagem->trigger( min_length );
+  }
+}
+
 void priest_t::refresh_insidious_ire_buff( action_state_t* s )
 {
   if ( !talents.shadow.insidious_ire.enabled() )

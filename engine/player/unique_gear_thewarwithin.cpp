@@ -3929,6 +3929,15 @@ void darkmoon_deck_vivacity( special_effect_t& effect )
 
     void execute( const spell_data_t* s_data, player_t*, action_state_t* ) override
     {
+      // BracketSim: this callback used to read the school off the action state,
+      // and was reached with a state that has no action on it - a hard crash of
+      // the whole simulator the moment anyone equipped Darkmoon Deck: Vivacity,
+      // surfacing in the browser build only as "null function" with nothing to
+      // say which item caused it. Our fix was a null guard.
+      //
+      // UPSTREAM FIXED IT PROPERLY on the merge of 19 September 2026: the school
+      // now comes from the spell data, so there is no action state to dereference
+      // and the guard is not needed. Their version is kept.
       switch ( s_data->get_school_type() )
       {
         case SCHOOL_FIRE:
@@ -6805,6 +6814,12 @@ void funhouse_lens( special_effect_t& effect )
     funhouse_lens_t( const special_effect_t& e, std::string_view n, const spell_data_t* s )
       : spell_t( n, e.player, s ), crit_buff( nullptr ), haste_buff( nullptr )
     {
+      // BracketSim, 23 September 2026: a proc action must be background. As a plain
+      // spell_t this one was adopted into the use_item's action list as a FOREGROUND
+      // action - no cooldown, no cost, always ready - so every player-ready event at
+      // time 0 picked it again ("Simulation stuck" for warriors, whose trinket list
+      // is always entered, and for any rotation that uses the trinket freely).
+      background = true;
       crit_buff = create_buff<stat_buff_t>( e.player, "funhouse_lens_crit", e.player->find_spell( 1213433 ) )
                       ->add_stat_from_effect_type( A_MOD_RATING, s->effectN( 1 ).average( e ) )
                       ->set_name_reporting( "Crit" );

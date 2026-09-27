@@ -20,6 +20,9 @@ struct warlock_pet_td_t : public actor_target_data_t
   struct debuffs_t
   {
     propagate_const<buff_t*> whiplash;
+    // BracketSim legacy compatibility: Infernal Brand. The Infernal's melee
+    // stacks it and its own Immolation is amplified by the stacks.
+    propagate_const<buff_t*> legacy_infernal_brand;
   } debuffs;
 
   struct dots_t
@@ -101,6 +104,16 @@ struct warlock_pet_t : public pet_t
   void init_base_stats() override;
   void init_action_list() override;
   void create_buffs() override;
+  /*
+   * BracketSim legacy compatibility: Relic of Demonic Synergy (7027).
+   *
+   * "your PRIMARY demon", which is not the Felguard. This was written on
+   * felguard_pet_t first and never fired once: a test character at level 60 has not
+   * talented Summon Felguard, and his main pet is an Imp. `is_main_pet` is the
+   * flag that actually means "primary demon", so both halves hang off it.
+   */
+  void init_special_effects() override;
+  double composite_player_multiplier( school_e ) const override;
   void schedule_ready( timespan_t = 0_ms, bool = false ) override;
   double composite_melee_haste() const override;
   double composite_melee_auto_attack_speed() const override;
@@ -428,6 +441,8 @@ struct felguard_pet_t : public warlock_pet_t
   void init_base_stats() override;
   action_t* create_action( util::string_view, util::string_view ) override;
   timespan_t available() const override;
+  // BracketSim legacy compatibility: the conduit Fel Commando (207).
+  double composite_player_multiplier( school_e ) const override;
 };
 
 struct wild_imp_pet_t : public warlock_pet_t
@@ -495,6 +510,7 @@ struct demonic_tyrant_t : public warlock_pet_t
   demonic_tyrant_t( warlock_t*, util::string_view = "demonic_tyrant" );
   action_t* create_action( util::string_view, util::string_view ) override;
   void arise() override;
+  void demise() override;
   double composite_player_multiplier( school_e ) const override;
 };
 

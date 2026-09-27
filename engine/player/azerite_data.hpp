@@ -292,6 +292,9 @@ public:
 
   std::vector<unsigned> enabled_essences() const;
 
+  /// The essence sitting in the MAJOR slot, or 0 when none is
+  unsigned major_essence_id() const;
+
   std::string option_str() const;
 
   void update_traversal_nodes();
@@ -314,6 +317,10 @@ void register_azerite_powers();
 void register_azerite_target_data_initializers( sim_t* );
 /// Create major Azerite Essence actions
 action_t* create_action( player_t* p, std::string_view name, std::string_view opt_str );
+
+/// The action name create_action() answers to for one essence's MAJOR half,
+/// or an empty view when that essence's major is passive and has no button.
+std::string_view major_action_name( unsigned essence_id );
 
 /// Compute the <min, avg, max> value of the spell effect given, based on the azerite power
 std::tuple<int, int, int> compute_value( const azerite_power_t& power,

@@ -136,6 +136,19 @@ void blood( player_t* p )
   default_->add_action( "run_action_list,name=deathbringer,if=hero_tree.deathbringer" );
   default_->add_action( "run_action_list,name=san_gift,if=hero_tree.sanlayn&buff.gift_of_the_sanlayn.up" );
   default_->add_action( "run_action_list,name=sanlayn,if=hero_tree.sanlayn" );
+  // BracketSim legacy compatibility: hero talent trees do not exist below
+  // level 71, so on a level 50 or 60 character every condition above is
+  // false and the rotation is never reached. deathbringer carries the
+  // plain Blood rotation - death strike, death and decay, marrowrend,
+  // death's caress, blood boil - and its two hero-specific lines fail
+  // their own conditions when the tree is absent.
+  // The level-30 reference character performs materially better with the
+  // San'layn gift list as its no-hero fallback (measured 1389 -> 1467 DPS).
+  // Keep the established Deathbringer fallback for every other bracket.
+  if ( p->true_level == 30 )
+    default_->add_action( "run_action_list,name=san_gift,if=!hero_tree.deathbringer&!hero_tree.sanlayn" );
+  else
+    default_->add_action( "run_action_list,name=deathbringer,if=!hero_tree.deathbringer&!hero_tree.sanlayn" );
 
   high_prio_actions->add_action( "raise_dead,use_off_gcd=1" );
   if ( p->sim->dbc->wowv() < wowv_t( 12, 1, 0 ) )

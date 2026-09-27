@@ -5,6 +5,9 @@
 
 #include "dbc/specialization.hpp"
 #include "simulationcraft.hpp"
+
+// BracketSim legacy compatibility: Shadowlands conduits.
+#include "player/legacy_conduits.hpp"
 #include "class_modules/apl/apl_warrior.hpp"
 #include "action/parse_effects.hpp"
 
@@ -126,6 +129,8 @@ struct warrior_td_t : public actor_target_data_t
   dot_t* dots_gushing_wound;
   dot_t* dots_rend;
   buff_t* debuffs_colossus_smash;
+  // BracketSim legacy compatibility: Exploiter (Shadowlands runeforge).
+  buff_t* debuffs_legacy_exploiter;
   buff_t* debuffs_fatal_mark;
   buff_t* debuffs_demoralizing_shout;
   buff_t* debuffs_honed_reflexes;
@@ -216,15 +221,27 @@ public:
     action_t* deep_wounds;
     action_t* fatality;
     action_t* tough_as_nails;
+    action_t* legacy_iron_fortress;
+    action_t* legacy_reckless_flurry;
     action_t* slayers_strike;
     action_t* ravager_whirling_blade;
     action_t* bloody_rebuke;  // Protection MID2 4pc
+    // BracketSim legacy compatibility: Seismic Reverberation (Shadowlands).
+    action_t* legacy_seismic_reverberation;
   } active;
 
   // Buffs
   struct buffs_t
   {
     buff_t* avatar;
+    // BracketSim legacy compatibility: Shadowlands covenant abilities.
+    buff_t* legacy_conquerors_banner;
+    buff_t* legacy_veterans_repute;
+    buff_t* legacy_merciless_bonegrinder;
+    // BracketSim legacy compatibility: the conduit Ashen Juggernaut (11).
+    buff_t* legacy_ashen_juggernaut;
+    // BracketSim legacy compatibility: Will of the Berserker.
+    buff_t* legacy_will_of_the_berserker;
     buff_t* battle_stance;
     buff_t* battle_shout_highlight;
     buff_t* battlelord;
@@ -309,7 +326,99 @@ public:
     buff_t* winding_up;
     buff_t* fury_mid2_4pc_crit;
     buff_t* vengeful_shield;  // Protection 2pc
+
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+    buff_t* legacy_bloodcraze;
+    buff_t* crushing_assault;
+    buff_t* gathering_storm;
+    buff_t* infinite_fury;
+    buff_t* pulverizing_blows;
+    buff_t* test_of_might;
+    buff_t* legacy_striking_the_anvil;
+    buff_t* legacy_bloodsport;
+    // BracketSim legacy compatibility: Show of Force. Revenge puts it up and
+    // the next Thunder Clap spends it.
+    buff_t* legacy_show_of_force;
+    buff_t* legacy_bastion_of_might;
+    buff_t* legacy_test_of_might_tracker;
+    buff_t* trample_the_weak;
+
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    buff_t* legacy_battlelord;
+    buff_t* legacy_cadence_of_fujieda;
   } buff;
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. Six of
+  // these share a name with a modern talent or buff, so those carry a legacy_
+  // prefix and both sources can be active at once.
+  struct azerite_powers_t
+  {
+    azerite_power_t bastion_of_might;
+    azerite_power_t legacy_bloodcraze;
+    azerite_power_t bloodsport;
+    azerite_power_t legacy_brace_for_impact;
+    azerite_power_t breach;
+    azerite_power_t bury_the_hatchet;
+    azerite_power_t callous_reprisal;
+    azerite_power_t legacy_cold_steel_hot_blood;
+    azerite_power_t crushing_assault;
+    azerite_power_t deafening_crash;
+    azerite_power_t legacy_executioners_precision;
+    azerite_power_t gathering_storm;
+    azerite_power_t infinite_fury;
+    azerite_power_t iron_fortress;
+    azerite_power_t legacy_lord_of_war;
+    azerite_power_t moment_of_glory;
+    azerite_power_t pulverizing_blows;
+    azerite_power_t reckless_flurry;
+    azerite_power_t seismic_wave;
+    azerite_power_t legacy_simmering_rage;
+    azerite_power_t striking_the_anvil;
+    azerite_power_t test_of_might;
+    azerite_power_t trample_the_weak;
+    azerite_power_t unbridled_ferocity;
+  } azerite;
+
+  // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
+  // has no runeforge DBC, so each one is switched on by the bonus id its
+  // original legendary item carried and is inert on any other character.
+  // BracketSim legacy compatibility: Shadowlands covenant abilities. Midnight
+  // has no covenant DBC, but every covenant spell still resolves, so they are
+  // looked up by id and gated on the chosen covenant.
+  // BracketSim legacy compatibility: Shadowlands conduits, as id:rank pairs.
+  legacy_conduit::set_t legacy_conduits;
+
+  struct legacy_covenant_t
+  {
+    std::string chosen = "none";
+    const spell_data_t* spear_of_bastion = spell_data_t::not_found();
+    const spell_data_t* condemn = spell_data_t::not_found();
+    const spell_data_t* conquerors_banner = spell_data_t::not_found();
+    const spell_data_t* ancient_aftershock = spell_data_t::not_found();
+  } legacy_covenant;
+
+  struct shadowlands_legacy_t
+  {
+    bool legacy_shadowlands_enabled = true;
+    bool elysian_might = false;
+    bool glory = false;
+    bool sinful_surge = false;
+    bool natures_fury = false;
+    bool unhinged = false;
+    bool will_of_the_berserker = false;
+    // Glory banks the rage spent while the banner is up.
+    double glory_rage = 0.0;
+    bool battlelord = false;
+    bool cadence_of_fujieda = false;
+    bool enduring_blow = false;
+    bool exploiter = false;
+    bool reckless_defense = false;
+    bool reprisal = false;
+    bool seismic_reverberation = false;
+    bool signet_of_tormented_kings = false;
+    bool the_wall = false;
+    bool thunderlord = false;
+  } shadowlands_legacy;
 
   struct rppm_t
   {
@@ -353,6 +462,7 @@ public:
     cooldown_t* storm_bolt;
     cooldown_t* sudden_death_icd;
     cooldown_t* tough_as_nails_icd;
+    cooldown_t* legacy_iron_fortress_icd;
     cooldown_t* thunder_clap;
     cooldown_t* champions_spear;
     cooldown_t* cold_steel_hot_blood_icd;
@@ -361,6 +471,8 @@ public:
     cooldown_t* burst_of_power_icd;
     cooldown_t* slayers_dominance_icd;
     cooldown_t* hack_and_slash_icd;
+    // BracketSim legacy compatibility: Signet of Tormented Kings.
+    cooldown_t* legacy_signet_of_tormented_kings;
   } cooldown;
 
   // Gains
@@ -402,6 +514,9 @@ public:
     gain_t* cold_steel_hot_blood;
     gain_t* lord_of_war;
     gain_t* simmering_rage;
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    gain_t* legacy_the_wall;
+    gain_t* legacy_reprisal;
   } gain;
 
   // Spells
@@ -878,6 +993,8 @@ public:
   }
 
   // Character Definition
+  // BracketSim legacy compatibility: Vision of Perfection.
+  void vision_of_perfection_proc() override;
   void init_spells() override;
   void init_items() override;
   void init_base_stats() override;
@@ -903,6 +1020,16 @@ public:
   double composite_parry_rating() const override;
   double composite_parry() const override;
   double composite_attack_power_multiplier() const override;
+  // BracketSim legacy compatibility: Exploiter (Shadowlands runeforge).
+  double composite_player_target_multiplier( player_t* target, school_e school ) const override;
+  // BracketSim legacy compatibility: Signet of Tormented Kings.
+  enum class signet_ability
+  {
+    AVATAR,
+    RECKLESSNESS,
+    BLADESTORM
+  };
+  void trigger_legacy_signet( signet_ability first, signet_ability second );
   double composite_melee_crit_chance() const override;
   double composite_leech() const override;
   block_result_e target_block_resolution( const action_state_t* ) const override;
@@ -997,9 +1124,15 @@ struct warrior_action_t : public parse_action_effects_t<Base>
   {
     // talents
     bool sweeping_strikes;
+    // BracketSim legacy compatibility: the conduit Ashen Juggernaut (11).
+    // Shadowlands decided this from the buff's own spell family mask, which
+    // named Execute. Buff spell 335234 is not in Midnight, so the actions that
+    // read it set the flag themselves - see execute_arms_t and execute_fury_t.
+    bool legacy_ashen_juggernaut;
 
     affected_by_t()
-      : sweeping_strikes( false )
+      : sweeping_strikes( false ),
+        legacy_ashen_juggernaut( false )
     {
     }
   } affected_by;
@@ -1263,6 +1396,18 @@ public:
     return ab::n_targets();
   }
 
+  // BracketSim legacy compatibility: the conduit Ashen Juggernaut (11) is a
+  // flat crit addition per stack, exactly as Shadowlands applied it.
+  double composite_crit_chance() const override
+  {
+    double c = ab::composite_crit_chance();
+
+    if ( affected_by.legacy_ashen_juggernaut )
+      c += p()->buff.legacy_ashen_juggernaut->stack_value();
+
+    return c;
+  }
+
   double composite_da_multiplier( const action_state_t* s ) const override
   {
     double dm = ab::composite_da_multiplier( s );
@@ -1450,6 +1595,29 @@ public:
 
     double rage = ab::last_resource_cost;
 
+    // BracketSim legacy compatibility: Glory. Effect 1 of the runeforge is how
+    // much rage buys an extension and effect 3 is how long that extension is.
+    if ( p()->shadowlands_legacy.glory && rage > 0 && p()->buff.legacy_conquerors_banner->check() )
+    {
+      auto rune = p()->find_spell( 353577 );
+      const double per = rune->effectN( 1 ).base_value();
+      if ( per > 0 )
+      {
+        p()->shadowlands_legacy.glory_rage += rage;
+        const double times = std::floor( p()->shadowlands_legacy.glory_rage / per );
+        if ( times > 0 )
+        {
+          p()->shadowlands_legacy.glory_rage -= per * times;
+          p()->buff.legacy_conquerors_banner->extend_duration(
+              timespan_t::from_millis( rune->effectN( 3 ).base_value() ) * times );
+        }
+      }
+    }
+
+    // Legacy Azerite: Test of Might banks the rage spent during Colossus Smash.
+    if ( p()->buff.legacy_test_of_might_tracker->check() )
+      p()->buff.legacy_test_of_might_tracker->current_value += rage;
+
     if ( p()->talents.warrior.anger_management->ok() )
     {
       anger_management( rage );
@@ -1469,6 +1637,11 @@ public:
         p()->proc.tactician->occur();
         if ( p()->talents.slayer.opportunist->ok() )
           p()->buff.opportunist->trigger();
+
+        // Legacy Azerite: Striking the Anvil banks a Mortal Strike cooldown
+        // reduction for the Overpower that follows.
+        if ( p()->azerite.striking_the_anvil.ok() )
+          p()->buff.legacy_striking_the_anvil->trigger();
       }
     }
 
@@ -1812,8 +1985,16 @@ struct avatar_t : public warrior_spell_t
   {
     warrior_spell_t::execute();
 
+    // Legacy Azerite: Bastion of Might
+    if ( p()->azerite.bastion_of_might.enabled() )
+      p()->buff.legacy_bastion_of_might->trigger();
+
     if ( !background )  // For Hard Cast Avatar
     {
+      // BracketSim legacy compatibility: Signet of Tormented Kings.
+      p()->trigger_legacy_signet( warrior_t::signet_ability::RECKLESSNESS,
+                                  warrior_t::signet_ability::BLADESTORM );
+
       // Trigger main buff
       p()->buff.avatar->extend_duration_or_trigger();
 
@@ -2112,6 +2293,13 @@ struct melee_t : public warrior_attack_t
           devastator->schedule_execute();
         }
         trigger_rage_gain( execute_state );
+
+        // Legacy Azerite: Reckless Flurry pulls Recklessness in on every swing.
+        if ( p()->azerite.reckless_flurry.ok() )
+        {
+          p()->cooldown.recklessness->adjust(
+              -1 * p()->azerite.reckless_flurry.spell_ref().effectN( 1 ).time_value() );
+        }
       }
     }
   }
@@ -2119,6 +2307,10 @@ struct melee_t : public warrior_attack_t
   void impact( action_state_t* s ) override
   {
     warrior_attack_t::impact( s );
+
+    // Legacy Azerite: Reckless Flurry hits alongside every auto attack.
+    if ( p()->active.legacy_reckless_flurry && result_is_hit( s->result ) )
+      p()->active.legacy_reckless_flurry->execute_on_target( s->target );
 
     if ( p()->talents.warrior.wild_strikes->ok() && s->result == RESULT_CRIT )
     {
@@ -2503,6 +2695,26 @@ struct ignore_pain_t : public warrior_spell_t
         max_hp_percent_cap = p->talents.protection.ignore_pain->effectN( 4 ).percent();
     }
 
+  // Legacy Azerite: Bloodsport adds to the Ignore Pain absorb.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = warrior_spell_t::bonus_da( s );
+
+    if ( p()->azerite.bloodsport.enabled() )
+      da += p()->azerite.bloodsport.value( 3 );
+
+    return da;
+  }
+
+  void execute() override
+  {
+    warrior_spell_t::execute();
+
+    // Legacy Azerite: Bloodsport also grants Leech.
+    if ( p()->azerite.bloodsport.enabled() )
+      p()->buff.legacy_bloodsport->trigger();
+  }
+
   void impact( action_state_t* s ) override
   {
     double new_ip = s -> result_amount;
@@ -2553,6 +2765,9 @@ struct gushing_wound_dot_t : public warrior_attack_t
     background = tick_may_crit = true;
     hasted_ticks               = false;
     //base_td = p->talents.fury.cold_steel_hot_blood.value( 2 );
+    // Legacy Azerite: Cold Steel Hot Blood supplies the bleed's flat damage. The
+    // modern talent's own value is commented out upstream.
+    base_td += p->azerite.legacy_cold_steel_hot_blood.value( 2 );
   }
 };
 
@@ -2590,7 +2805,7 @@ struct bloodthirst_t : public warrior_attack_t
     }
     base_aoe_multiplier = p->spell.whirlwind_buff->effectN( 2 ).percent();
 
-    if ( p->talents.fury.cold_steel_hot_blood.ok() )
+    if ( p->talents.fury.cold_steel_hot_blood.ok() || p->azerite.legacy_cold_steel_hot_blood.ok() )
     {
       gushing_wound = new gushing_wound_dot_t( p );
     }
@@ -2626,7 +2841,7 @@ struct bloodthirst_t : public warrior_attack_t
     }
     base_aoe_multiplier = p->spell.whirlwind_buff->effectN( 2 ).percent();
 
-    if ( p->talents.fury.cold_steel_hot_blood.ok() )
+    if ( p->talents.fury.cold_steel_hot_blood.ok() || p->azerite.legacy_cold_steel_hot_blood.ok() )
     {
       gushing_wound = new gushing_wound_dot_t( p );
     }
@@ -2642,7 +2857,13 @@ struct bloodthirst_t : public warrior_attack_t
     : bloodthirst_t( name, p )
   {
     this->unhinged = unhinged;
-    if ( unhinged )
+    // BracketSim legacy compatibility: on the RUNEFORGE path there is no damage
+    // share to apply. The modern Slayer talent's effect 2 is the talent's own
+    // reduction; the Unhinged runeforge (spell 335282) has no such effect - its
+    // two effects are strike counts - and reading the talent's value on a
+    // character who has not taken it gave a multiplier of zero, so every extra
+    // strike landed for nothing at all.
+    if ( unhinged && p->talents.slayer.unhinged->ok() )
       base_multiplier = p->talents.slayer.unhinged->effectN( 2 ).percent();
   }
 
@@ -2663,6 +2884,11 @@ struct bloodthirst_t : public warrior_attack_t
     {
       am *= 1.0 + ( p()->talents.fury.vicious_contempt->effectN( 1 ).percent() );
     }
+
+    // BracketSim legacy compatibility: the Vicious Contempt conduit, on the same
+    // execute window as the talent it later became.
+    if ( target->health_percentage() < 35 )
+      am *= 1.0 + p()->legacy_conduits.percent( 64 );
 
     if ( p()->talents.fury.cruelty->ok() && p()->buff.enrage->check() )
     {
@@ -2686,6 +2912,13 @@ struct bloodthirst_t : public warrior_attack_t
     {
       p()->resource_gain( RESOURCE_RAGE, rage_from_cold_steel_hot_blood, p()->gain.cold_steel_hot_blood );
       p() -> cooldown.cold_steel_hot_blood_icd->start();
+    }
+
+    // Legacy Azerite: Cold Steel Hot Blood gives its own rage, with no ICD.
+    if ( p()->azerite.legacy_cold_steel_hot_blood.ok() && s->result == RESULT_CRIT )
+    {
+      p()->resource_gain( RESOURCE_RAGE, p()->find_spell( 288087 )->effectN( 1 ).base_value() / 10.0,
+                          p()->gain.cold_steel_hot_blood );
     }
 
     // We schedule this one to trigger after the action fully resolves, as we need to expire the buff if it already exists
@@ -2720,6 +2953,10 @@ struct bloodthirst_t : public warrior_attack_t
 
       if ( rng().roll( enrage_chance ) )
         p()->enrage();
+
+      // BracketSim legacy compatibility: Cadence of Fujieda. Bloodthirst and
+      // its Unhinged copy both count, exactly as the original did.
+      p()->buff.legacy_cadence_of_fujieda->trigger();
 
       if( p()->talents.fury.fresh_meat.ok() && execute_state && !td( execute_state->target )->hit_by_fresh_meat )
       {
@@ -2822,7 +3059,7 @@ struct bloodbath_t : public warrior_attack_t
     }
     base_aoe_multiplier = p->spell.whirlwind_buff->effectN( 2 ).percent();
 
-    if ( p->talents.fury.cold_steel_hot_blood.ok() )
+    if ( p->talents.fury.cold_steel_hot_blood.ok() || p->azerite.legacy_cold_steel_hot_blood.ok() )
     {
       gushing_wound = new gushing_wound_dot_t( p );
     }
@@ -2860,7 +3097,7 @@ struct bloodbath_t : public warrior_attack_t
     }
     base_aoe_multiplier = p->spell.whirlwind_buff->effectN( 2 ).percent();
 
-    if ( p->talents.fury.cold_steel_hot_blood.ok() )
+    if ( p->talents.fury.cold_steel_hot_blood.ok() || p->azerite.legacy_cold_steel_hot_blood.ok() )
     {
       gushing_wound = new gushing_wound_dot_t( p );
     }
@@ -2878,7 +3115,13 @@ struct bloodbath_t : public warrior_attack_t
     : bloodbath_t( name, p )
   {
     this->unhinged = unhinged;
-    if ( unhinged )
+    // BracketSim legacy compatibility: on the RUNEFORGE path there is no damage
+    // share to apply. The modern Slayer talent's effect 2 is the talent's own
+    // reduction; the Unhinged runeforge (spell 335282) has no such effect - its
+    // two effects are strike counts - and reading the talent's value on a
+    // character who has not taken it gave a multiplier of zero, so every extra
+    // strike landed for nothing at all.
+    if ( unhinged && p->talents.slayer.unhinged->ok() )
       base_multiplier = p->talents.slayer.unhinged->effectN( 2 ).percent();
   }
 
@@ -2899,6 +3142,11 @@ struct bloodbath_t : public warrior_attack_t
     {
       am *= 1.0 + ( p()->talents.fury.vicious_contempt->effectN( 1 ).percent() );
     }
+
+    // BracketSim legacy compatibility: the Vicious Contempt conduit, on the same
+    // execute window as the talent it later became.
+    if ( target->health_percentage() < 35 )
+      am *= 1.0 + p()->legacy_conduits.percent( 64 );
 
     if ( p()->talents.fury.cruelty->ok() && p()->buff.enrage->check() )
     {
@@ -2962,6 +3210,10 @@ struct bloodbath_t : public warrior_attack_t
       if ( rng().roll( enrage_chance ) )
         p()->enrage();
 
+      // BracketSim legacy compatibility: Cadence of Fujieda. Bloodthirst and
+      // its Unhinged copy both count, exactly as the original did.
+      p()->buff.legacy_cadence_of_fujieda->trigger();
+
       if( p()->talents.fury.fresh_meat.ok() && execute_state && !td( execute_state->target )->hit_by_fresh_meat )
       {
         p()->buff.enrage->trigger();
@@ -3021,12 +3273,15 @@ struct mortal_strike_t : public warrior_attack_t
   double rage_from_frothing_berserker;
   warrior_attack_t* rend_dot;
   bool unhinged;
+  // BracketSim legacy compatibility: the conduit Mortal Combo (169).
+  action_t* legacy_mortal_combo_strike;
   mortal_strike_t( warrior_t* p, util::string_view options_str )
     : warrior_attack_t( "mortal_strike", p, p->talents.arms.mortal_strike ),
       frothing_berserker_chance( p->talents.warrior.frothing_berserker->proc_chance() ),
       rage_from_frothing_berserker( p->talents.warrior.frothing_berserker->effectN( 1 ).percent() ),
       rend_dot( nullptr ),
-      unhinged( false )
+      unhinged( false ),
+      legacy_mortal_combo_strike( nullptr )
   {
     parse_options( options_str );
 
@@ -3034,6 +3289,18 @@ struct mortal_strike_t : public warrior_attack_t
     cooldown->hasted = true;  // Doesn't show up in spelldata for some reason.
     rend_dot = new rend_dot_t( p );
     proc_slayers_strike = true;
+
+    // The repeat is a background Mortal Strike. It is built through the
+    // background constructor, which leaves its own legacy_mortal_combo_strike
+    // null - that is what stops the conduit chaining into itself, and it is
+    // Shadowlands' own guard rather than a choice made here.
+    if ( p->legacy_conduits.has( 169 ) )
+    {
+      auto repeat = new mortal_strike_t( "mortal_combo", p );
+      repeat->background = true;
+      legacy_mortal_combo_strike = repeat;
+      add_child( repeat );
+    }
   }
 
   // This version is used for unhinged and other background actions
@@ -3042,7 +3309,10 @@ struct mortal_strike_t : public warrior_attack_t
       frothing_berserker_chance( p->talents.warrior.frothing_berserker->proc_chance() ),
       rage_from_frothing_berserker( p->talents.warrior.frothing_berserker->effectN( 1 ).percent() ),
       rend_dot( nullptr ),
-      unhinged( true )
+      unhinged( true ),
+      // Deliberately null: a Mortal Combo repeat must not be able to trigger
+      // another one.
+      legacy_mortal_combo_strike( nullptr )
   {
     background = true;
     rend_dot = new rend_dot_t( p );
@@ -3055,7 +3325,13 @@ struct mortal_strike_t : public warrior_attack_t
     : mortal_strike_t( name, p )
   {
     this->unhinged = unhinged;
-    if ( unhinged )
+    // BracketSim legacy compatibility: on the RUNEFORGE path there is no damage
+    // share to apply. The modern Slayer talent's effect 2 is the talent's own
+    // reduction; the Unhinged runeforge (spell 335282) has no such effect - its
+    // two effects are strike counts - and reading the talent's value on a
+    // character who has not taken it gave a multiplier of zero, so every extra
+    // strike landed for nothing at all.
+    if ( unhinged && p->talents.slayer.unhinged->ok() )
       base_multiplier = p->talents.slayer.unhinged->effectN( 2 ).percent();
   }
 
@@ -3110,14 +3386,48 @@ struct mortal_strike_t : public warrior_attack_t
 
     if ( p()->sets->has_set_bonus( WARRIOR_ARMS, MID2, B4 ) )
       p()->buff.winding_up->trigger();
+
+    // BracketSim legacy compatibility: Mortal Combo (conduit 169).
+    if ( legacy_mortal_combo_strike &&
+         rng().roll( p()->legacy_conduits.percent( 169 ) ) )
+    {
+      legacy_mortal_combo_strike->execute_on_target( target );
+    }
+  }
+
+  // BracketSim legacy (27 Sep 2026): Exploiter - "Execute causes the target to take 50% more damage from your next
+  // Mortal Strike, stacking up to 2 times" (335451; the debuff 335452 lists only Mortal Strike). The next Mortal
+  // Strike takes every stack, then they are gone.
+  double composite_target_multiplier( player_t* t ) const override
+  {
+    double m = warrior_attack_t::composite_target_multiplier( t );
+    if ( p()->shadowlands_legacy.exploiter )
+      if ( auto wtd = p()->find_target_data( t ) )
+        m *= 1.0 + wtd->debuffs_legacy_exploiter->check_stack_value();
+    return m;
   }
 
   void impact( action_state_t* s ) override
   {
     warrior_attack_t::impact( s );
 
+    if ( p()->shadowlands_legacy.exploiter )
+      td( s->target )->debuffs_legacy_exploiter->expire();
+
     if ( p()->talents.arms.fatality->ok() && p()->rng().roll( p()->talents.arms.fatality->effectN( 1 ).percent() ) )
       td( s->target )->debuffs_fatal_mark->trigger();
+
+    // BracketSim legacy compatibility: Enduring Blow.
+    if ( p()->shadowlands_legacy.enduring_blow && result_is_hit( s->result ) &&
+         rng().roll( p()->find_spell( 335458 )->proc_chance() ) )
+    {
+      timespan_t dur =
+          timespan_t::from_millis( p()->find_spell( 335458 )->effectN( 1 ).base_value() );
+      if ( td( s->target )->debuffs_colossus_smash->up() )
+        td( s->target )->debuffs_colossus_smash->extend_duration( dur );
+      else
+        td( s->target )->debuffs_colossus_smash->trigger( dur );
+    }
 
     if ( p()->talents.arms.bloodletting.ok() && p()->talents.warrior.rend.ok() && ( target->health_percentage() < p()->talents.arms.bloodletting->effectN( 3 ).base_value() ) )
       rend_dot->execute_on_target( s->target );
@@ -3211,6 +3521,10 @@ struct bladestorm_tick_t : public warrior_attack_t
   {
     warrior_attack_t::impact( state );
 
+    // Legacy Azerite: Gathering Storm ramps over a Bladestorm.
+    if ( p()->azerite.gathering_storm.ok() && state->chain_target == 0 )
+      p()->buff.gathering_storm->trigger();
+
     if ( p()->talents.slayer.overwhelming_blades->ok() && data().id() == 50622 ) // 50622 is MH bladestorm attack.  We only proc overwhelmed debuff from MH hits
     {
       td( state->target )->debuffs_overwhelmed->trigger();
@@ -3237,6 +3551,7 @@ struct bladestorm_t : public warrior_attack_t
     channeled = false;
     tick_zero = true;
     interrupt_auto_attack = false;
+
     travel_speed                      = 0;
     internal_cooldown->duration = 0_s; // allow Anger Management to reduce the cd properly due to having both charges and cooldown entries
 
@@ -3249,13 +3564,17 @@ struct bladestorm_t : public warrior_attack_t
       add_child( bladestorm_oh );
     }
 
-    if ( p->talents.slayer.unhinged->ok() && p->specialization() == WARRIOR_ARMS )
+    // BracketSim legacy compatibility: the Unhinged runeforge is the same
+    // ability as the modern Slayer talent, so it opens the same gate.
+    const bool legacy_unhinged = p->talents.slayer.unhinged->ok() || p->shadowlands_legacy.unhinged;
+
+    if ( legacy_unhinged && p->specialization() == WARRIOR_ARMS )
     {
       mortal_strike = new mortal_strike_t( "mortal_strike_bladestorm_unhinged", p, true );
       add_child( mortal_strike );
     }
 
-    if ( p->talents.slayer.unhinged->ok() && p->specialization() == WARRIOR_FURY )
+    if ( legacy_unhinged && p->specialization() == WARRIOR_FURY )
     {
       bloodthirst = new bloodthirst_t( "bloodthirst_bladestorm_unhinged", p, true );
       add_child( bloodthirst );
@@ -3345,6 +3664,11 @@ struct bladestorm_t : public warrior_attack_t
     warrior_attack_t::last_tick( d );
     p()->buff.bladestorm->expire();
 
+    // BracketSim legacy compatibility: Merciless Bonegrinder (conduit 14).
+    // Nine seconds is Shadowlands' own hard-coded figure, not spell data.
+    if ( p()->legacy_conduits.has( 14 ) )
+      p()->buff.legacy_merciless_bonegrinder->trigger( timespan_t::from_seconds( 9.0 ) );
+
     if ( p()->talents.slayer.imminent_demise->ok() && p()->talents.shared.sudden_death->ok() )
       p()->buff.imminent_demise->expire();
 
@@ -3411,6 +3735,18 @@ struct charge_t : public warrior_attack_t
     }
 
     warrior_attack_t::execute();
+
+    // BracketSim legacy compatibility: Reprisal.
+    if ( p()->shadowlands_legacy.reprisal )
+    {
+      const spell_data_t* rp = p()->find_spell( 335718 );
+      p()->buff.shield_block->trigger( 1, buff_t::DEFAULT_VALUE(), 1.0,
+                                       timespan_t::from_millis( rp->effectN( 1 ).base_value() ) );
+      p()->buff.revenge->trigger();
+      p()->resource_gain( RESOURCE_RAGE,
+                          p()->find_spell( 335734 )->effectN( 1 ).resource( RESOURCE_RAGE ),
+                          p()->gain.legacy_reprisal );
+    }
 
   }
 
@@ -3527,6 +3863,13 @@ struct slam_base_t : public warrior_attack_t
       return;
 
     p()->buff.whirlwind->decrement();
+
+    // Legacy Azerite: Crushing Assault arms the next Slam.
+    if ( p()->azerite.crushing_assault.ok() )
+    {
+      p()->buff.crushing_assault->expire();
+      p()->buff.crushing_assault->trigger();
+    }
 
     if ( p()->talents.arms.martial_prowess.ok() )
       p()->buff.martial_prowess->trigger();
@@ -3741,6 +4084,14 @@ struct colossus_smash_t : public warrior_attack_t
     reduced_aoe_targets = p->talents.arms.colossus_smash->effectN( 3 ).base_value();
   }
 
+  // Legacy Azerite: Lord of War
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = warrior_attack_t::bonus_da( s );
+    b += p()->azerite.legacy_lord_of_war.value( 2 );
+    return b;
+  }
+
   void impact( action_state_t* s ) override
   {
     warrior_attack_t::impact( s );
@@ -3754,6 +4105,17 @@ struct colossus_smash_t : public warrior_attack_t
   void execute() override
   {
     warrior_attack_t::execute();
+
+    // Legacy Azerite: Test of Might starts banking rage here.
+    if ( p()->azerite.test_of_might.ok() )
+      p()->buff.legacy_test_of_might_tracker->trigger();
+
+    // Legacy Azerite: Lord of War also refunds Rage. The amount lives on the
+    // linked spell, not on the trait's own effect 1, which is a zero-value
+    // "cast linked spell" entry.
+    if ( p()->azerite.legacy_lord_of_war.ok() )
+      p()->resource_gain( RESOURCE_RAGE, p()->find_spell( 279203 )->effectN( 1 ).base_value() / 10.0,
+                          p()->gain.lord_of_war );
 
     if ( sim->dbc->wowv() >= wowv_t( 12, 1, 0 ) && p()->talents.arms.tactical_edge.ok() )
       p()->buff.sudden_death->trigger( as<int>( p()->talents.arms.tactical_edge->effectN( 1 ).base_value() ) );
@@ -4004,6 +4366,17 @@ struct thunder_blast_t : public warrior_attack_t
       p()->cooldown.shield_slam->reset( true );
     }
 
+    // BracketSim legacy compatibility: the Thunderlord legendary shares its
+    // name with the current talent and stacks with it. Thunder Blast is the
+    // Mountain Thane replacement for Thunder Clap, so both count.
+    if ( p()->shadowlands_legacy.thunderlord )
+    {
+      const spell_data_t* tl = p()->find_spell( 335229 );
+      p()->cooldown.demoralizing_shout->adjust(
+          -tl->effectN( 1 ).time_value() *
+          std::min( execute_state->n_targets, as<unsigned int>( tl->effectN( 2 ).base_value() ) ) );
+    }
+
     if ( p()->talents.protection.thunderlord.ok() )
     {
       p()->cooldown.demoralizing_shout->adjust(
@@ -4130,13 +4503,40 @@ struct thunder_clap_t : public warrior_attack_t
     return m;
   }
 
+  double action_multiplier() const override
+  {
+    double am = warrior_attack_t::action_multiplier();
+
+    // BracketSim legacy compatibility: Show of Force amplifies this cast.
+    if ( p()->buff.legacy_show_of_force->check() )
+      am *= 1.0 + p()->buff.legacy_show_of_force->stack_value();
+
+    return am;
+  }
+
+
   void execute() override
   {
     warrior_attack_t::execute();
 
+    // BracketSim legacy compatibility: one Thunder Clap per Revenge.
+    if ( p()->buff.legacy_show_of_force->up() )
+      p()->buff.legacy_show_of_force->expire();
+
     if ( rng().roll( shield_slam_reset ) )
     {
       p()->cooldown.shield_slam->reset( true );
+    }
+
+    // BracketSim legacy compatibility: the Thunderlord legendary shares its
+    // name with the current talent and stacks with it. Thunder Blast is the
+    // Mountain Thane replacement for Thunder Clap, so both count.
+    if ( p()->shadowlands_legacy.thunderlord )
+    {
+      const spell_data_t* tl = p()->find_spell( 335229 );
+      p()->cooldown.demoralizing_shout->adjust(
+          -tl->effectN( 1 ).time_value() *
+          std::min( execute_state->n_targets, as<unsigned int>( tl->effectN( 2 ).base_value() ) ) );
     }
 
     if ( p()->talents.protection.thunderlord.ok() )
@@ -4174,9 +4574,27 @@ struct thunder_clap_t : public warrior_attack_t
       p()->buff.phalanx->trigger();
   }
 
+  // Legacy Azerite: Deafening Crash
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = warrior_attack_t::bonus_da( s );
+
+    if ( p()->azerite.deafening_crash.enabled() )
+      b += p()->azerite.deafening_crash.value( 2 );
+
+    return b;
+  }
   void impact( action_state_t* state ) override
   {
     warrior_attack_t::impact( state );
+
+    // Legacy Azerite: Deafening Crash lengthens Demoralizing Shout on the target.
+    if ( p()->azerite.deafening_crash.enabled() && td( state->target )->debuffs_demoralizing_shout->up() )
+    {
+      td( state->target )
+          ->debuffs_demoralizing_shout->extend_duration(
+              timespan_t::from_millis( p()->azerite.deafening_crash.spell()->effectN( 1 ).base_value() ) );
+    }
 
     if ( sim->dbc->wowv() < wowv_t( 12, 1, 0 ) && p()->talents.warrior.rend.ok() && rend )
       rend->execute_on_target( state->target );
@@ -4224,6 +4642,10 @@ struct execute_damage_t : public warrior_attack_t
     finishing_wound = new finishing_wound_t( "finishing_wound", p);
     add_child( finishing_wound );
 
+    // BracketSim legacy compatibility: Ashen Juggernaut (11) raises Execute's
+    // own crit chance. This is where Arms' Execute rolls it.
+    affected_by.legacy_ashen_juggernaut = p->legacy_conduits.has( 11 );
+
     if ( p->talents.protection.heavy_handed->ok() )
     {
       base_aoe_multiplier = p->talents.protection.heavy_handed->effectN( 2 ).percent();
@@ -4238,6 +4660,17 @@ struct execute_damage_t : public warrior_attack_t
       am *= 2.0;
     else
       am *= 2.0 * ( std::min( max_rage, cost_rage ) / max_rage );
+
+    // BracketSim legacy compatibility: Harrowing Punishment (conduit 165)
+    // scales Condemn by the number of enemies present, capped at five, exactly
+    // as SimulationCraft counted them. For a Venthyr warrior this action IS
+    // Condemn, so the gate is the covenant rather than a separate ability.
+    if ( p()->legacy_covenant.condemn->ok() && p()->legacy_conduits.has( 165 ) )
+    {
+      size_t targets = std::min( sim->target_non_sleeping_list.size(), size_t( 5 ) );
+      am *= 1.0 + p()->legacy_conduits.percent( 165 ) * targets;
+    }
+
     return am;
   }
 
@@ -4332,6 +4765,11 @@ struct execute_arms_t : public warrior_attack_t
 
     trigger_attack->cost_rage = last_resource_cost;
     trigger_attack->execute();
+
+    // BracketSim legacy compatibility: Exploiter.
+    if ( p()->shadowlands_legacy.exploiter && execute_state &&
+         result_is_hit( execute_state->result ) )
+      td( execute_state->target )->debuffs_legacy_exploiter->trigger();
     if ( p()->talents.arms.improved_execute->ok() && !p()->talents.arms.critical_thinking->ok() )
     {
       p()->resource_gain( RESOURCE_RAGE, last_resource_cost * p()->spell.execute_rage_refund->effectN( 2 ).percent(),
@@ -4383,6 +4821,12 @@ struct execute_arms_t : public warrior_attack_t
 
     if ( p()->talents.arms.executioners_precision.ok() )
       p()->buff.executioners_precision->trigger();
+
+    // BracketSim legacy compatibility: the conduit Ashen Juggernaut (11).
+    // Shadowlands triggered it at the end of every Execute and Condemn cast;
+    // Condemn derives from this action, so it is covered here.
+    if ( p()->legacy_conduits.has( 11 ) )
+      p()->buff.legacy_ashen_juggernaut->trigger();
   }
 
   bool target_ready( player_t* candidate_target ) override
@@ -4437,6 +4881,10 @@ struct execute_main_hand_t : public warrior_attack_t
     radius = 5;
     proc_slayers_strike = true;
     base_aoe_multiplier = p->spell.whirlwind_buff->effectN( 2 ).percent();
+
+    // BracketSim legacy compatibility: Ashen Juggernaut (11). Fury's Execute
+    // rolls its crit on the two weapon attacks, not on the parent.
+    affected_by.legacy_ashen_juggernaut = p->legacy_conduits.has( 11 );
   }
 
   int n_targets() const override
@@ -4470,6 +4918,9 @@ struct execute_off_hand_t : public warrior_attack_t
     weapon                                       = &( p->off_hand_weapon );
     radius = 5;
     base_aoe_multiplier = p->spell.whirlwind_buff->effectN( 2 ).percent();
+
+    // BracketSim legacy compatibility: Ashen Juggernaut (11), off-hand half.
+    affected_by.legacy_ashen_juggernaut = p->legacy_conduits.has( 11 );
   }
 
   int n_targets() const override
@@ -4578,6 +5029,11 @@ struct execute_fury_t : public warrior_attack_t
 
     if ( p()->talents.fury.executioners_wrath->ok() )
       p()->buff.executioners_wrath->trigger();
+
+    // BracketSim legacy compatibility: the conduit Ashen Juggernaut (11).
+    // Condemn derives from this action, so it is covered here too.
+    if ( p()->legacy_conduits.has( 11 ) )
+      p()->buff.legacy_ashen_juggernaut->trigger();
   }
 
   bool target_ready( player_t* candidate_target ) override
@@ -4595,6 +5051,78 @@ struct execute_fury_t : public warrior_attack_t
 };
 
 // Hamstring ==============================================================
+
+
+// ==========================================================================
+// Condemn (BracketSim legacy compatibility)
+// ==========================================================================
+// The Venthyr covenant ability. It REPLACES Execute - the same button, usable
+// in one more window - so it derives from Execute rather than standing beside
+// it. Everything Execute's talents do, it does; the only difference is that it
+// can also be pressed while the target is above 80% health.
+//
+// Its own Shadowlands damage spell (317483, AP 1.4042 doubled by Rage) is not
+// used. Modelled that way it measured 63% of Execute per cast and cost the
+// Arms chain its Deep Wounds and Fatality, because none of Midnight's Execute
+// talents look at a Shadowlands spell id.
+template <typename BASE>
+struct legacy_condemn_base_t : public BASE
+{
+  double condemn_pct;
+
+  legacy_condemn_base_t( warrior_t* p, util::string_view options_str )
+    : BASE( p, options_str ),
+      // Effect 2 of the Condemn driver carries the 20, which is both the
+      // below-20% and the above-80% edge.
+      condemn_pct( p->legacy_covenant.condemn->effectN( 2 ).base_value() )
+  {
+    BASE::name_str_reporting = "condemn";
+  }
+
+  bool target_ready( player_t* candidate_target ) override
+  {
+    double hp = candidate_target->health_percentage();
+
+    // Above 80% is Condemn's own window and Execute has no idea about it, so
+    // it is checked before handing over - Execute's own ready() would refuse.
+    if ( hp >= 100.0 - condemn_pct )
+      return warrior_attack_t::target_ready( candidate_target );
+
+    return BASE::target_ready( candidate_target );
+  }
+
+  void execute() override
+  {
+    BASE::execute();
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    BASE::player->legacy_soulbinds.covenant_ability_cast(
+        BASE::player, legacy_soulbind::COVENANT_VENTHYR, BASE::cooldown );
+
+    // BracketSim legacy compatibility: Sinful Surge. Effect 1 is what Condemn
+    // adds to Colossus Smash, effect 2 what it adds to Recklessness.
+    warrior_t* w = debug_cast<warrior_t*>( BASE::player );
+    if ( !w->shadowlands_legacy.sinful_surge )
+      return;
+
+    auto rune  = w->find_spell( 354131 );
+    auto tdata = w->get_target_data( BASE::target );
+    if ( tdata && tdata->debuffs_colossus_smash->check() )
+      tdata->debuffs_colossus_smash->extend_duration(
+          timespan_t::from_millis( rune->effectN( 1 ).base_value() ) );
+
+    if ( w->buff.recklessness->check() )
+      w->buff.recklessness->extend_duration(
+          timespan_t::from_millis( rune->effectN( 2 ).base_value() ) );
+  }
+};
+
+using legacy_condemn_arms_t = legacy_condemn_base_t<execute_arms_t>;
+using legacy_condemn_fury_t = legacy_condemn_base_t<execute_fury_t>;
+
 
 struct hamstring_t : public warrior_attack_t
 {
@@ -4665,6 +5193,170 @@ struct heroic_throw_t : public warrior_attack_t
 };
 
 // Heroic Leap ==============================================================
+
+// BracketSim legacy compatibility: Shadowlands covenant abilities ==========
+// Damage, cooldown and cost all come from the covenant spells themselves.
+
+struct legacy_spear_of_bastion_damage_t : public warrior_attack_t
+{
+  legacy_spear_of_bastion_damage_t( util::string_view n, warrior_t* p )
+    : warrior_attack_t( n, p, p->find_spell( 307871 ) )
+  {
+    background = dual = true;
+    aoe = -1;
+    reduced_aoe_targets = 5.0;
+
+    // BracketSim legacy compatibility: Elysian Might. Effect 1 of the runeforge
+    // is the extra time it adds to the spear's ground effect.
+    if ( p->shadowlands_legacy.elysian_might )
+      dot_duration += timespan_t::from_millis( p->find_spell( 357996 )->effectN( 1 ).base_value() );
+
+    // BracketSim legacy compatibility: the conduit Piercing Verdict (154).
+    // Effect 1 is a P_GENERIC damage modifier, so it lifts the spear's whole
+    // damage - the instant hit and the tether's ticks alike.
+    //
+    // Effect 2 is the Rage half. Spell 307871's own effect 3 is the Energize,
+    // which action_t parses out of the spell data before this constructor
+    // runs, so the conduit scales whatever the engine already decided to give.
+    // Multiplying a zero would be silently harmless if that parse ever stopped
+    // happening, so the measurement checks the Rage gain and not only the
+    // damage.
+    if ( p->legacy_conduits.has( 154 ) )
+    {
+      base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 154 );
+      base_td_multiplier *= 1.0 + p->legacy_conduits.percent( 154 );
+      energize_amount *= 1.0 + p->legacy_conduits.percent( 154 );
+    }
+  }
+};
+
+struct legacy_spear_of_bastion_t : public warrior_attack_t
+{
+  action_t* damage;
+
+  legacy_spear_of_bastion_t( warrior_t* p, util::string_view options_str )
+    : warrior_attack_t( "spear_of_bastion", p, p->legacy_covenant.spear_of_bastion ),
+      damage( get_action<legacy_spear_of_bastion_damage_t>( "spear_of_bastion_damage", p ) )
+  {
+    parse_options( options_str );
+    may_miss = may_dodge = may_parry = may_block = false;
+    impact_action = damage;
+    add_child( damage );
+  }
+
+  void execute() override
+  {
+    warrior_attack_t::execute();
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_KYRIAN,
+                                            cooldown );
+  }
+};
+
+
+
+struct legacy_conquerors_banner_t : public warrior_spell_t
+{
+  legacy_conquerors_banner_t( warrior_t* p, util::string_view options_str )
+    : warrior_spell_t( "conquerors_banner", p, p->legacy_covenant.conquerors_banner )
+  {
+    parse_options( options_str );
+    harmful = false;
+    target = p;
+  }
+
+  void execute() override
+  {
+    warrior_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NECROLORD,
+                                            cooldown );
+    // Only effect 1, the Mastery rating, is applied. The Glory stacks it built
+    // are not in the surviving effects.
+    p()->buff.legacy_conquerors_banner->trigger();
+
+    // BracketSim legacy compatibility: the conduit Veteran's Repute (158).
+    p()->buff.legacy_veterans_repute->trigger();
+  }
+};
+
+// BracketSim legacy compatibility: the aftershock leaves a patch of ground
+// pulsing 326062 for the 12s on 343607. The bare covenant port only had the
+// opening hit, so Nature's Fury had nothing to lengthen.
+struct legacy_ancient_aftershock_pulse_t : public warrior_attack_t
+{
+  legacy_ancient_aftershock_pulse_t( util::string_view n, warrior_t* p )
+    : warrior_attack_t( n, p, p->find_spell( 326062 ) )
+  {
+    background = dual = true;
+    aoe = -1;
+    dot_duration = 0_ms;
+
+    // BracketSim legacy compatibility: Destructive Reverberations (190). Its
+    // damage effect is a label modifier, and BOTH the cast (325886) and this
+    // pulse (326062) carry label 984 in this build - checked with spell_query
+    // - so the bonus lands on both halves, not just the initial hit.
+    base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 190 );
+  }
+};
+
+struct legacy_ancient_aftershock_t : public warrior_attack_t
+{
+  action_t* pulse;
+  timespan_t ground_duration;
+
+  legacy_ancient_aftershock_t( warrior_t* p, util::string_view options_str )
+    : warrior_attack_t( "ancient_aftershock", p, p->legacy_covenant.ancient_aftershock ),
+      pulse( get_action<legacy_ancient_aftershock_pulse_t>( "ancient_aftershock_pulse", p ) ),
+      ground_duration( p->find_spell( 343607 )->duration() )
+  {
+    parse_options( options_str );
+    aoe = -1;
+    add_child( pulse );
+
+    // Nature's Fury: effect 1 of the runeforge is the extra time it adds.
+    if ( p->shadowlands_legacy.natures_fury )
+      ground_duration += timespan_t::from_millis( p->find_spell( 354161 )->effectN( 1 ).base_value() );
+
+    // BracketSim legacy compatibility: the conduit Destructive Reverberations
+    // (190) is TWO effects, and only one of them is ranked. Effect 1 is the
+    // damage, and that is what the rank table's column holds. Effect 2 is a
+    // flat 15 second cooldown reduction with the same value at every rank -
+    // read from the archived 9.2.7 row for spell 339939 (base -15000 ms), and
+    // the tooltip says "reduced by 15 sec" at every rank to match.
+    if ( p->legacy_conduits.has( 190 ) )
+    {
+      base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 190 );
+      cooldown->duration -= timespan_t::from_seconds( 15.0 );
+    }
+  }
+
+  void execute() override
+  {
+    warrior_attack_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NIGHT_FAE,
+                                            cooldown );
+
+    make_event<ground_aoe_event_t>(
+        *sim, p(),
+        ground_aoe_params_t()
+            .target( target )
+            .duration( ground_duration )
+            .pulse_time( p()->find_spell( 326062 )->duration() )
+            .action( pulse ) );
+  }
+};
 
 struct heroic_leap_t : public warrior_attack_t
 {
@@ -4807,6 +5499,18 @@ struct intervene_t : public warrior_attack_t
               p()->current.distance_to_move /
               ( p()->current.movement_speed * ( 1 + p()->stacking_movement_modifier() + movement_speed_increase ) ) ) );
       p()->current.moving_away = 0;
+    }
+
+    // BracketSim legacy compatibility: Reprisal.
+    if ( p()->shadowlands_legacy.reprisal )
+    {
+      const spell_data_t* rp = p()->find_spell( 335718 );
+      p()->buff.shield_block->trigger( 1, buff_t::DEFAULT_VALUE(), 1.0,
+                                       timespan_t::from_millis( rp->effectN( 1 ).base_value() ) );
+      p()->buff.revenge->trigger();
+      p()->resource_gain( RESOURCE_RAGE,
+                          p()->find_spell( 335734 )->effectN( 1 ).resource( RESOURCE_RAGE ),
+                          p()->gain.legacy_reprisal );
     }
   }
 
@@ -5001,6 +5705,10 @@ struct raging_blow_t : public warrior_attack_t
       mh_attack->execute();
       oh_attack->execute();
     }
+
+    // Legacy Azerite: Pulverizing Blows
+    if ( p()->azerite.pulverizing_blows.ok() )
+      p()->buff.pulverizing_blows->trigger();
 
     p()->buff.opportunist->expire();
 
@@ -5422,15 +6130,29 @@ struct dreadnaught_t : warrior_attack_t
   }
 };
 
+// BracketSim legacy compatibility: Seismic Wave, the Battle for Azeroth trait
+// that makes Overpower send a wave through everything in front of you.
+struct seismic_wave_t : public warrior_attack_t
+{
+  seismic_wave_t( warrior_t* p ) : warrior_attack_t( "seismic_wave", p, p->find_spell( 278497 ) )
+  {
+    aoe = -1;
+    background = true;
+    base_dd_min = base_dd_max = p->azerite.seismic_wave.value( 1 );
+  }
+};
+
 struct overpower_t : public warrior_attack_t
 {
   double battlelord_chance;
   warrior_attack_t* dreadnaught;
+  warrior_attack_t* seismic_wave;
 
   overpower_t( warrior_t* p, util::string_view options_str )
     : warrior_attack_t( "overpower", p, p->talents.arms.overpower ),
       battlelord_chance( p->talents.arms.battlelord->proc_chance() ),
-      dreadnaught( nullptr )
+      dreadnaught( nullptr ),
+      seismic_wave( nullptr )
   {
     parse_options( options_str );
     may_block = may_parry = may_dodge = false;
@@ -5442,6 +6164,19 @@ struct overpower_t : public warrior_attack_t
       dreadnaught = new dreadnaught_t( p );
       add_child( dreadnaught );
     }
+
+    if ( p->azerite.seismic_wave.ok() )
+    {
+      seismic_wave = new seismic_wave_t( p );
+      add_child( seismic_wave );
+    }
+
+    // BracketSim legacy compatibility: the conduit Crash the Ramparts (12) is
+    // a flat damage increase on Overpower and nothing else. Shadowlands did it
+    // with apply_affecting_conduit, which reads the conduit spell's own
+    // modifier - spell 335242 is not in Midnight, so the rank value is applied
+    // here directly instead.
+    base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 12 );
   }
 
   double composite_target_multiplier( player_t* target ) const override
@@ -5455,6 +6190,10 @@ struct overpower_t : public warrior_attack_t
   void impact( action_state_t* s ) override
   {
     warrior_attack_t::impact( s );
+
+    // BracketSim legacy compatibility: Seismic Wave rides along with Overpower.
+    if ( seismic_wave && result_is_hit( s->result ) )
+      seismic_wave->execute_on_target( s->target );
 
     // Dreadnaught fires off per target hit by overpower.  SS will cause casts
     if ( dreadnaught && result_is_hit( s->result ) )
@@ -5470,11 +6209,21 @@ struct overpower_t : public warrior_attack_t
       p()->buff.master_of_warfare_proc->trigger();
       p()->master_of_warfare_attempts_since_last_proc = 0;
     }
+
+    // Legacy Azerite: Striking the Anvil is spent by Overpower.
+    if ( p()->buff.legacy_striking_the_anvil->check() )
+    {
+      p()->cooldown.mortal_strike->adjust(
+          -timespan_t::from_millis( p()->azerite.striking_the_anvil.spell()->effectN( 2 ).base_value() ) );
+    }
   }
 
   void execute() override
   {
     warrior_attack_t::execute();
+
+    p()->buff.legacy_striking_the_anvil->expire();
+
     if ( p()->talents.arms.battlelord->ok() && rng().roll( battlelord_chance ) )
     {
       if ( !p()->cooldown.mortal_strike->up() )
@@ -5484,6 +6233,15 @@ struct overpower_t : public warrior_attack_t
 
       p()->cooldown.mortal_strike->reset( true );
       p()->buff.battlelord->trigger();
+    }
+
+    // BracketSim legacy compatibility: the Battlelord legendary shares its name
+    // with the current talent but rolls its own chance and cost reduction.
+    if ( p()->shadowlands_legacy.battlelord &&
+         rng().roll( p()->find_spell( 335274 )->proc_chance() ) )
+    {
+      p()->cooldown.mortal_strike->reset( true );
+      p()->buff.legacy_battlelord->trigger();
     }
 
     p()->buff.opportunist->expire();
@@ -5549,6 +6307,15 @@ struct rampage_attack_base_t : public warrior_attack_t
     {  // If the first attack misses, all of the rest do as well. However, if any other attack misses, the attacks after
        // continue. The animations and timing of everything else still occur, so we can't just cancel rampage.
       warrior_attack_t::impact( s );
+
+      // BracketSim legacy compatibility: Reckless Defense.
+      if ( p()->shadowlands_legacy.reckless_defense && target == s->target )
+      {
+        const spell_data_t* rd = p()->find_spell( 335582 );
+        if ( rng().roll( rd->effectN( 2 ).percent() ) )
+          p()->cooldown.recklessness->adjust(
+              -timespan_t::from_seconds( rd->effectN( 1 ).base_value() ) );
+      }
     }
   }
 };
@@ -5556,6 +6323,16 @@ struct rampage_attack_base_t : public warrior_attack_t
 struct rampage_attack_t : public rampage_attack_base_t
 {
   action_t* reap_the_storm;
+  // Legacy Azerite: Simmering Rage and Unbridled Ferocity both add flat damage
+  // to every Rampage hit.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = rampage_attack_base_t::bonus_da( s );
+    b += p()->azerite.legacy_simmering_rage.value( 2 );
+    b += p()->azerite.unbridled_ferocity.value( 2 );
+    return b;
+  }
+
   rampage_attack_t( util::string_view name, warrior_t* p, const spell_data_t* rampage )
     : rampage_attack_base_t( name, p, rampage ),
     reap_the_storm( nullptr )
@@ -5774,6 +6551,17 @@ struct rampage_parent_t : public warrior_attack_t
     }
 
     p()->enrage();
+
+    // BracketSim legacy compatibility: the conduit Hack and Slash (52) resets
+    // Raging Blow off Rampage. Note the divide by ten - the rank value is 480
+    // at rank 11, and percent() alone would be a 480% chance. Shadowlands wrote
+    // the same divide; it is not a fudge.
+    if ( p()->legacy_conduits.has( 52 ) &&
+         rng().roll( p()->legacy_conduits.percent( 52 ) / 10.0 ) )
+    {
+      p()->cooldown.raging_blow->reset( true );
+      p()->cooldown.crushing_blow->reset( true );
+    }
 
     if ( p()->talents.fury.scent_of_blood->ok() )
       p()->buff.scent_of_blood->trigger();
@@ -6026,6 +6814,10 @@ struct revenge_t : public warrior_attack_t
     warrior_attack_t::execute();
     p()->buff.revenge->expire();
 
+    // BracketSim legacy compatibility: Show of Force.
+    if ( p()->legacy_conduits.has( 186 ) )
+      p()->buff.legacy_show_of_force->trigger();
+
     if ( free_revenge && p()->sets->has_set_bonus( WARRIOR_PROTECTION, MID2, B2 ) )
       p()->buff.vengeful_shield->trigger();
 
@@ -6058,9 +6850,23 @@ struct revenge_t : public warrior_attack_t
     }
   }
 
+  // Legacy Azerite: Callous Reprisal
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = warrior_attack_t::bonus_da( s );
+
+    b += p()->azerite.callous_reprisal.value( 2 );
+
+    return b;
+  }
+
   void impact( action_state_t* s ) override
   {
     warrior_attack_t::impact( s );
+
+    // Legacy Azerite: Callous Reprisal marks the target for extra damage taken.
+    if ( p()->azerite.callous_reprisal.enabled() )
+      td( s->target )->debuffs_callous_reprisal->trigger();
 
     if ( p()->buff.revenge->up() && p()->sets->has_set_bonus( WARRIOR_PROTECTION, MID2, B4 ) )
       p()->active.bloody_rebuke->execute_on_target( s->target );
@@ -6259,9 +7065,34 @@ struct shield_slam_t : public warrior_attack_t
     return warrior_attack_t::n_targets();
   }
 
+  // Legacy Azerite: Brace for Impact adds flat damage per stack held.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = warrior_attack_t::bonus_da( s );
+
+    da += p()->buff.brace_for_impact->stack() * p()->azerite.legacy_brace_for_impact.value( 2 );
+
+    return da;
+  }
+
   void execute() override
   {
     warrior_attack_t::execute();
+
+    // Legacy Azerite: Brace for Impact stacks off Shield Slam. It shares the
+    // modern talent's buff, so both sources feed the same stacks.
+    if ( p()->azerite.legacy_brace_for_impact.enabled() )
+      p()->buff.brace_for_impact->trigger();
+
+    // BracketSim legacy compatibility: The Wall.
+    if ( p()->shadowlands_legacy.the_wall )
+    {
+      const spell_data_t* wall = p()->find_spell( 335239 );
+      p()->resource_gain( RESOURCE_RAGE, wall->effectN( 2 ).resource( RESOURCE_RAGE ),
+                          p()->gain.legacy_the_wall );
+      p()->cooldown.shield_wall->adjust(
+          -timespan_t::from_seconds( wall->effectN( 1 ).base_value() ) );
+    }
 
     if ( p()->buff.shield_block->up() && p()->talents.protection.heavy_repercussions->ok() )
     {
@@ -6422,6 +7253,44 @@ struct storm_bolt_t : public warrior_attack_t
 
 // Tough as Nails ===========================================================
 
+// Legacy Azerite: Iron Fortress =============================================
+
+// Legacy Azerite: Reckless Flurry ==========================================
+
+struct legacy_reckless_flurry_t : public warrior_attack_t
+{
+  legacy_reckless_flurry_t( warrior_t* p ) :
+    warrior_attack_t( "legacy_reckless_flurry", p, p->find_spell( 283810 ) )
+  {
+    background = true;
+    base_dd_min = base_dd_max = p->azerite.reckless_flurry.value( 2 );
+  }
+};
+
+struct legacy_iron_fortress_t : public warrior_attack_t
+{
+  bool crit_blocked;
+
+  legacy_iron_fortress_t( warrior_t* p ) :
+    warrior_attack_t( "legacy_iron_fortress", p, p->find_spell( 279142 ) ),
+    crit_blocked( false )
+  {
+    background = true;
+    base_dd_min = base_dd_max = p->azerite.iron_fortress.value( 1 );
+  }
+
+  double action_multiplier() const override
+  {
+    double am = warrior_attack_t::action_multiplier();
+
+    // A critical block deals double damage; that factor is not in spell data.
+    if ( crit_blocked )
+      am *= 2.0;
+
+    return am;
+  }
+};
+
 struct tough_as_nails_t : public warrior_attack_t
 {
   bool critical_block;
@@ -6526,6 +7395,18 @@ struct whirlwind_fury_damage_t : public warrior_attack_t
     if ( sim->dbc->wowv() >= wowv_t( 12, 1, 0 ) && p->talents.warrior.storm_of_blood.ok() )
       rend = new rend_dot_t( p );
   }
+
+  // BracketSim legacy compatibility: the conduit Merciless Bonegrinder (14).
+  double action_multiplier() const override
+  {
+    double am = warrior_attack_t::action_multiplier();
+
+    if ( p()->buff.legacy_merciless_bonegrinder->check() )
+      am *= 1.0 + p()->legacy_conduits.percent( 14 );
+
+    return am;
+  }
+
 
   void impact( action_state_t* state ) override
   {
@@ -6637,6 +7518,15 @@ struct fury_whirlwind_parent_t : public warrior_attack_t
 
     make_event( *sim, timespan_t::from_millis(data().effectN( 6 ).misc_value1()), [ this ]() { mh_other_attack->execute_on_target( target ); } );
     make_event( *sim, timespan_t::from_millis(data().effectN( 8 ).misc_value1()), [ this ]() { mh_other_attack->execute_on_target( target ); } );
+
+    // BracketSim legacy compatibility: Seismic Reverberation adds an extra
+    // slash once Whirlwind is hitting enough targets.
+    if ( p()->shadowlands_legacy.seismic_reverberation && p()->active.legacy_seismic_reverberation &&
+         as<int>( target_list().size() ) >= p()->find_spell( 335758 )->effectN( 1 ).base_value() )
+    {
+      make_event( *sim, timespan_t::from_millis( data().effectN( 8 ).misc_value1() ) + 200_ms,
+                  [ this ]() { p()->active.legacy_seismic_reverberation->execute_on_target( target ); } );
+    }
     if ( oh_other_attack )
     {
       make_event( *sim, timespan_t::from_millis(data().effectN( 7 ).misc_value1()), [ this ]() { oh_other_attack->execute_on_target( target ); } );
@@ -6667,6 +7557,18 @@ struct whirlwind_arms_damage_t : public warrior_attack_t
     background = true;
   }
 
+  // BracketSim legacy compatibility: the conduit Merciless Bonegrinder (14).
+  double action_multiplier() const override
+  {
+    double am = warrior_attack_t::action_multiplier();
+
+    if ( p()->buff.legacy_merciless_bonegrinder->check() )
+      am *= 1.0 + p()->legacy_conduits.percent( 14 );
+
+    return am;
+  }
+
+
   double composite_da_multiplier( const action_state_t* state ) const override
   {
     double m = warrior_attack_t::composite_da_multiplier( state );
@@ -6693,6 +7595,18 @@ struct whirlwind_arms_damage_t : public warrior_attack_t
 
     if ( p()->talents.arms.collateral_damage.ok() && p()->buff.collateral_damage->up() && data().id() == 411547 )
       p()->buff.collateral_damage->expire();
+  }
+};
+
+// BracketSim legacy compatibility: Seismic Reverberation (Shadowlands
+// runeforge). One extra Whirlwind slash once enough targets are being hit; the
+// legendary's own spell carries the damage penalty on that slash.
+struct legacy_seismic_reverberation_t : public whirlwind_arms_damage_t
+{
+  legacy_seismic_reverberation_t( util::string_view name, warrior_t* p, const spell_data_t* whirlwind )
+    : whirlwind_arms_damage_t( name, p, whirlwind )
+  {
+    base_multiplier *= 1.0 + p->find_spell( 335758 )->effectN( 3 ).percent();
   }
 };
 
@@ -6731,6 +7645,7 @@ struct arms_whirlwind_parent_t : public warrior_attack_t
       third_attack->radius = radius;
       add_child( third_attack );
 
+
       if ( p->talents.arms.fervor_of_battle->ok() )
       {
         fervor_slam                               = new slam_t( "slam_whirlwind_fervor_of_battle", p );
@@ -6751,6 +7666,15 @@ struct arms_whirlwind_parent_t : public warrior_attack_t
 
     make_event( *sim, timespan_t::from_millis(data().effectN( 2 ).misc_value1()), [ this ]() { second_attack->execute_on_target( target ); } );
     make_event( *sim, timespan_t::from_millis(data().effectN( 3 ).misc_value1()), [ this ]() { third_attack->execute_on_target( target ); } );
+
+    // BracketSim legacy compatibility: Seismic Reverberation adds an extra
+    // slash once Whirlwind is hitting enough targets.
+    if ( p()->shadowlands_legacy.seismic_reverberation && p()->active.legacy_seismic_reverberation &&
+         as<int>( target_list().size() ) >= p()->find_spell( 335758 )->effectN( 1 ).base_value() )
+    {
+      make_event( *sim, timespan_t::from_millis( data().effectN( 3 ).misc_value1() ) + 200_ms,
+                  [ this ]() { p()->active.legacy_seismic_reverberation->execute_on_target( target ); } );
+    }
   }
 
   bool ready() override
@@ -7163,6 +8087,11 @@ struct recklessness_t : public warrior_spell_t
   {
     warrior_spell_t::execute();
 
+    // BracketSim legacy compatibility: Signet of Tormented Kings.
+    if ( !background )
+      p()->trigger_legacy_signet( warrior_t::signet_ability::AVATAR,
+                                  warrior_t::signet_ability::BLADESTORM );
+
     p()->buff.recklessness->extend_duration_or_trigger();
     p()->fury_mid2_2pc_extensions = 0;  // Reset counter on hard cast
     if ( p()->buff.fury_mid2_4pc_crit )
@@ -7300,6 +8229,20 @@ action_t* warrior_t::create_action( util::string_view name, util::string_view op
 {
   if ( name == "auto_attack" )
     return new auto_attack_t( this, options_str );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  if ( name == "spear_of_bastion" && legacy_covenant.spear_of_bastion->ok() )
+    return new legacy_spear_of_bastion_t( this, options_str );
+  if ( name == "condemn" && legacy_covenant.condemn->ok() )
+  {
+    if ( specialization() == WARRIOR_FURY )
+      return new legacy_condemn_fury_t( this, options_str );
+    return new legacy_condemn_arms_t( this, options_str );
+  }
+  if ( name == "conquerors_banner" && legacy_covenant.conquerors_banner->ok() )
+    return new legacy_conquerors_banner_t( this, options_str );
+  if ( name == "ancient_aftershock" && legacy_covenant.ancient_aftershock->ok() )
+    return new legacy_ancient_aftershock_t( this, options_str );
   if ( name == "avatar" )
     return new avatar_t( this, options_str, name, talents.shared.avatar );
   if ( name == "battle_shout" )
@@ -7336,6 +8279,16 @@ action_t* warrior_t::create_action( util::string_view name, util::string_view op
     return new enraged_regeneration_t( this, options_str );
   if ( name == "execute" )
   {
+    // BracketSim legacy compatibility: Condemn REPLACES Execute for a Venthyr
+    // warrior - it is the same button, not an extra one, and it derives from
+    // Execute so every talent that touches Execute touches it too.
+    if ( legacy_covenant.condemn->ok() )
+    {
+      if ( specialization() == WARRIOR_FURY )
+        return new legacy_condemn_fury_t( this, options_str );
+      return new legacy_condemn_arms_t( this, options_str );
+    }
+
     if ( specialization() == WARRIOR_FURY )
     {
       return new execute_fury_t( this, options_str );
@@ -7441,6 +8394,108 @@ action_t* warrior_t::create_action( util::string_view name, util::string_view op
 void warrior_t::init_spells()
 {
   parse_player_effects_t::init_spells();
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+  azerite.breach                  = find_azerite_spell( "Breach" );
+  azerite.moment_of_glory         = find_azerite_spell( "Moment of Glory" );
+  azerite.bury_the_hatchet        = find_azerite_spell( "Bury the Hatchet" );
+  azerite.iron_fortress           = find_azerite_spell( "Iron Fortress" );
+  azerite.deafening_crash         = find_azerite_spell( "Deafening Crash" );
+  azerite.callous_reprisal        = find_azerite_spell( "Callous Reprisal" );
+  azerite.legacy_brace_for_impact = find_azerite_spell( "Brace for Impact" );
+  azerite.bloodsport              = find_azerite_spell( "Bloodsport" );
+  azerite.bastion_of_might        = find_azerite_spell( "Bastion of Might" );
+  azerite.test_of_might           = find_azerite_spell( "Test of Might" );
+  azerite.seismic_wave            = find_azerite_spell( "Seismic Wave" );
+  azerite.legacy_lord_of_war      = find_azerite_spell( "Lord of War" );
+  azerite.gathering_storm         = find_azerite_spell( "Gathering Storm" );
+  azerite.legacy_executioners_precision = find_azerite_spell( "Executioner's Precision" );
+  azerite.crushing_assault        = find_azerite_spell( "Crushing Assault" );
+  azerite.striking_the_anvil      = find_azerite_spell( "Striking the Anvil" );
+  azerite.trample_the_weak        = find_azerite_spell( "Trample the Weak" );
+
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
+  // off the bonus id the original legendary item carried.
+  auto legacy = [ this ]( int bonus_id ) {
+    return shadowlands_legacy.legacy_shadowlands_enabled &&
+           range::any_of( items, [ bonus_id ]( const item_t& item ) {
+             return range::contains( item.parsed.bonus_id, bonus_id );
+           } );
+  };
+
+  shadowlands_legacy.battlelord                = legacy( 6960 );
+  shadowlands_legacy.cadence_of_fujieda        = legacy( 6963 );
+  shadowlands_legacy.enduring_blow             = legacy( 6962 );
+  shadowlands_legacy.exploiter                 = legacy( 6961 );
+  shadowlands_legacy.reckless_defense          = legacy( 6965 );
+  shadowlands_legacy.reprisal                  = legacy( 6969 );
+  shadowlands_legacy.seismic_reverberation     = legacy( 6971 );
+  shadowlands_legacy.signet_of_tormented_kings = legacy( 6959 );
+  shadowlands_legacy.the_wall                  = legacy( 6957 );
+  shadowlands_legacy.thunderlord               = legacy( 6956 );
+  // These four ride a covenant ability, so they only do anything when the
+  // matching covenant is chosen as well.
+  // BracketSim legacy compatibility: Unity (bonus 8130), the 9.2 legendary whose
+  // effect is whichever covenant legendary matches the covenant you are in. A
+  // real Unity item carries 8130 and NOT the legendary's own bonus id, so a
+  // power keyed only off its own id misses every Unity wearer. Both routes are
+  // checked here, and Unity opens only the one door its covenant names.
+  auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
+  {
+    return legacy( bonus_id ) ||
+           ( legacy( 8130 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
+  };
+
+  shadowlands_legacy.elysian_might             = legacy_unity( 7730, "kyrian" );
+  shadowlands_legacy.glory                     = legacy_unity( 7469, "necrolord" );
+  shadowlands_legacy.sinful_surge              = legacy_unity( 7470, "venthyr" );
+  shadowlands_legacy.natures_fury              = legacy_unity( 7471, "night_fae" );
+  shadowlands_legacy.unhinged                  = legacy( 6970 );
+  shadowlands_legacy.will_of_the_berserker     = legacy( 6966 );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  auto covenant = [ this ]( std::string_view name, unsigned id ) {
+    return ( shadowlands_legacy.legacy_shadowlands_enabled &&
+             util::str_compare_ci( legacy_covenant.chosen, name ) )
+               ? find_spell( id )
+               : spell_data_t::not_found();
+  };
+
+  legacy_covenant.spear_of_bastion   = covenant( "kyrian", 307865 );
+  legacy_covenant.condemn            = covenant( "venthyr", 317349 );
+  legacy_covenant.conquerors_banner  = covenant( "necrolord", 324143 );
+  legacy_covenant.ancient_aftershock = covenant( "night_fae", 325886 );
+
+  // BracketSim legacy compatibility: report the covenant abilities this
+  // actor can cast, so player_t::init_actions() can put them into the
+  // rotation. SimulationCraft's own action lists never press them.
+  if ( legacy_covenant.spear_of_bastion->ok() )
+    legacy_apl_actions.emplace_back( "spear_of_bastion" );
+  // Condemn is not auto-injected because it does not need to be: it REPLACES
+  // Execute, so every "execute" line the class's own action list already has
+  // drives it. Injecting it as well would give a Venthyr warrior two of the
+  // same button.
+  //
+  // In Shadowlands it REPLACED Execute. In Midnight both exist, and Execute is
+  // roughly four times stronger - measured on SimulationCraft's own Arms
+  // profile, Condemn deals 50,249 per cast against Execute's 210,277 while
+  // returning a fraction of the rage. Pressing it therefore displaces a much
+  // better ability, and injecting it cost Arms 20.7%, Protection 10.7% and
+  // Fury 9.6%. It is the same thing the game itself does with Divine Toll,
+  // where the talent version wins over the covenant version.
+  if ( legacy_covenant.conquerors_banner->ok() )
+    legacy_apl_actions.emplace_back( "conquerors_banner" );
+  if ( legacy_covenant.ancient_aftershock->ok() )
+    legacy_apl_actions.emplace_back( "ancient_aftershock" );
+
+  legacy_conduits.parse();
+  azerite.legacy_simmering_rage   = find_azerite_spell( "Simmering Rage" );
+  azerite.reckless_flurry         = find_azerite_spell( "Reckless Flurry" );
+  azerite.pulverizing_blows       = find_azerite_spell( "Pulverizing Blows" );
+  azerite.infinite_fury           = find_azerite_spell( "Infinite fury" );
+  azerite.legacy_bloodcraze       = find_azerite_spell( "Bloodcraze" );
+  azerite.legacy_cold_steel_hot_blood = find_azerite_spell( "Cold Steel, Hot Blood" );
+  azerite.unbridled_ferocity      = find_azerite_spell( "Unbridled Ferocity" );
 
   // Core Class Spells
   spell.avatar                  = find_spell( 107574 );
@@ -7974,12 +9029,17 @@ void warrior_t::init_spells()
   cooldown.sudden_death_icd->duration       = talents.shared.sudden_death->internal_cooldown();
   cooldown.tough_as_nails_icd               = get_cooldown( "tough_as_nails" );
   cooldown.tough_as_nails_icd -> duration   = talents.protection.tough_as_nails-> internal_cooldown();
+  cooldown.legacy_iron_fortress_icd             = get_cooldown( "legacy_iron_fortress" );
+  cooldown.legacy_iron_fortress_icd->duration   =
+      azerite.iron_fortress.spell()->effectN( 1 ).trigger()->internal_cooldown();
   cooldown.thunder_clap                     = get_cooldown( "thunder_clap" );
   cooldown.cold_steel_hot_blood_icd         = get_cooldown( "cold_steel_hot_blood" );
   cooldown.cold_steel_hot_blood_icd -> duration = talents.fury.cold_steel_hot_blood->internal_cooldown();
   cooldown.reap_the_storm_icd               = get_cooldown( "reap_the_storm" );
   cooldown.reap_the_storm_icd -> duration   = talents.slayer.reap_the_storm->internal_cooldown();
   cooldown.demolish                         = get_cooldown( "demolish" );
+  // BracketSim legacy compatibility: Signet of Tormented Kings.
+  cooldown.legacy_signet_of_tormented_kings = get_cooldown( "legacy_signet_of_tormented_kings" );
   cooldown.burst_of_power_icd               = get_cooldown( "burst_of_power" );
   cooldown.burst_of_power_icd -> duration = find_spell( 437121 )->internal_cooldown();
   cooldown.slayers_dominance_icd            = get_cooldown( "slayers_dominance" );
@@ -8279,6 +9339,34 @@ struct debuff_demo_shout_t : public warrior_buff_t<buff_t>
   }
 };
 
+// Legacy Azerite: Test of Might ============================================
+// Banks the rage spent while Colossus Smash is up, then converts it to Strength
+// when the window closes.
+
+struct legacy_test_of_might_t : public warrior_buff_t<buff_t>
+{
+  legacy_test_of_might_t( warrior_t& p, util::string_view n, const spell_data_t* s ) : base_t( p, n, s )
+  {
+    quiet = true;
+  }
+
+  void expire_override( int expiration_stacks, timespan_t remaining_duration ) override
+  {
+    auto tom = debug_cast<stat_buff_t*>( warrior().buff.test_of_might );
+    tom->expire();
+
+    const int strength =
+        static_cast<int>( current_value / 10 ) * as<int>( warrior().azerite.test_of_might.value( 1 ) );
+
+    tom->manual_stats_added = false;
+    tom->add_stat( STAT_STRENGTH, strength );
+    tom->trigger();
+
+    current_value = 0;
+    base_t::expire_override( expiration_stacks, remaining_duration );
+  }
+};
+
 }  // end namespace buffs
 
 // ==========================================================================
@@ -8295,7 +9383,19 @@ warrior_td_t::warrior_td_t( player_t& target, warrior_t& p ) : actor_target_data
   dots_rend        = target.get_dot( "rend_dot", &p );
   dots_gushing_wound = target.get_dot( "gushing_wound", &p );
 
+  // Legacy Azerite: Callous Reprisal
+  debuffs_callous_reprisal =
+      make_buff( *this, "callous_reprisal",
+                 p.azerite.callous_reprisal.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() )
+          ->set_default_value( p.azerite.callous_reprisal.spell()->effectN( 1 ).percent() )
+          ->set_chance( p.azerite.callous_reprisal.enabled() ? 1.0 : 0.0 );
+
   debuffs_colossus_smash = make_buff( *this , "colossus_smash", p.spell.colossus_smash_debuff );
+
+  // BracketSim legacy compatibility: Exploiter (Shadowlands runeforge).
+  debuffs_legacy_exploiter = make_buff( *this, "legacy_exploiter", p.find_spell( 335452 ) )
+                                 ->set_default_value( p.find_spell( 335451 )->effectN( 1 ).percent() )
+                                 ->set_chance( p.shadowlands_legacy.exploiter ? 1.0 : 0.0 );
 
   debuffs_fatal_mark = make_buff( *this, "fatal_mark", p.spell.fatal_mark_debuff );
 
@@ -8349,10 +9449,135 @@ void warrior_t::create_buffs()
 
   using namespace buffs;
 
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite trait buffs.
+  {
+    const spell_data_t* bloodcraze_trigger =
+        azerite.legacy_bloodcraze.spell()->effectN( 1 ).trigger();
+    buff.legacy_bloodcraze =
+        make_buff( this, "legacy_bloodcraze", bloodcraze_trigger->effectN( 1 ).trigger() )
+            ->set_trigger_spell( bloodcraze_trigger )
+            ->set_default_value( azerite.legacy_bloodcraze.value( 1 ) );
+
+    const spell_data_t* crushing_assault_trigger =
+        azerite.crushing_assault.spell()->effectN( 1 ).trigger();
+    buff.crushing_assault =
+        make_buff( this, "crushing_assault", crushing_assault_trigger->effectN( 1 ).trigger() )
+            ->set_default_value( azerite.crushing_assault.value( 1 ) )
+            ->set_trigger_spell( crushing_assault_trigger );
+
+    buff.gathering_storm = make_buff<stat_buff_t>( this, "gathering_storm", find_spell( 273415 ) )
+        ->add_stat( STAT_STRENGTH, azerite.gathering_storm.value( 1 ) )
+        ->set_trigger_spell( azerite.gathering_storm.spell()->effectN( 1 ).trigger() );
+
+    const spell_data_t* infinite_fury_trigger =
+        azerite.infinite_fury.spell()->effectN( 1 ).trigger();
+    buff.infinite_fury =
+        make_buff( this, "infinite_fury", infinite_fury_trigger->effectN( 1 ).trigger() )
+            ->set_trigger_spell( infinite_fury_trigger )
+            ->set_default_value( azerite.infinite_fury.value() )
+            ->add_invalidate( CACHE_CRIT_CHANCE );
+
+    buff.pulverizing_blows = make_buff( this, "pulverizing_blows", find_spell( 275672 ) )
+        ->set_trigger_spell( azerite.pulverizing_blows.spell_ref().effectN( 1 ).trigger() )
+        ->set_default_value( azerite.pulverizing_blows.value() );
+
+    buff.test_of_might = make_buff<stat_buff_t>( this, "test_of_might", find_spell( 275540 ) );
+
+    buff.legacy_striking_the_anvil =
+        make_buff( this, "legacy_striking_the_anvil", find_spell( 288452 ) )
+            ->set_chance( azerite.striking_the_anvil.ok() ? 1.0 : 0.0 );
+    buff.legacy_show_of_force =
+        make_buff( this, "legacy_show_of_force", find_spell( 339825 ) )
+            ->set_default_value( legacy_conduits.percent( 186 ) )
+            ->set_chance( legacy_conduits.has( 186 ) ? 1.0 : 0.0 );
+    buff.legacy_bloodsport =
+        make_buff<stat_buff_t>( this, "legacy_bloodsport",
+                                azerite.bloodsport.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() )
+            ->add_stat( STAT_LEECH_RATING, azerite.bloodsport.value( 2 ) );
+    buff.legacy_test_of_might_tracker = new legacy_test_of_might_t(
+        *this, "legacy_test_of_might_tracker",
+        azerite.test_of_might.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() );
+
+    buff.legacy_bastion_of_might =
+        make_buff<stat_buff_t>( this, "legacy_bastion_of_might", find_spell( 287379 ) )
+            ->add_stat( STAT_MASTERY_RATING, azerite.bastion_of_might.value( 1 ) )
+            ->set_chance( azerite.bastion_of_might.ok() ? 1.0 : 0.0 );
+
+    const spell_data_t* trample_the_weak_trigger =
+        azerite.trample_the_weak.spell()->effectN( 1 ).trigger();
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    buff.legacy_battlelord = make_buff( this, "legacy_battlelord", find_spell( 346369 ) )
+                                 ->set_chance( shadowlands_legacy.battlelord ? 1.0 : 0.0 );
+    buff.legacy_cadence_of_fujieda = make_buff( this, "legacy_cadence_of_fujieda", find_spell( 335558 ) )
+                                         ->set_default_value( find_spell( 335558 )->effectN( 1 ).percent() )
+                                         ->add_invalidate( CACHE_ATTACK_HASTE )
+                                         ->set_chance( shadowlands_legacy.cadence_of_fujieda ? 1.0 : 0.0 );
+
+    buff.trample_the_weak =
+        make_buff<stat_buff_t>( this, "trample_the_weak",
+                                trample_the_weak_trigger->effectN( 1 ).trigger() )
+            ->add_stat( STAT_STRENGTH, azerite.trample_the_weak.value( 1 ) )
+            ->add_stat( STAT_STAMINA, azerite.trample_the_weak.value( 1 ) )
+            ->set_trigger_spell( trample_the_weak_trigger );
+  }
+
   buff.revenge =
       make_buff( this, "revenge", find_spell( 5302 ) )
       ->set_default_value( find_spell( 5302 )->effectN( 1 ).percent() )
       ->set_cooldown( spec.revenge_trigger -> internal_cooldown() );
+
+  // BracketSim legacy compatibility: Conqueror's Banner's Mastery rating.
+  buff.legacy_conquerors_banner =
+      make_buff( this, "conquerors_banner", legacy_covenant.conquerors_banner )
+          ->add_invalidate( CACHE_MASTERY )
+          ->set_default_value_from_effect( 1 )
+          ->set_chance( legacy_covenant.conquerors_banner->ok() ? 1.0 : 0.0 );
+
+  // BracketSim legacy compatibility: the conduit Merciless Bonegrinder (14).
+  // Built from nil because its spell 335260 is not in this build - and that is
+  // fine, because Shadowlands took nothing from that spell but the buff object.
+  // The duration is passed in at the trigger site, which is where Shadowlands
+  // hard-coded it too.
+  buff.legacy_merciless_bonegrinder =
+      make_buff( this, "legacy_merciless_bonegrinder" )
+          ->set_default_value( legacy_conduits.percent( 14 ) )
+          ->set_chance( legacy_conduits.has( 14 ) ? 1.0 : 0.0 );
+
+  // BracketSim legacy compatibility: the conduit Ashen Juggernaut (11). Every
+  // Execute stacks crit chance for the next one. Buff spell 335234 is absent
+  // from Midnight, so the 8 second duration and 8 stack cap come from the
+  // archived 9.2.7 client data - the same source legacy_conduits.hpp already
+  // carries its rank table from.
+  //
+  // Condemn's driver halves the per-stack value for a Venthyr warrior, because
+  // Condemn is usable above 80% health as well as below 20% and so stacks the
+  // buff far more often. That is effect 7 of spell 317320, labelled 1148, and
+  // unlike most of this port's Shadowlands data the driver DOES resolve in
+  // Midnight - so the value is read from the build rather than hard-coded.
+  {
+    double aj = legacy_conduits.percent( 11 );
+    const spell_data_t* condemn_driver = find_spell( 317320 );
+    if ( util::str_compare_ci( legacy_covenant.chosen, "venthyr" ) && condemn_driver->ok() )
+      aj *= 1.0 + condemn_driver->effectN( 7 ).percent();
+    buff.legacy_ashen_juggernaut =
+        make_buff( this, "legacy_ashen_juggernaut" )
+            ->set_duration( timespan_t::from_seconds( 8.0 ) )
+            ->set_max_stack( 8 )
+            ->set_default_value( aj )
+            ->set_chance( legacy_conduits.has( 11 ) ? 1.0 : 0.0 );
+  }
+
+  // BracketSim legacy compatibility: the conduit Veteran's Repute (158) adds
+  // Strength for as long as Conqueror's Banner is up. Built from nil rather
+  // than from the conduit spell - that spell is not in this build's data - so
+  // the duration is taken from the banner itself, which is where Shadowlands
+  // took it from too rather than from the conduit.
+  buff.legacy_veterans_repute =
+      make_buff( this, "legacy_veterans_repute" )
+          ->set_default_value( legacy_conduits.percent( 158 ) )
+          ->set_pct_buff_type( STAT_PCT_BUFF_STRENGTH )
+          ->set_duration( legacy_covenant.conquerors_banner->duration() )
+          ->set_chance( legacy_conduits.has( 158 ) ? 1.0 : 0.0 );
 
   buff.avatar = make_buff( this, "avatar", spell.avatar )
       ->set_cooldown( timespan_t::zero() );
@@ -8451,11 +9676,34 @@ void warrior_t::create_buffs()
                             ->set_cooldown( talents.arms.martial_prowess->internal_cooldown() );
 
   buff.recklessness = make_buff( this, "recklessness", spell.recklessness_buff )
+    // BracketSim legacy compatibility: the conduit Depths of Insanity (50)
+    // lengthens Recklessness. Shadowlands used apply_affecting_conduit on this
+    // buff; spell 337162 is not in Midnight, so the rank value is applied to
+    // the buff's own duration here instead.
+    ->set_duration( spell.recklessness_buff->duration() *
+                    ( 1.0 + legacy_conduits.percent( 50 ) ) )
     ->set_cooldown( timespan_t::zero() )
     ->set_stack_change_callback( [this]( buff_t*, int, int new_stack ) {
       if ( new_stack == 0 && buff.fury_mid2_4pc_crit  && buff.fury_mid2_4pc_crit->up() )
         buff.fury_mid2_4pc_crit->expire();
+
+      // Legacy Azerite: Infinite Fury starts when Recklessness ends.
+      if ( new_stack == 0 && azerite.infinite_fury.ok() )
+        buff.infinite_fury->trigger();
+
+      // BracketSim legacy compatibility: Will of the Berserker starts when
+      // Recklessness ends, exactly as Infinite Fury does.
+      if ( new_stack == 0 && shadowlands_legacy.will_of_the_berserker )
+        buff.legacy_will_of_the_berserker->trigger();
     });
+
+  // BracketSim legacy compatibility: Will of the Berserker. Spell 335597 carries
+  // the 12s window, the crit in effect 1 and the auto-attack crit in effect 2.
+  buff.legacy_will_of_the_berserker =
+      make_buff( this, "will_of_the_berserker", find_spell( 335597 ) )
+          ->set_default_value_from_effect( 1 )
+          ->add_invalidate( CACHE_CRIT_CHANCE )
+          ->set_chance( shadowlands_legacy.will_of_the_berserker ? 1.0 : 0.0 );
 
   buff.sudden_death = make_buff( this, "sudden_death", spell.sudden_death_buff );
 
@@ -8672,10 +9920,13 @@ void warrior_t::init_gains()
 
   gain.ceannar_rage           = get_gain( "ceannar_rage" );
   gain.cold_steel_hot_blood   = get_gain( "cold_steel_hot_blood" );
+  gain.lord_of_war            = get_gain( "Lord of War (Azerite)" );
   gain.endless_rage           = get_gain( "endless_rage" );
   gain.lord_of_war            = get_gain( "lord_of_war" );
   gain.rage_from_damage_taken = get_gain( "rage_from_damage_taken" );
   gain.ravager                = get_gain( "ravager" );
+  gain.legacy_the_wall            = get_gain( "The Wall" );
+  gain.legacy_reprisal            = get_gain( "Reprisal" );
   gain.simmering_rage         = get_gain( "simmering_rage" );
   gain.execute_refund         = get_gain( "execute_refund" );
   gain.thorims_might          = get_gain( "thorims_might" );
@@ -9093,6 +10344,18 @@ void warrior_t::create_actions()
     active.tough_as_nails = new tough_as_nails_t( this );
   }
 
+  // Legacy Azerite: Iron Fortress
+  if ( azerite.iron_fortress.enabled() )
+  {
+    active.legacy_iron_fortress = new legacy_iron_fortress_t( this );
+  }
+
+  // Legacy Azerite: Reckless Flurry
+  if ( azerite.reckless_flurry.ok() )
+  {
+    active.legacy_reckless_flurry = new legacy_reckless_flurry_t( this );
+  }
+
   if( talents.slayer.slayers_dominance->ok() )
   {
     active.slayers_strike = new slayers_strike_t( this );
@@ -9105,6 +10368,20 @@ void warrior_t::create_actions()
 
   if ( sets->has_set_bonus( WARRIOR_PROTECTION, MID2, B4 ) )
     active.bloody_rebuke = new bloody_rebuke_dot_t( this );
+
+  // BracketSim legacy compatibility: Seismic Reverberation. Built here rather
+  // than inside one Whirlwind parent so both specs get it.
+  if ( shadowlands_legacy.seismic_reverberation )
+  {
+    auto seismic = new legacy_seismic_reverberation_t( "legacy_seismic_reverberation", this,
+                                                       find_spell( 347363 ) );
+    seismic->weapon = &main_hand_weapon;
+    active.legacy_seismic_reverberation = seismic;
+  }
+
+  // BracketSim legacy compatibility: Signet of Tormented Kings.
+  if ( shadowlands_legacy.signet_of_tormented_kings )
+    cooldown.legacy_signet_of_tormented_kings->duration = find_spell( 335266 )->internal_cooldown();
 
   parse_player_effects_t::create_actions();
 }
@@ -9121,6 +10398,45 @@ void warrior_t::activate()
 }
 
 // warrior_t::reset =========================================================
+
+
+// BracketSim legacy compatibility: Vision of Perfection (Heart of Azeroth major
+// essence). The engine procs it and calls this; each spec fires its signature
+// cooldown early, at the fraction of its duration the essence grants.
+void warrior_t::vision_of_perfection_proc()
+{
+  auto essence = find_azerite_essence( "Vision of Perfection" );
+  if ( !essence.enabled() )
+    return;
+
+  double mult = essence.spell( 1u )->effectN( 1 ).percent() +
+                essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
+
+  buff_t* window = nullptr;
+  switch ( specialization() )
+  {
+    case WARRIOR_ARMS:
+      window = buff.avatar;
+      break;
+    case WARRIOR_FURY:
+      window = buff.recklessness;
+      break;
+    case WARRIOR_PROTECTION:
+      window = buff.avatar;
+      break;
+    default:
+      break;
+  }
+
+  if ( !window || mult <= 0 )
+    return;
+
+  timespan_t dur = window->buff_duration() * mult;
+  if ( window->check() )
+    window->extend_duration( dur );
+  else
+    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+}
 
 void warrior_t::reset()
 {
@@ -9321,6 +10637,49 @@ double warrior_t::composite_parry() const
 
 // warrior_t::composite_attack_power_multiplier ==============================
 
+// BracketSim legacy compatibility: Exploiter marks the target for extra damage.
+// BracketSim legacy compatibility: Signet of Tormented Kings. Casting one of
+// the three cooldowns rolls evenly between the other two at reduced duration.
+// Avatar and Recklessness are pure windows, so those are granted directly;
+// Bladestorm is real damage, so the actor's own Bladestorm is fired with its
+// cooldown reset rather than a second copy being built at load time - building
+// copies of these three aborts actor initialisation.
+void warrior_t::trigger_legacy_signet( signet_ability first, signet_ability second )
+{
+  if ( !shadowlands_legacy.signet_of_tormented_kings )
+    return;
+
+  if ( cooldown.legacy_signet_of_tormented_kings->down() )
+    return;
+
+  cooldown.legacy_signet_of_tormented_kings->start();
+
+  const spell_data_t* signet = find_spell( 335266 );
+  switch ( rng().roll( 0.5 ) ? first : second )
+  {
+    case signet_ability::AVATAR:
+      buff.avatar->extend_duration_or_trigger( signet->effectN( 2 ).time_value() );
+      break;
+    case signet_ability::RECKLESSNESS:
+      buff.recklessness->extend_duration_or_trigger( signet->effectN( 1 ).time_value() );
+      break;
+    case signet_ability::BLADESTORM:
+      if ( action_t* storm = find_action( "bladestorm" ) )
+        storm->cooldown->reset( false );
+      break;
+  }
+}
+
+double warrior_t::composite_player_target_multiplier( player_t* target, school_e school ) const
+{
+  double m = parse_player_effects_t::composite_player_target_multiplier( target, school );
+
+  // BracketSim legacy (27 Sep 2026): Exploiter no longer lives here - it made EVERY attack +50% for 30 s after each
+  // Execute (60 Arms: the legendary read +46%). It is Mortal Strike's alone; see mortal_strike_t.
+
+  return m;
+}
+
 double warrior_t::composite_attack_power_multiplier() const
 {
   double ap = parse_player_effects_t::composite_attack_power_multiplier();
@@ -9496,6 +10855,18 @@ void warrior_t::assess_damage( school_e school, result_amount_type type, action_
     cooldown.rage_from_auto_attack->start( cooldown.rage_from_auto_attack->duration );
   }
 
+  // Legacy Azerite: Iron Fortress retaliates against a blocked hit.
+  if ( azerite.iron_fortress.enabled() && active.legacy_iron_fortress &&
+       cooldown.legacy_iron_fortress_icd->up() &&
+       ( s->block_result == BLOCK_RESULT_BLOCKED || s->block_result == BLOCK_RESULT_CRIT_BLOCKED ) &&
+       s->action->player->is_enemy() )
+  {
+    debug_cast<legacy_iron_fortress_t*>( active.legacy_iron_fortress )->crit_blocked =
+        s->block_result == BLOCK_RESULT_CRIT_BLOCKED;
+    active.legacy_iron_fortress->execute_on_target( s->action->player );
+    cooldown.legacy_iron_fortress_icd->start();
+  }
+
   if ( talents.protection.tough_as_nails->ok() && cooldown.tough_as_nails_icd -> up() &&
     ( s -> block_result == BLOCK_RESULT_BLOCKED || s -> block_result == BLOCK_RESULT_CRIT_BLOCKED ) &&
     s -> action -> player -> is_enemy() )
@@ -9537,6 +10908,10 @@ void warrior_t::create_options()
 {
   parse_player_effects_t::create_options();
 
+  add_option( opt_bool( "warrior.legacy_shadowlands_enabled",
+                        shadowlands_legacy.legacy_shadowlands_enabled ) );
+  add_option( opt_string( "warrior.legacy_covenant", legacy_covenant.chosen ) );
+  add_option( opt_string( "warrior.legacy_conduits", legacy_conduits.option ) );
   add_option( opt_bool( "non_dps_mechanics", non_dps_mechanics ) );
   add_option( opt_bool( "warrior_fixed_time", warrior_fixed_time ) );
   add_option( opt_int( "into_the_fray_friends", into_the_fray_friends ) );

@@ -997,6 +997,7 @@ player_t::player_t( sim_t* s, player_e t, util::string_view n, race_e r )
     precombat_initialized( false ),
     potion_used( false ),
     leech_pool( 0 ),
+    weighted_blades_active( false ),
     region_str( s->default_region_str ),
     server_str( s->default_server_str ),
     origin_str(),
@@ -1770,6 +1771,34 @@ void player_t::init_initial_stats()
         total_gear.add_stat( stat, gear.get_stat( stat ) );
     }
 
+    /*
+     * BracketSim legacy compatibility: Desolation Battlegear, item set 660 - the
+     * Burning Crusade dungeon mail set (Helm, Hauberk, Gauntlets, Pauldrons and
+     * Greaves of Desolation). Its bonuses still work for a twink in-game, and this
+     * engine carried no data for them - nor does Raidbots' (checked on 15 September
+     * 2026: four pieces equipped, no bonus). Values from the in-game tooltip, which
+     * the author confirmed do not scale with level:
+     *   (2) Increases your critical strike by 13.
+     *   (4) Your attacks have a chance to grant you 25 Agility for 15 sec. (1%)
+     * The 2-piece is added to gear stats, so it behaves like any item stat; the
+     * 4-piece proc is built in init_special_effects. Each item counts once, as
+     * set_bonus_t counts.
+     */
+    {
+      std::vector<unsigned> desolation;
+      for ( const auto& item : items )
+      {
+        unsigned id = item.parsed.data.id;
+        if ( id && item.parsed.data.id_set == 660 && range::find( desolation, id ) == desolation.end() )
+          desolation.push_back( id );
+      }
+      if ( desolation.size() >= 2 )
+      {
+        total_gear.add_stat( STAT_CRIT_RATING, 13 );
+        sim->print_debug( "{} Desolation Battlegear (2): +13 critical strike", *this );
+      }
+    }
+
     sim->print_debug( "{} total gear stats: {}", *this, total_gear );
 
     initial.stats += enchant;
@@ -2234,6 +2263,169 @@ void player_t::init_special_effects()
   }
 
   sim->print_debug( "Initializing special effects for {}.", *this );
+
+  // BracketSim legacy compatibility: Desolation Battlegear (4) - see
+  // init_initial_stats for the set and its source. "Your attacks" is taken as
+  // melee and ranged attacks and abilities, not spells; the tooltip names no
+  // cooldown, only the 1% chance.
+  {
+    std::vector<unsigned> desolation;
+    for ( const auto& item : items )
+    {
+      unsigned id = item.parsed.data.id;
+      if ( id && item.parsed.data.id_set == 660 && range::find( desolation, id ) == desolation.end() )
+        desolation.push_back( id );
+    }
+    if ( desolation.size() >= 4 )
+    {
+      auto effect          = new special_effect_t( this );
+      effect->name_str     = "desolation_battlegear";
+      effect->proc_flags_  = PF_MELEE | PF_MELEE_ABILITY | PF_RANGED | PF_RANGED_ABILITY;
+      effect->proc_flags2_ = PF2_ALL_HIT;
+      effect->proc_chance_ = 0.01;
+      effect->ppm_         = 0;
+      effect->cooldown_    = timespan_t::zero();
+      effect->custom_buff  = make_buff<stat_buff_t>( this, "desolation_battlegear" )
+                               ->add_stat( STAT_AGILITY, 25 )
+                               ->set_duration( 15_s );
+      effect->disable_action();
+      special_effects.push_back( effect );
+      new dbc_proc_callback_t( this, *effect );
+      sim->print_debug( "{} Desolation Battlegear (4): 1% attack proc, +25 Agility for 15s", *this );
+    }
+  }
+
+  // BracketSim legacy compatibility: The Twin Blades of Azzinoth, set 699.
+  //
+  // the author, 18 September 2026, asked for this one by name: *"yes port that too"*.
+  // It is the last classic legendary with an effect worth having - Golad and
+  // Tiriosh, Val'anyr and Thori'dal he has ruled out as stat sticks.
+  //
+  // WHY IT IS HERE AND NOT IN unique_gear.cpp WITH THE OTHER LEGENDARIES. Every
+  // other legacy weapon hangs off an item effect row: the client says "item
+  // 17182 triggers spell 21162 on hit" and registering that spell id is the
+  // whole job. The Warglaives have NO effect rows -
+  //
+  //   item 32837 (main hand)   no rows in item_effect
+  //   item 32838 (off hand)    no rows in item_effect
+  //
+  // - because in the game the proc never came from the items. It came from the
+  // SET, through ItemSet -> ItemSetSpell, and SimulationCraft's extract carries
+  // ItemSetSpell only for the tier sets it cares about. So there is no spell id
+  // to register against and the pair has to be detected directly, which is
+  // exactly what Desolation Battlegear above does and why this sits beside it.
+  //
+  // THE SET MEMBERSHIP IS REAL DATA, not an assumption: both glaives carry
+  // id_set 699 in this client's own item table, which is what the loop reads.
+  // Had that been missing too, this would have been a pair of hardcoded item
+  // ids and much weaker.
+  //
+  // CONFIRMED IN GAME, 18 September 2026. the author equipped both glaives on a level
+  // 40 monk and sent the tooltip:
+  //
+  //     The Twin Blades of Azzinoth (0/2)
+  //     (2) Set: Increases attack power by 30 when fighting Demons.
+  //     (2) Set: Your melee attacks have a chance to increase your haste by 66
+  //              for 10 sec.
+  //
+  // So two of the three assumptions below are now readings:
+  //
+  //   1. IT STILL FIRES. The set exists in Midnight and still grants the bonus.
+  //      The worry that Blizzard had dropped it was unfounded.
+  //   2. THE MAGNITUDE IS 66 HASTE FOR 10 SECONDS, exactly as carried. Wowhead's
+  //      live render was right and wowsims' 450 was the TBC-era rating, which is
+  //      the trap Volatile Solvent nearly fell into - a raw rating does not
+  //      survive an expansion.
+  //
+  // STILL ASSUMED, and it is the only one left: THE RATE. 1.0 PPM with a 45
+  // second internal cooldown, from wowsims' dormant TBC set file. The tooltip
+  // states no cooldown at all, so neither number is confirmed. The internal
+  // cooldown does most of the work either way - one proc per 45 seconds caps
+  // the buff at 22% uptime however often it rolls - so an error in the PPM is
+  // bounded, and an error in the ICD is not.
+  //
+  // The other half, "+30 attack power when fighting Demons", is deliberately not
+  // modelled: the sim's target is a generic boss, not a demon, so applying it
+  // would credit damage this project has no business claiming.
+  //
+  // Also read from the same tooltip, and consistent with the item table used
+  // above: item level 42 on a level 40 character (base row 33), speed 2.60,
+  // Unique, and usable by warrior, rogue, death knight, monk and demon hunter.
+  {
+    std::vector<unsigned> glaives;
+    for ( const auto& item : items )
+    {
+      unsigned id = item.parsed.data.id;
+      if ( id && item.parsed.data.id_set == 699 && range::find( glaives, id ) == glaives.end() )
+        glaives.push_back( id );
+    }
+    if ( glaives.size() >= 2 )
+    {
+      auto effect          = new special_effect_t( this );
+      effect->name_str     = "twin_blades_of_azzinoth";
+      effect->proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+      effect->proc_flags2_ = PF2_ALL_HIT;
+      effect->ppm_         = 1.0;
+      effect->proc_chance_ = 0;
+      effect->cooldown_    = timespan_t::from_seconds( 45 );
+      effect->custom_buff  = make_buff<stat_buff_t>( this, "twin_blades_of_azzinoth" )
+                               ->add_stat( STAT_HASTE_RATING, 66.0 )
+                               ->set_duration( 10_s );
+      effect->disable_action();
+      special_effects.push_back( effect );
+      new dbc_proc_callback_t( this, *effect );
+      sim->print_debug( "{} Twin Blades of Azzinoth: 1 PPM, +66 haste for 10s, 45s ICD", *this );
+    }
+  }
+
+  // BracketSim: WEIGHTED BLADES - +45% Sinister Strike, from the EPIC stages of
+  // the rogue legendary chain.
+  //
+  // the author, 19 September 2026: *"the rogue legendary daggers are just stat sticks
+  // at this point ... hence why i asked for the modelling of the epic daggers
+  // since they actually have the sinister strike buff which might make it better
+  // then the leggo daggers"*. That comparison is the whole point of this block.
+  //
+  //   1089  Fear 77945      + Vengeance 77946    Jaws of Retribution   +45%
+  //   1088  The Sleeper 77947 + The Dreamer 77948 Maw of Oblivion      +45%
+  //   1087  Golad 77949     + Tiriosh 77950      Fangs of the Father   NOTHING
+  //
+  // Golad and Tiriosh are excluded on purpose: the legendary pair's set bonus is
+  // disabled in the live game, which is exactly why the epics can beat it.
+  //
+  // Spell 110211 is hollow in this client - every coefficient reads 0.000000 -
+  // so apply_affecting_aura has nothing to read and the 45% is stated here,
+  // once, next to its source: wowhead.com/spell=110211. Two published sources
+  // are wrong and were not followed: Icy Veins puts the 45% on Fangs of the
+  // Father, and wowsims models the stacking Agility with no 45% modifier at all.
+  //
+  // REVEALING STRIKE IS NOT MODELLED because it does not exist: the ability was
+  // removed from the game and there is no revealing_strike_t in this engine.
+  // Sinister Strike is the whole of the effect here.
+  //
+  // Detected by id_set rather than by item id pairs, matching the Warglaive
+  // block above: a set is what the client says it is, and a pair cannot be faked
+  // with two main hands.
+  {
+    static constexpr std::array<unsigned, 2> weighted_blade_sets = { 1089, 1088 };
+    for ( unsigned set_id : weighted_blade_sets )
+    {
+      std::vector<unsigned> pair;
+      for ( const auto& item : items )
+      {
+        unsigned id = item.parsed.data.id;
+        if ( id && item.parsed.data.id_set == set_id &&
+             range::find( pair, id ) == pair.end() )
+          pair.push_back( id );
+      }
+      if ( pair.size() >= 2 )
+      {
+        weighted_blades_active = true;
+        sim->print_debug( "{} Weighted Blades (set {}): +45% Sinister Strike", *this, set_id );
+        break;
+      }
+    }
+  }
 
   // ..and then move on to second phase initialization of all special effects.
   unique_gear::init( this );
@@ -4194,6 +4386,200 @@ void player_t::create_actions()
     def.insert( def.begin(), { "use_item,slot=shirt", "" } );
   }
 
+  // The placement rules below walk an action list's ENTRIES. A profile that
+  // supplies its own `actions=` has only the STRING form at this point - the
+  // split into entries happens further down this function - so the walk found
+  // an empty list, fell through to `def.begin()` and put the ability at the very
+  // top of the priority, above everything the profile asked for.
+  //
+  // That is not a cosmetic misplacement. A Night Fae feral druid re-run through
+  // its own saved action list cast Convoke the Spirits twice as often as the
+  // generated list did and read 16% high; the APL tuner refused the character
+  // because its replay gate caught exactly this. Materialise every list first so
+  // the placement rules have entries to read. Clearing the string keeps the
+  // assert below (one form or the other, never both) true and makes the split
+  // loop skip what has already been converted.
+  for ( auto apl : action_priority_list )
+  {
+    if ( !apl->action_list_str.empty() && apl->action_list.empty() )
+    {
+      for ( auto& split : util::string_split<util::string_view>( apl->action_list_str, "/" ) )
+        apl->action_list.emplace_back( split, "" );
+      apl->action_list_str.clear();
+    }
+  }
+
+  // BracketSim legacy compatibility: put the Shadowlands covenant abilities into
+  // the rotation. Without this an imported profile never presses them at all and
+  // still reports a perfectly plausible number, which is the worst kind of wrong.
+  //
+  // They go ABOVE the first call_action_list/run_action_list. run_action_list
+  // never returns, so anything appended after it is dead code - the first attempt
+  // at this appended to the end of the list and the ability was still never cast.
+  // The same problem one expansion earlier: a Battle for Azeroth major essence
+  // is a button, and nothing was pressing it. The class modules fill
+  // legacy_apl_actions for covenant abilities; azerite_data.cpp fills nothing,
+  // so an imported Heart of Azeroth cast its major exactly never and still
+  // reported a number. It joins the same queue as the covenant abilities and is
+  // placed by the same rule below.
+  if ( is_player() && azerite_essence &&
+       !util::str_compare_ci( legacy_apl_placement, "none" ) )
+  {
+    auto name = azerite::major_action_name( azerite_essence->major_essence_id() );
+    if ( !name.empty() && range::find( legacy_apl_actions, name ) == legacy_apl_actions.end() )
+    {
+      legacy_apl_actions.emplace_back( name );
+    }
+  }
+
+  // BracketSim legacy compatibility: Fleshcraft, for Volatile Solvent.
+  //
+  // Only Volatile Solvent makes Fleshcraft a damage button - the shield and the
+  // damage reduction are defensive, and Pustule Eruption's spell is gone from
+  // the client. So it is injected only for the trait that pays for it, and an
+  // actor without the trait never spends the global.
+  //
+  // THE THREE OPTIONS ON THE LINE ARE THE WHOLE POINT. The mastery lands when
+  // the cast starts, at its full two minutes, however little of the three
+  // second channel is finished. Interrupting immediately turns a three second
+  // channel into a one global cooldown purchase, which is exactly what every
+  // Shadowlands action list did with it.
+  if ( is_player() && legacy_soulbinds.has( legacy_soulbind::VOLATILE_SOLVENT ) &&
+       !util::str_compare_ci( legacy_apl_placement, "none" ) )
+  {
+    // Precombat FIRST, and unconditionally. the author pre-casts it every pull, every
+    // Shadowlands action list opened with it, and a precombat channel costs
+    // nothing at all - composite_dot_duration() returns zero there, so the cast
+    // hands over the buff and ends.
+    //
+    // It also has to exist for a second reason that has nothing to do with the
+    // opener: The First Sigil fires a FREE Fleshcraft, and it finds that
+    // Fleshcraft by looking through this actor's action list. Injecting here
+    // rather than only under the refresh option keeps the trinket working when
+    // the refresh is switched off, which is what makes the refresh measurable in
+    // isolation.
+    auto& pre = get_action_priority_list( "precombat" )->action_list;
+    if ( range::find_if( pre, []( const action_priority_t& ap ) {
+           return util::str_prefix_ci( ap.action_, "fleshcraft" );
+         } ) == pre.end() )
+    {
+      pre.emplace_back( "fleshcraft", "BracketSim legacy ability" );
+    }
+
+    // And then the in-combat refresh. MEASURED, level 60 Necrolord demonology
+    // warlock, 20,000 iterations, 300 second patchwerk:
+    //
+    //   no trait at all                         13,045
+    //   trait, pre-pull cast only  (40% uptime) 13,129   +0.64%
+    //   trait, refreshed in combat (99% uptime) 13,132   +0.67%
+    //
+    // So the refresh is worth +3 DPS - inside the 0.03% error bar. Nearly the
+    // whole value of the trait comes from the pre-pull cast, because the extra
+    // two minutes of uptime buys back almost exactly the two globals it costs.
+    // the author, 18 September 2026: *"if it doesnt give more damage by channeling it
+    // then we dont have to cast it during the fight"*. It does not - and it does
+    // not cost anything either, so it stays on: it is what a player actually
+    // does, and a spec with cheaper globals or steeper mastery scaling can only
+    // gain from it. legacy_fleshcraft_refresh=0 switches it off.
+    //
+    // IT WAS NOT ALWAYS FREE. Written first with interrupt_if=1, this line cost
+    // 121 DPS (-0.9%): interrupt_if only fires on a tick boundary and left 1.7
+    // seconds of dead channel on every cast. cancel_if ends it at the first
+    // evaluation - channel ticks per fight went from 12 to 2. A sloppy cancel
+    // made a free ability look like a real loss, which is worth remembering the
+    // next time a Shadowlands action list looks needlessly fussy.
+    if ( legacy_fleshcraft_refresh )
+    {
+      // cancel_if rather than interrupt_if, which is what Shadowlands' own
+      // WARLOCK list used for this exact line. The buff is already banked by
+      // execute(), so the condition is true from the first evaluation and the
+      // channel ends at the earliest moment the engine allows. interrupt_if
+      // waits for a tick boundary and measured 1.7s of dead channel per cast.
+      legacy_apl_actions.emplace_back( "fleshcraft,if=buff.volatile_solvent_humanoid.down,"
+                                       "cancel_if=buff.volatile_solvent_humanoid.up,"
+                                       "interrupt_immediate=1,interrupt_global=1" );
+    }
+  }
+
+  if ( is_player() && !legacy_apl_actions.empty() &&
+       !util::str_compare_ci( legacy_apl_placement, "none" ) )
+  {
+    // A cooldown ability belongs in the class's own cooldown list where one
+    // exists: that list is called at the moments the spec actually wants
+    // cooldowns, so the ability lines up with the rest of the burst instead of
+    // being fired the instant it comes off cooldown.
+    action_priority_list_t* cds = nullptr;
+    if ( !util::str_compare_ci( legacy_apl_placement, "default" ) )
+    {
+      for ( auto name : { "cds", "cooldowns" } )
+      {
+        auto candidate = find_action_priority_list( name );
+        if ( candidate && !candidate->action_list.empty() )
+        {
+          cds = candidate;
+          break;
+        }
+      }
+    }
+
+    // Injecting twice is a real hazard, not a theoretical one: a saved profile
+    // carries the first injection in its text, so re-running it would add a
+    // second copy and press the ability twice as often. The marker comment does
+    // not survive `save=`, so the test is the entry itself - a BARE action name,
+    // which is what this code writes and what no generated list contains (the
+    // shipped lists all carry conditions).
+    auto already_injected = [ & ]( const action_priority_list_t* list, const std::string& action ) {
+      return list && range::any_of( list->action_list, [ & ]( const action_priority_t& ap ) {
+        return util::str_compare_ci( ap.action_, action );
+      } );
+    };
+
+    if ( cds )
+    {
+      auto at = cds->action_list.begin();
+      for ( const auto& action : legacy_apl_actions )
+      {
+        if ( already_injected( cds, action ) )
+          continue;
+        at = cds->action_list.insert( at, { action, "BracketSim legacy ability" } ) + 1;
+        sim->print_debug( "{} legacy APL injection into {}: {}", *this, cds->name_str, action );
+      }
+    }
+    else
+    {
+
+    auto& def = get_action_priority_list( "default" )->action_list;
+
+    // Leading variable assignments and snapshot_stats are left in front, so the
+    // list still sets up its own state before anything is pressed.
+    auto at = def.begin();
+    for ( auto it = def.begin(); it != def.end(); ++it )
+    {
+      if ( util::str_in_str_ci( it->action_, "call_action_list" ) ||
+           util::str_in_str_ci( it->action_, "run_action_list" ) )
+      {
+        at = it;
+        break;
+      }
+      if ( util::str_prefix_ci( it->action_, "variable" ) ||
+           util::str_prefix_ci( it->action_, "snapshot_stats" ) )
+      {
+        at = it + 1;
+      }
+    }
+
+    auto* def_list = get_action_priority_list( "default" );
+    for ( const auto& action : legacy_apl_actions )
+    {
+      if ( already_injected( def_list, action ) )
+        continue;
+      at = def.insert( at, { action, "BracketSim legacy ability" } ) + 1;
+      sim->print_debug( "{} legacy APL injection into default: {}", *this, action );
+    }
+
+    }
+  }
+
   int j = 0;
 
   auto apls = sorted_action_priority_lists( this );
@@ -4821,6 +5207,88 @@ void player_t::create_buffs()
 {
   sim->print_debug( "Creating Auras, Buffs, and Debuffs for {}.", *this );
 
+  // BracketSim legacy compatibility: Shadowlands soulbind traits. Done here so
+  // every class gets them without touching twelve class modules.
+  legacy_soulbinds.chosen.parse();
+  legacy_soulbinds.create_buffs( this );
+
+  // BracketSim: the buffs with no spell, built from what the profile states.
+  //
+  // Both are refused loudly rather than ignored quietly. A silently dropped
+  // option is how `temporary_enchant=howling_rune_3` returned the same dps as
+  // `temporary_enchant=made_up_thing` for a whole day.
+  if ( !is_enemy() && !bracketsim.creature_damage.empty() )
+  {
+    auto parts = util::string_split<util::string_view>( bracketsim.creature_damage, "/" );
+    if ( parts.size() != 2 )
+      throw std::invalid_argument( "bracketsim_creature_damage wants <percent>/<creature type>" );
+    double pct = util::to_double( parts[ 0 ] ) / 100.0;
+    race_e race = util::parse_race_type( parts[ 1 ] );
+    if ( race == RACE_NONE || race == RACE_UNKNOWN )
+      throw std::invalid_argument( fmt::format( "bracketsim_creature_damage: unknown creature type '{}'",
+                                                parts[ 1 ] ) );
+    // Passive: a null buff means composite_versus_multiplier applies it always,
+    // which is what carrying the Journal's buff means.
+    buffs.creature_type_buffs.emplace_back( nullptr, 1u << ( race - 1 ), pct );
+    sim->print_debug( "{} BracketSim creature damage +{}% versus {}", *this, pct * 100.0,
+                      util::race_type_string( race ) );
+  }
+
+  if ( !is_enemy() && !bracketsim.raid_haste.empty() )
+  {
+    auto parts = util::string_split<util::string_view>( bracketsim.raid_haste, "/" );
+    if ( parts.size() != 3 )
+      throw std::invalid_argument(
+        "bracketsim_raid_haste wants <percent>/<duration seconds>/<period seconds>" );
+    double pct = util::to_double( parts[ 0 ] ) / 100.0;
+    timespan_t duration = timespan_t::from_seconds( util::to_double( parts[ 1 ] ) );
+    timespan_t period = timespan_t::from_seconds( util::to_double( parts[ 2 ] ) );
+    if ( pct <= 0 || duration <= 0_ms || period <= 0_ms )
+      throw std::invalid_argument( "bracketsim_raid_haste: every value must be positive" );
+
+    bracketsim.raid_haste_buff = make_buff( this, "bracketsim_raid_haste" )
+      ->set_default_value( pct )
+      ->set_duration( duration )
+      ->add_invalidate( CACHE_HASTE );
+
+    bracketsim.timed_stat_times.clear();
+    for ( timespan_t at = 0_ms; at < sim->max_time * 1.2; at += period )
+      bracketsim.timed_stat_times.push_back( at );
+    register_timed_buff_triggers( bracketsim.raid_haste_buff, bracketsim.timed_stat_times, duration );
+    sim->print_debug( "{} BracketSim raid haste +{}% for {} every {}", *this, pct * 100.0,
+                      duration, period );
+  }
+
+  if ( !is_enemy() && !bracketsim.timed_stat.empty() )
+  {
+    auto parts = util::string_split<util::string_view>( bracketsim.timed_stat, "/" );
+    if ( parts.size() != 4 )
+      throw std::invalid_argument(
+        "bracketsim_timed_stat wants <stat>/<amount>/<duration seconds>/<period seconds>" );
+    stat_e stat = util::parse_stat_type( parts[ 0 ] );
+    if ( stat == STAT_NONE )
+      throw std::invalid_argument( fmt::format( "bracketsim_timed_stat: unknown stat '{}'", parts[ 0 ] ) );
+    double amount = util::to_double( parts[ 1 ] );
+    timespan_t duration = timespan_t::from_seconds( util::to_double( parts[ 2 ] ) );
+    timespan_t period = timespan_t::from_seconds( util::to_double( parts[ 3 ] ) );
+    if ( amount <= 0 || duration <= 0_ms || period <= 0_ms )
+      throw std::invalid_argument( "bracketsim_timed_stat: amount, duration and period must be positive" );
+
+    auto buff = make_buff<stat_buff_t>( this, "bracketsim_timed_stat" )
+      ->add_stat( stat, amount )
+      ->set_duration( duration );
+
+    // Pressed on cooldown from the pull, which is how a one minute consumable
+    // on a three minute cooldown is really used. The vector lives on the player
+    // because register_timed_buff_triggers keeps a reference to it.
+    bracketsim.timed_stat_times.clear();
+    for ( timespan_t at = 0_ms; at < sim->max_time * 1.2; at += period )
+      bracketsim.timed_stat_times.push_back( at );
+    register_timed_buff_triggers( buff, bracketsim.timed_stat_times, duration );
+    sim->print_debug( "{} BracketSim timed stat {} +{} for {} every {}", *this,
+                      util::stat_type_string( stat ), amount, duration, period );
+  }
+
   // Infinite-Stacking Buffs and De-Buffs for everyone
   buffs.stunned = make_buff( this, "stunned" )
     ->set_max_stack( 1 )
@@ -4993,6 +5461,11 @@ double player_t::composite_melee_haste() const
 
     if ( buffs.bloodlust->check() )
       h *= 1.0 / ( 1.0 + buffs.bloodlust->check_stack_value() );
+
+    // BracketSim: Drums of Fury and anything else that hastes the raid without
+    // being Bloodlust. See bracketsim_raid_haste.
+    if ( bracketsim.raid_haste_buff && bracketsim.raid_haste_buff->check() )
+      h *= 1.0 / ( 1.0 + bracketsim.raid_haste_buff->check_value() );
   }
 
   return h;
@@ -5331,6 +5804,11 @@ double player_t::composite_spell_haste() const
 
     if ( buffs.bloodlust->check() )
       h *= 1.0 / ( 1.0 + buffs.bloodlust->check_stack_value() );
+
+    // BracketSim: Drums of Fury and anything else that hastes the raid without
+    // being Bloodlust. See bracketsim_raid_haste.
+    if ( bracketsim.raid_haste_buff && bracketsim.raid_haste_buff->check() )
+      h *= 1.0 / ( 1.0 + bracketsim.raid_haste_buff->check_value() );
   }
 
   return h;
@@ -5546,6 +6024,9 @@ double player_t::composite_player_multiplier( school_e school ) const
 {
   double m = current.damage_multiplier[ school ];
 
+  // BracketSim legacy compatibility: Shadowlands soulbind traits.
+  m *= legacy_soulbinds.player_multiplier( this );
+
   if ( buffs.taste_of_mana && buffs.taste_of_mana->has_common_school( school ) )
     m *= 1.0 + buffs.taste_of_mana->check_value();
 
@@ -5587,6 +6068,10 @@ double player_t::composite_versus_multiplier( player_t* t ) const
 double player_t::composite_player_target_multiplier( player_t* t, school_e /* school */ ) const
 {
   double m = 1.0;
+
+  // BracketSim legacy compatibility: Shadowlands soulbind traits that key off
+  // the target rather than off the player.
+  m *= legacy_soulbinds.target_multiplier( this, t );
 
   auto td = find_target_data( t );
   if ( td )
@@ -5760,6 +6245,7 @@ double player_t::composite_attribute_multiplier( attribute_e attr ) const
 
   if ( is_pet() || is_enemy() || type == HEALING_ENEMY )
     return m;
+
 
   if ( ( true_level >= 27 ) && matching_gear )
     m *= matching_gear_multiplier( attr );
@@ -6140,6 +6626,10 @@ void player_t::combat_begin()
 {
   if ( !precombat_initialized )
     precombat_init();
+
+  // BracketSim legacy compatibility: Shadowlands soulbind traits that are up
+  // from the pull, or that ramp on a timer rather than on a proc.
+  legacy_soulbinds.combat_begin( this );
 
   // Trigger registered pre-pull functions
   for ( const auto& f : precombat_begin_functions )
@@ -7114,6 +7604,10 @@ void player_t::arise()
     consumables.food_action->execute();
   if ( consumables.augmentation && consumables.augmentation_action )
     consumables.augmentation_action->execute();
+  // After the flask, so that a profile which names both keeps the flask
+  // rather than silently dropping it for the elixir.
+  if ( ( consumables.battle_elixir || consumables.guardian_elixir ) && consumables.elixir_action )
+    consumables.elixir_action->execute();
 
   // Requires index-based lookup since on-arise callbacks may
   // insert new on-arise callbacks to the vector.
@@ -11084,6 +11578,12 @@ action_t* player_t::create_action( util::string_view name, util::string_view opt
   if ( name == "thorn_bloom" )
     return new thorn_bloom_t( this, options_str );
 
+  // BracketSim legacy compatibility: Fleshcraft, the Necrolord class ability.
+  // It belongs here rather than in a class module because it is the same button
+  // for all twelve classes - see legacy_soulbind_effects.cpp.
+  if ( auto* legacy = legacy_soulbind::create_action( this, name, options_str ) )
+    return legacy;
+
   if ( name == "cancel_action" )
     return new cancel_action_t( this, options_str );
   if ( name == "cancel_buff" )
@@ -12926,6 +13426,8 @@ std::string player_t::create_profile( save_e stype )
         profile_str += "potion=" + potion_option + term;
       if ( !flask_option.empty() )
         profile_str += "flask=" + flask_option + term;
+      if ( !elixir_str.empty() )
+        profile_str += "elixir=" + elixir_str + term;
       if ( !food_option.empty() )
         profile_str += "food=" + food_option + term;
       if ( !rune_option.empty() )
@@ -13200,6 +13702,7 @@ void player_t::copy_from( player_t* source )
 
   potion_str = source->potion_str;
   flask_str  = source->flask_str;
+  elixir_str = source->elixir_str;
   food_str   = source->food_str;
   rune_str   = source->rune_str;
   temporary_enchant_str = source->temporary_enchant_str;
@@ -13211,6 +13714,16 @@ void player_t::create_options()
 {
   options.reserve( 180 );
   add_option( opt_string( "name", name_str ) );
+  // BracketSim legacy compatibility: Shadowlands soulbind traits, given as a
+  // slash separated list of trait spell ids or snake_case names, e.g.
+  //   legacy_soulbinds=329778/333935
+  //   legacy_soulbinds=pointed_courage/hammer_of_genesis
+  // legacy_soulbind_allies is how many friendly players stand near you, which
+  // several traits scale off and a single actor sim cannot observe.
+  add_option( opt_string( "legacy_soulbinds", legacy_soulbinds.chosen.option ) );
+  add_option( opt_string( "legacy_apl_placement", legacy_apl_placement ) );
+  add_option( opt_bool( "legacy_fleshcraft_refresh", legacy_fleshcraft_refresh ) );
+  add_option( opt_int( "legacy_soulbind_allies", legacy_soulbinds.nearby_allies, 0, 40 ) );
   add_option( opt_func( "origin", parse_origin ) );
   add_option( opt_func( "source", parse_source ) );
   add_option( opt_string( "region", region_str ) );
@@ -13275,6 +13788,7 @@ void player_t::create_options()
   add_option( opt_string( "potion", potion_str ) );
   add_option( opt_string( "flask", flask_str ) );
   add_option( opt_string( "phial", flask_str ) );
+  add_option( opt_string( "elixir", elixir_str ) );
   add_option( opt_string( "food", food_str ) );
   add_option( opt_string( "augmentation", rune_str ) );
   add_option( opt_string( "temporary_enchant", temporary_enchant_str ) );
@@ -13484,6 +13998,13 @@ void player_t::create_options()
 
     return true;
   } ) );
+
+  // BracketSim: real buffs with no spell in this build. See player.hpp.
+  add_option( opt_string( "bracketsim_creature_damage", bracketsim.creature_damage ) );
+  add_option( opt_string( "bracketsim_timed_stat", bracketsim.timed_stat ) );
+  add_option( opt_string( "bracketsim_raid_haste", bracketsim.raid_haste ) );
+  add_option( opt_float( "bracketsim_dragonwrath_chance",
+                         bracketsim.dragonwrath_chance, 0.0, 1.0 ) );
 
   // Invoke External Buffs
   add_option( opt_string( "external_buffs.pool", external_buffs.pool ) );

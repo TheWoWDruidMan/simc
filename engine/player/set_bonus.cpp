@@ -283,6 +283,19 @@ void set_bonus_t::initialize()
 
         bool is_enabled = is_enabled_2p || is_enabled_4p;
 
+        // BracketSim: a twink cannot use a set bonus from before The War Within.
+        // the author, 15 September 2026: "only TWW S1-S3 to current xpac should be
+        // active, that means SL/DF and before" are disabled in-game. Stock
+        // SimulationCraft applies Shadowlands season 3 and every Dragonflight set
+        // whenever enough pieces are worn; bracketsim_legacy_set_bonuses=1 restores
+        // that behaviour for comparison.
+        if ( !actor->sim->bracketsim_legacy_set_bonuses && !util::str_prefix_ci( data.bonus->tier, "TWW" ) &&
+             !util::str_prefix_ci( data.bonus->tier, "MID" ) )
+        {
+          data.enabled = false;
+          continue;
+        }
+
         if ( is_equippable && ( is_overridden || is_in_range || is_enabled ) )
         {
           if ( is_disabled_2p || is_disabled_4p )

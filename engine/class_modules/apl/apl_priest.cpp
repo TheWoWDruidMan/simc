@@ -20,8 +20,14 @@ std::string potion( const player_t* p )
 
 std::string flask( const player_t* p )
 {
+  // BracketSim legacy compatibility: the low-level branch named a POTION.
+  //
+  // `tempered_potion_3` is a potion, not a flask, so every Discipline priest at
+  // or below level 80 died at init with "Invalid consumable 'tempered_potion_3'
+  // ... Unable to find consumable" - the author's level 80 a test character among them.
+  // The other specs' branch beside it has the flask this should have been.
   if ( p->specialization() == PRIEST_DISCIPLINE )
-    return ( p->true_level > 80 ) ? "flask_of_the_blood_knights_2" : "tempered_potion_3";
+    return ( p->true_level > 80 ) ? "flask_of_the_blood_knights_2" : "flask_of_alchemical_chaos_3";
 
   return ( p->true_level > 80 ) ? "flask_of_the_magisters_2" : "flask_of_alchemical_chaos_3";
 }

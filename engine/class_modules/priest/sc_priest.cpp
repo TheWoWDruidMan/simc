@@ -15,6 +15,9 @@
 
 #include "simulationcraft.hpp"
 
+// BracketSim legacy compatibility: Shadowlands conduits.
+#include "player/legacy_conduits.hpp"
+
 namespace priestspace
 {
 namespace buffs
@@ -175,6 +178,76 @@ struct expiation_t final : public priest_spell_t
 };
 
 // ==========================================================================
+// Painbreaker Psalm (BracketSim legacy compatibility)
+// ==========================================================================
+// Shadow Word: Death consumes 8 seconds of Shadow Word: Pain AND Vampiric
+// Touch, deals that damage at once and returns Insanity.
+//
+// Modelled on expiation_t directly above, which consumes dot time the same way
+// for one dot, so the dot accounting and the "no dot, no damage" case behave
+// identically here rather than being invented a second time.
+//
+// The Insanity is read as pro-rata. The tooltip says "up to" 2 x 336167 s2/10
+// - 15 per dot, 30 for both - and a dot with less than 8 seconds left cannot
+// give its full share. The per-dot amount and the two-dot total come from the
+// data; only the pro-rata reading of "up to" is an assumption.
+struct painbreaker_psalm_t final : public priest_spell_t
+{
+  timespan_t consume_time;
+  double insanity_per_dot;
+
+  painbreaker_psalm_t( priest_t& p )
+    : priest_spell_t( "painbreaker_psalm", p, p.find_spell( 336167 ) ),
+      consume_time(
+          timespan_t::from_seconds( p.find_spell( 336165 )->effectN( 1 ).base_value() ) ),
+      // Effect 2 is a dummy holding tenths of Insanity, not a resource effect.
+      // The spell's own description divides it by 10; resource() would apply
+      // the Insanity divisor of 100 and report 1.5 where the game shows 15.
+      insanity_per_dot( p.find_spell( 336167 )->effectN( 2 ).base_value() / 10.0 )
+  {
+    background = dual = true;
+    // 336167 carries the "Can't Crit" attribute, so this does not roll one.
+    may_crit      = false;
+    tick_may_crit = false;
+    school        = SCHOOL_SHADOW;
+    snapshot_flags &= ~STATE_NO_MULTIPLIER;
+  }
+
+  void execute() override
+  {
+    dot_t* dots[ 2 ] = { td( target )->dots.shadow_word_pain,
+                         td( target )->dots.vampiric_touch };
+
+    double damage   = 0;
+    double insanity = 0;
+
+    for ( dot_t* dot : dots )
+    {
+      if ( !dot || !dot->is_ticking() )
+        continue;
+
+      timespan_t taken  = std::min( consume_time, dot->remains() );
+      double dot_damage = priest().tick_damage_over_time( taken, dot );
+      if ( dot_damage <= 0 )
+        continue;
+
+      damage += dot_damage;
+      insanity += insanity_per_dot * ( taken / consume_time );
+      dot->adjust_duration( -taken );
+    }
+
+    if ( damage <= 0 )
+      return;
+
+    sim->print_debug( "Painbreaker Psalm consumed dots for {}, {} Insanity", damage, insanity );
+    base_dd_min = base_dd_max = damage;
+    priest_spell_t::execute();
+    priest().resource_gain( RESOURCE_INSANITY, insanity,
+                            priest().gains.insanity_legacy_painbreaker_psalm );
+  }
+};
+
+// ==========================================================================
 // Mind Blast
 // ==========================================================================
 struct mind_blast_base_t : public priest_spell_t
@@ -183,6 +256,10 @@ private:
   propagate_const<expiation_t*> child_expiation;
 
   double void_blast_cdr;
+
+  // Legacy Azerite: Whispers of the Damned
+  double legacy_whispers_value = 0.0;
+  double legacy_whispers_insanity = 0.0;
 
 public:
   mind_blast_base_t( priest_t& p, util::string_view options_str, const spell_data_t* s )
@@ -196,6 +273,13 @@ public:
     cooldown->hasted             = true;
     triggers_atonement           = true;
     idol_of_nzoth_execute_stacks = 6;
+
+    // Legacy Azerite: Whispers of the Damned
+    legacy_whispers_value = p.legacy_azerite.whispers_of_the_damned.value( 2 );
+    legacy_whispers_insanity = p.legacy_azerite.whispers_of_the_damned.spell()
+                                   ->effectN( 1 ).trigger()
+                                   ->effectN( 1 ).trigger()
+                                   ->effectN( 1 ).resource( RESOURCE_INSANITY );
 
     if ( priest().talents.discipline.expiation.enabled() )
     {
@@ -241,7 +325,35 @@ public:
       m *= 1 + priest().talents.shadow.insidious_ire->effectN( 1 ).percent();
     }
 
+    // BracketSim legacy compatibility: Mind Devourer. Shadowlands put the rank
+    // value straight on Mind Blast's direct damage. Its other half, a chance to
+    // make the next Devouring Plague cost no insanity, has no spender left to
+    // land on and is not ported.
+    if ( priest().legacy_conduits.has( 113 ) )
+    {
+      m *= 1.0 + priest().legacy_conduits.percent( 113 );
+    }
+
+    // BracketSim legacy compatibility: Talbadar's Stratagem. Its buff whitelists
+    // Mind Blast and Void Blast, which are exactly the two actions built on
+    // this base, so applying it here covers both.
+    if ( priest().buffs.legacy_talbadars_stratagem->check() )
+    {
+      m *= 1 + priest().buffs.legacy_talbadars_stratagem->check_value();
+    }
+
     return m;
+  }
+
+  // Legacy Azerite: Whispers of the Damned
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double d = priest_spell_t::bonus_da( s );
+
+    if ( priest().legacy_azerite.whispers_of_the_damned.enabled() )
+      d += legacy_whispers_value;
+
+    return d;
   }
 
   void impact( action_state_t* s ) override
@@ -249,6 +361,13 @@ public:
     priest_spell_t::impact( s );
 
     [[maybe_unused]] priest_td_t& td = get_td( s->target );
+
+    // Legacy Azerite: Whispers of the Damned adds Insanity on a critical hit.
+    if ( priest().legacy_azerite.whispers_of_the_damned.enabled() && s->result == RESULT_CRIT )
+    {
+      priest().generate_insanity( legacy_whispers_insanity, priest().gains.insanity_whispers_of_the_damned,
+                                  s->action );
+    }
 
     if ( result_is_hit( s->result ) )
     {
@@ -925,6 +1044,17 @@ struct power_infusion_t final : public priest_spell_t
     : priest_spell_t( name, p, p.talents.power_infusion ),
       power_infusion_magnitude( p.buffs.power_infusion->default_value )
   {
+    // BracketSim legacy compatibility: Power Unto Others (conduit 73) shortens
+    // Power Infusion's cooldown, but only when it is cast on an ally - which
+    // is either because the priest is not self-casting, or because Twins of
+    // the Sun Priestess lets an ally cast still buff the priest. Same gate
+    // SimulationCraft used.
+    if ( p.legacy_conduits.has( 73 ) &&
+         ( p.shadowlands_legacy.twins_of_the_sun_priestess || !p.options.self_power_infusion ) )
+    {
+      cooldown->duration -= timespan_t::from_seconds( p.legacy_conduits.value( 73 ) );
+    }
+
     parse_options( options_str );
     harmful = false;
   }
@@ -933,8 +1063,16 @@ struct power_infusion_t final : public priest_spell_t
   {
     priest_spell_t::execute();
 
-    // Trigger PI on the actor only if casting on itself
-    if ( priest().options.self_power_infusion || priest().talents.twins_of_the_sun_priestess.enabled() )
+    // Trigger PI on the actor only if casting on itself.
+    //
+    // BracketSim legacy compatibility: the Twins of the Sun Priestess
+    // runeforge grants the same thing the modern talent does, so it feeds the
+    // condition that already exists rather than a parallel one. At default
+    // options the priest already casts Power Infusion on itself, so this
+    // changes nothing unless priest.self_power_infusion=0 - which is exactly
+    // what the legendary is for, and why it cannot be measured by default.
+    if ( priest().options.self_power_infusion || priest().talents.twins_of_the_sun_priestess.enabled() ||
+         priest().shadowlands_legacy.twins_of_the_sun_priestess )
     {
       priest().buffs.power_infusion->trigger( 1, power_infusion_magnitude, -1,
                                               priest().buffs.power_infusion->buff_duration() );
@@ -960,6 +1098,10 @@ struct mindgames_healing_reversal_t final : public priest_spell_t
     // $healing=${($SPS*$s5/100)*(1+$@versadmg)*$m3/100}
     spell_power_mod.direct = ( priest().talents.pvp.mindgames->effectN( 5 ).base_value() / 100 ) *
                              ( priest().talents.pvp.mindgames->effectN( 3 ).base_value() / 100 );
+
+    // BracketSim legacy compatibility: Shadow Word: Manipulation (7704).
+    if ( priest().shadowlands_legacy.shadow_word_manipulation )
+      base_dd_multiplier *= 1.0 + priest().find_spell( 356392 )->effectN( 2 ).percent();
   }
 };
 
@@ -979,6 +1121,207 @@ struct mindgames_damage_reversal_t final : public priest_heal_t
     // $damage=${($SPS*$s2/100)*(1+$@versadmg)*$m3/100}
     spell_power_mod.direct = ( priest().talents.pvp.mindgames->effectN( 2 ).base_value() / 100 ) *
                              ( priest().talents.pvp.mindgames->effectN( 3 ).base_value() / 100 );
+
+    // BracketSim legacy compatibility: Shadow Word: Manipulation (7704).
+    if ( priest().shadowlands_legacy.shadow_word_manipulation )
+      base_dd_multiplier *= 1.0 + priest().find_spell( 356392 )->effectN( 2 ).percent();
+  }
+};
+
+// BracketSim legacy compatibility: Shadowlands covenant abilities ==========
+// Cast time, cooldown, duration, damage and the per-stack bonus all come from
+// the covenant spells themselves, which still resolve in current client data.
+
+struct legacy_ascended_eruption_t final : public priest_spell_t
+{
+  legacy_ascended_eruption_t( priest_t& p )
+    : priest_spell_t( "ascended_eruption", p, p.legacy_covenant.ascended_eruption )
+  {
+    background = true;
+    aoe = -1;
+  }
+};
+
+struct legacy_ascended_blast_t final : public priest_spell_t
+{
+  legacy_ascended_blast_t( priest_t& p, util::string_view options_str )
+    : priest_spell_t( "ascended_blast", p, p.legacy_covenant.ascended_blast )
+  {
+    parse_options( options_str );
+    // The healing it splashed onto an ally is not modelled.
+
+    // BracketSim legacy compatibility: Courageous Ascension (conduit 87).
+    // Its other half raised the Ascended Eruption by the conduit spell's own
+    // effect 2, and 337966 is not in Midnight's spell data at all - so that
+    // half is left out rather than guessed, and this ability is understated by
+    // whatever it was worth.
+    base_dd_multiplier *= 1.0 + p.legacy_conduits.percent( 87 );
+  }
+
+  bool ready() override
+  {
+    return priest().buffs.legacy_boon_of_the_ascended->check() && priest_spell_t::ready();
+  }
+
+  void execute() override
+  {
+    priest_spell_t::execute();
+    // Effect 3 is how many stacks of Boon this cast is worth.
+    priest().buffs.legacy_boon_of_the_ascended->bump(
+        as<int>( data().effectN( 3 ).base_value() ) );
+  }
+};
+
+struct legacy_ascended_nova_t final : public priest_spell_t
+{
+  legacy_ascended_nova_t( priest_t& p, util::string_view options_str )
+    : priest_spell_t( "ascended_nova", p, p.legacy_covenant.ascended_nova )
+  {
+    parse_options( options_str );
+    aoe = -1;
+  }
+
+  bool ready() override
+  {
+    return priest().buffs.legacy_boon_of_the_ascended->check() && priest_spell_t::ready();
+  }
+
+  void execute() override
+  {
+    priest_spell_t::execute();
+    priest().buffs.legacy_boon_of_the_ascended->bump(
+        as<int>( data().effectN( 3 ).base_value() ) );
+  }
+};
+
+struct legacy_boon_of_the_ascended_t final : public priest_spell_t
+{
+  legacy_boon_of_the_ascended_t( priest_t& p, util::string_view options_str )
+    : priest_spell_t( "boon_of_the_ascended", p, p.legacy_covenant.boon_of_the_ascended )
+  {
+    parse_options( options_str );
+    harmful = may_miss = false;
+  }
+
+  void execute() override
+  {
+    priest_spell_t::execute();
+    priest().buffs.legacy_boon_of_the_ascended->trigger();
+
+    // BracketSim legacy compatibility: the Kyrian soulbind traits that ride
+    // this ability - Combat Meditation's Mastery window and Effusive Anima
+    // Accelerator's cooldown reduction. Both live in the shared player_t layer
+    // because they are identical on all twelve classes apart from a duration
+    // that tracks whatever covenant ability they ride; only the host and its
+    // cooldown are class knowledge, and that is what is passed in here.
+    // Effusive Anima's damage half is deliberately not modelled: it is a flat
+    // 3,469 read at level 60 and cannot scale.
+    priest().legacy_soulbinds.covenant_ability_cast( &priest(), legacy_soulbind::COVENANT_KYRIAN,
+                                                    cooldown );
+  }
+};
+
+struct legacy_unholy_transfusion_t final : public priest_spell_t
+{
+  legacy_unholy_transfusion_t( priest_t& p )
+    : priest_spell_t( "unholy_transfusion", p, p.legacy_covenant.unholy_transfusion )
+  {
+    background = true;
+    aoe = -1;
+
+    // BracketSim legacy compatibility: Festering Transfusion (conduit 90)
+    // lengthens this dot and raises its tick damage. The duration is only
+    // extended where there is already a dot to extend - adding time to an
+    // action with no periodic part would invent one.
+    if ( p.legacy_conduits.has( 90 ) )
+    {
+      const spell_data_t* conduit = p.find_spell( 337979 );
+      if ( dot_duration > 0_ms && conduit->ok() )
+        dot_duration += conduit->effectN( 2 ).time_value();
+      base_td_multiplier *= 1.0 + p.legacy_conduits.percent( 90 );
+    }
+  }
+};
+
+struct legacy_unholy_nova_t final : public priest_spell_t
+{
+  propagate_const<action_t*> transfusion;
+
+  legacy_unholy_nova_t( priest_t& p, util::string_view options_str )
+    : priest_spell_t( "unholy_nova", p, p.legacy_covenant.unholy_nova ),
+      transfusion( new legacy_unholy_transfusion_t( p ) )
+  {
+    parse_options( options_str );
+    harmful = may_miss = false;
+    aoe = -1;
+    add_child( transfusion );
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    priest_spell_t::impact( s );
+    // The healing half of the nova, and the ally heal its dot granted, are not
+    // modelled; the Unholy Transfusion damage is.
+    transfusion->execute_on_target( s->target );
+
+    // BracketSim legacy compatibility: the Necrolord soulbind trait that rides
+    // this ability - Lead by Example. Shared layer; the ally count is the
+    // global legacy_soulbind_allies, because a single-actor sim cannot see
+    // them. Unholy Nova has no cooldown worth accelerating, so none is passed.
+    if ( !s->chain_target )
+      priest().legacy_soulbinds.covenant_ability_cast( &priest(), legacy_soulbind::COVENANT_NECROLORD );
+
+    // BracketSim legacy compatibility: Pallid Command. Only the primary target
+    // summons, matching Shadowlands' !s->chain_target guard.
+    if ( priest().shadowlands_legacy.pallid_command && !s->chain_target )
+    {
+      priest().pets.legacy_rattling_mage.spawn();
+
+      // Shadowlands drove the stacks off allies hitting the Unholy Transfusion
+      // target, which a single-actor sim cannot observe, so it took the count
+      // as an option and so does this. Applied at summon because this port
+      // models Unholy Transfusion as instant damage rather than a dot, so
+      // there is no dot window to watch.
+      // A live log has the mage at the 50 stack cap within two seconds of a
+      // solo pull, so applying the configured count at summon costs nothing
+      // against a 20 second window.
+      int stacks = priest().options.legacy_rigor_mortis_stacks;
+      if ( stacks > 0 )
+        priest().buffs.legacy_rigor_mortis->trigger( stacks );
+    }
+
+    // BracketSim legacy compatibility: Kevin's Oozeling rides the same cast.
+    if ( priest().legacy_soulbinds.has( 352110 ) && priest().legacy_covenant.unholy_nova->ok() &&
+         !s->chain_target )
+    {
+      priest().pets.legacy_kevins_oozeling.spawn();
+    }
+  }
+};
+
+struct legacy_fae_guardians_t final : public priest_spell_t
+{
+  legacy_fae_guardians_t( priest_t& p, util::string_view options_str )
+    : priest_spell_t( "fae_guardians", p, p.legacy_covenant.fae_guardians )
+  {
+    parse_options( options_str );
+    harmful = may_miss = false;
+  }
+
+  void execute() override
+  {
+    priest_spell_t::execute();
+    priest().buffs.legacy_fae_guardians->trigger();
+
+    // All three faeries land on the same millisecond in the live log, so a solo
+    // priest gets the whole set with no ally targeting to model. Only the
+    // Wrathful Faerie has a throughput effect this port can honestly claim.
+    priest().get_target_data( target )->buffs.legacy_wrathful_faerie->trigger();
+
+    // BracketSim legacy compatibility: the Night Fae soulbind trait that rides
+    // this ability - Field of Blossoms.
+    priest().legacy_soulbinds.covenant_ability_cast( &priest(), legacy_soulbind::COVENANT_NIGHT_FAE,
+                                                    cooldown );
   }
 };
 
@@ -989,12 +1332,27 @@ struct mindgames_t final : public priest_spell_t
   propagate_const<action_t*> child_searing_light;
 
   mindgames_t( priest_t& p, util::string_view options_str )
-    : priest_spell_t( "mindgames", p, p.talents.pvp.mindgames ),
+    : priest_spell_t( "mindgames", p, p.legacy_mindgames_spell() ),
       child_mindgames_healing_reversal( nullptr ),
       child_mindgames_damage_reversal( nullptr ),
       child_searing_light( priest().background_actions.searing_light )
   {
     parse_options( options_str );
+
+    // BracketSim legacy compatibility: Shadow Word: Manipulation (7704) is
+    // detected but has nothing to act on. All three of its effects work on the
+    // shield window Mindgames used to open - effect 1 lengthens it, effects 2
+    // and 3 raise the damage the shields deal when broken - and this port casts
+    // Mindgames for its direct damage only. Adding the duration to an action
+    // with no periodic effect hangs the simulator, so it is deliberately not
+    // applied.
+
+    // BracketSim legacy compatibility: Shattered Perceptions. Shadowlands
+    // raised Mindgames' direct damage by the rank value, and this port casts
+    // Mindgames for its direct damage, so that half ports exactly. Its other
+    // half lengthens the shield window, which this port does not model - the
+    // same reason Shadow Word: Manipulation above is inert.
+    base_dd_multiplier *= 1.0 + priest().legacy_conduits.percent( 105 );
 
     affected_by_shadow_weaving   = true;
     triggers_atonement           = true;
@@ -1023,6 +1381,14 @@ struct mindgames_t final : public priest_spell_t
         child_searing_light->execute();
       }
     }
+
+    // BracketSim legacy compatibility: the Venthyr soulbind trait that rides
+    // this ability - Wasteland Propriety. Gated on the COVENANT version rather
+    // than on the action, because Mindgames also survives as a PvP talent and a
+    // soulbind cannot ride that.
+    if ( priest().legacy_covenant.mindgames->ok() )
+      priest().legacy_soulbinds.covenant_ability_cast( &priest(), legacy_soulbind::COVENANT_VENTHYR,
+                                                      cooldown );
   }
 
   void impact( action_state_t* s ) override
@@ -1039,6 +1405,25 @@ struct mindgames_t final : public priest_spell_t
     if ( child_mindgames_damage_reversal )
     {
       child_mindgames_damage_reversal->execute();
+    }
+
+    // BracketSim legacy compatibility: Shadow Word: Manipulation (7704). One
+    // stack per second still on Mindgames when the shield breaks, so the buff
+    // lands late by however much time was used up. Shadowlands added a
+    // Shattered Perceptions term to both figures; that conduit is not in this
+    // port, so the term is dropped rather than guessed at.
+    if ( priest().shadowlands_legacy.shadow_word_manipulation )
+    {
+      auto rune = priest().find_spell( 356392 );
+      timespan_t window = priest().legacy_mindgames_spell()->duration() +
+                          rune->effectN( 1 ).time_value();
+      timespan_t stacks = timespan_t::from_seconds(
+          priest().options.legacy_shadow_word_manipulation_seconds );
+      timespan_t delay = std::max( 0_ms, window - stacks );
+      make_event( *sim, delay, [ this, stacks ] {
+        priest().buffs.legacy_shadow_word_manipulation->trigger(
+            static_cast<int>( stacks.total_seconds() ) );
+      } );
     }
 
     if ( priest().specialization() == PRIEST_SHADOW )
@@ -1204,6 +1589,7 @@ public:
   propagate_const<expiation_t*> child_expiation;
   action_t* child_searing_light;
   propagate_const<devour_matter_damage_t*> child_devour_matter;
+  propagate_const<painbreaker_psalm_t*> child_painbreaker_psalm;
   timespan_t execute_override;
 
   // BUG: https://github.com/SimCMinMax/WoW-BugTracker/issues/1359
@@ -1215,10 +1601,17 @@ public:
       child_expiation( nullptr ),
       child_searing_light( priest().background_actions.searing_light ),
       child_devour_matter( nullptr ),
+      child_painbreaker_psalm( nullptr ),
       execute_override( execute_override )
   {
     affected_by_shadow_weaving   = true;
     idol_of_nzoth_execute_stacks = 4;
+
+    // BracketSim legacy compatibility: Kiss of Death shortens Shadow Word:
+    // Death's cooldown.
+    if ( p.shadowlands_legacy.kiss_of_death )
+      cooldown->duration += timespan_t::from_millis(
+          p.find_spell( 336133 )->effectN( 1 ).base_value() );
 
     if ( priest().talents.discipline.expiation.enabled() )
     {
@@ -1233,6 +1626,13 @@ public:
     if ( priest().talents.voidweaver.devour_matter.enabled() )
     {
       child_devour_matter = new devour_matter_damage_t( priest(), &data() );
+    }
+
+    // BracketSim legacy compatibility: Painbreaker Psalm.
+    if ( p.shadowlands_legacy.painbreaker_psalm )
+    {
+      child_painbreaker_psalm = new painbreaker_psalm_t( priest() );
+      add_child( child_painbreaker_psalm );
     }
   }
 
@@ -1351,6 +1751,15 @@ public:
       child_devour_matter->parent_chain_number = cast_state( s )->chain_number;
       child_devour_matter->set_target( s->target );
       child_devour_matter->execute();
+    }
+
+    // BracketSim legacy compatibility: Painbreaker Psalm consumes the dots on
+    // a landed Shadow Word: Death, in the same place Mind Blast consumes them
+    // for Expiation.
+    if ( child_painbreaker_psalm && result_is_hit( s->result ) )
+    {
+      child_painbreaker_psalm->set_target( s->target );
+      child_painbreaker_psalm->execute();
     }
 
     if ( priest().talents.shared.inescapable_torment.enabled() )
@@ -2531,6 +2940,20 @@ priest_td_t::priest_td_t( player_t* target, priest_t& p ) : actor_target_data_t(
                         } );
 
   buffs.horrific_visions = make_buff( *this, "horrific_visions", p.talents.shadow.horrific_visions );
+
+  // BracketSim legacy compatibility: Kevin's Wrath. Spell 352528 is not in
+  // current data, so the 6% and the duration are hand set from the live trait
+  // tooltip and the refresh cadence seen in a combat log.
+  buffs.legacy_kevins_wrath = make_buff( *this, "kevins_wrath" )
+                                  ->set_duration( 8_s )
+                                  ->set_default_value( 0.06 );
+
+  // BracketSim legacy compatibility: Wrathful Faerie. Duration comes from the
+  // driver rather than from 342132, which is absent from current data.
+  buffs.legacy_wrathful_faerie =
+      make_buff( *this, "wrathful_faerie" )
+          ->set_duration( p.legacy_covenant.fae_guardians->duration() )
+          ->set_chance( p.legacy_covenant.fae_guardians->ok() ? 1.0 : 0.0 );
 }
 
 void priest_td_t::reset()
@@ -2539,6 +2962,16 @@ void priest_td_t::reset()
 
 void priest_td_t::target_demise()
 {
+  // BracketSim legacy compatibility: Death Throes grants Insanity when a target
+  // dies with Shadow Word: Pain on it.
+  if ( priest().legacy_azerite.death_throes.enabled() && dots.shadow_word_pain->is_ticking() )
+  {
+    // Effect 2 is a dummy, so it carries no scaled budget value - the tooltip
+    // reads it as base value / 100 Insanity.
+    priest().generate_insanity( priest().legacy_azerite.death_throes.spell()->effectN( 2 ).base_value() / 100.0,
+                                priest().gains.insanity_death_throes, nullptr );
+  }
+
   priest().sim->print_debug( "{} demised. Priest {} resets targetdata for him.", *target, priest() );
 
   reset();
@@ -2597,6 +3030,11 @@ void priest_t::create_gains()
 {
   gains.insanity_auspicious_spirits      = get_gain( "Auspicious Spirits" );
   gains.insanity_death_and_madness       = get_gain( "Death and Madness" );
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite trait.
+  gains.insanity_death_throes            = get_gain( "Death Throes" );
+  gains.insanity_whispers_of_the_damned  = get_gain( "Whispers of the Damned" );
+  gains.insanity_legacy_wrathful_faerie  = get_gain( "Wrathful Faerie" );
+  gains.insanity_legacy_painbreaker_psalm = get_gain( "Painbreaker Psalm" );
   gains.shadowfiend                      = get_gain( "Shadowfiend" );
   gains.mindbender                       = get_gain( "Mindbender" );
   gains.voidwraith                       = get_gain( "Voidwraith" );
@@ -2871,6 +3309,37 @@ std::unique_ptr<expr_t> priest_t::create_expression( util::string_view expressio
   return player_t::create_expression( expression_str );
 }  // namespace priestspace
 
+// BracketSim legacy compatibility: Wrathful Faerie. While the faerie is on a
+// target, the priest's damage against it restores Insanity. The amount is spell
+// 327703 effect 2 - 300, which is 3.0 once SimC's x100 insanity scaling is
+// undone - and matches all eight procs in the live log exactly.
+void priest_t::trigger_legacy_wrathful_faerie( player_t* t )
+{
+  if ( !legacy_covenant.fae_guardians->ok() || !legacy_covenant.wrathful_faerie->ok() )
+    return;
+  if ( buffs.legacy_wrathful_faerie_icd->check() )
+    return;
+
+  auto td = find_target_data( t );
+  if ( !td || !td->buffs.legacy_wrathful_faerie->check() )
+    return;
+
+  double amount = legacy_covenant.wrathful_faerie->effectN( 2 ).resource( RESOURCE_INSANITY );
+
+  // BracketSim legacy compatibility: Bwonsamdi's Pact (7703). Shadowlands
+  // doubled this outright rather than reading a percentage from the runeforge,
+  // so the doubling is the reference's own constant, not a guess.
+  if ( shadowlands_legacy.bwonsamdis_pact &&
+       util::str_compare_ci( options.legacy_bwonsamdis_pact_mask, "wrathful" ) )
+    amount *= 2.0;
+
+  if ( amount <= 0 )
+    return;
+
+  resource_gain( RESOURCE_INSANITY, amount, gains.insanity_legacy_wrathful_faerie );
+  buffs.legacy_wrathful_faerie_icd->trigger();
+}
+
 void priest_t::assess_damage( school_e school, result_amount_type dtype, action_state_t* s )
 {
   player_t::assess_damage( school, dtype, s );
@@ -2934,6 +3403,15 @@ double priest_t::composite_player_target_multiplier( player_t* t, school_e schoo
 {
   double m = player_t::composite_player_target_multiplier( t, school );
 
+  // BracketSim legacy compatibility: Kevin's Wrath. The Oozeling's attacks make
+  // the target take more damage from YOU specifically, so it belongs here and
+  // not on a generic target debuff.
+  if ( auto td = find_target_data( t ) )
+  {
+    if ( td->buffs.legacy_kevins_wrath && td->buffs.legacy_kevins_wrath->check() )
+      m *= 1.0 + td->buffs.legacy_kevins_wrath->check_value();
+  }
+
   return m;
 }
 
@@ -2965,6 +3443,13 @@ double priest_t::composite_mitigation_multiplier( const action_state_t* s, schoo
 
   if ( talents.translucent_image.ok() && buffs.fade->check() )
     m *= 1.0 + buffs.fade->check_value();
+
+  // BracketSim legacy compatibility: the conduit Translucent Image (66) is the
+  // same idea as the modern talent above and stacks with it. Its rank value is
+  // NEGATIVE twelve - damage TAKEN goes down - so this multiply is a reduction
+  // exactly as written, with no sign flip.
+  if ( legacy_conduits.has( 66 ) && buffs.fade->check() )
+    m *= 1.0 + legacy_conduits.percent( 66 );
 
   if ( buffs.protective_light->check() )
     m *= 1.0 + buffs.protective_light->check_value();
@@ -3016,6 +3501,20 @@ action_t* priest_t::create_action( util::string_view name, util::string_view opt
 {
   using namespace actions::spells;
   using namespace actions::heals;
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  if ( name == "boon_of_the_ascended" && legacy_covenant.boon_of_the_ascended->ok() )
+    return new actions::spells::legacy_boon_of_the_ascended_t( *this, options_str );
+  if ( name == "ascended_blast" && legacy_covenant.boon_of_the_ascended->ok() )
+    return new actions::spells::legacy_ascended_blast_t( *this, options_str );
+  if ( name == "ascended_nova" && legacy_covenant.boon_of_the_ascended->ok() )
+    return new actions::spells::legacy_ascended_nova_t( *this, options_str );
+  if ( name == "fae_guardians" && legacy_covenant.fae_guardians->ok() )
+    return new legacy_fae_guardians_t( *this, options_str );
+  if ( name == "unholy_nova" && legacy_covenant.unholy_nova->ok() )
+    return new actions::spells::legacy_unholy_nova_t( *this, options_str );
+  if ( name == "mindgames" && legacy_covenant.mindgames->ok() )
+    return new actions::spells::mindgames_t( *this, options_str );
 
   action_t* shadow_action = create_action_shadow( name, options_str );
   if ( shadow_action )
@@ -3277,6 +3776,102 @@ void priest_t::init_spells()
 {
   base_t::init_spells();
 
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+  legacy_azerite.sanctum                = find_azerite_spell( "Sanctum" );
+
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
+  // off the bonus id the original legendary item carried.
+  auto legacy = [ this ]( int bonus_id ) {
+    return shadowlands_legacy.legacy_shadowlands_enabled &&
+           range::any_of( items, [ bonus_id ]( const item_t& item ) {
+             return range::contains( item.parsed.bonus_id, bonus_id );
+           } );
+  };
+
+  shadowlands_legacy.kiss_of_death              = legacy( 6979 );
+  // BracketSim legacy compatibility: Unity (bonus 8126), the 9.2 legendary whose
+  // effect is whichever covenant legendary matches the covenant you are in. A
+  // real Unity item carries 8126 and NOT the legendary's own bonus id, so a
+  // power keyed only off its own id misses every Unity wearer. Both routes are
+  // checked here, and Unity opens only the one door its covenant names.
+  auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
+  {
+    return legacy( bonus_id ) ||
+           ( legacy( 8126 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
+  };
+
+  shadowlands_legacy.shadow_word_manipulation   = legacy_unity( 7704, "venthyr" );
+  shadowlands_legacy.spheres_harmony            = legacy_unity( 7728, "kyrian" );
+  shadowlands_legacy.bwonsamdis_pact            = legacy_unity( 7703, "night_fae" );
+  shadowlands_legacy.eternal_call_to_the_void   = legacy( 6983 );
+  shadowlands_legacy.painbreaker_psalm          = legacy( 6981 );
+  shadowlands_legacy.twins_of_the_sun_priestess = legacy( 7002 );
+  // 7729 is Pallid Command's own bonus id, on a crafted item. The Unity route
+  // that used to be spelled out here by hand is now the legacy_unity lambda,
+  // which says the same thing for every covenant rather than only Necrolord.
+  shadowlands_legacy.pallid_command             = legacy_unity( 7729, "necrolord" );
+  shadowlands_legacy.talbadars_stratagem        = legacy( 7162 );
+  shadowlands_legacy.the_penitent_one           = legacy( 6976 );
+  // Read unconditionally: the flag above is what gates the behaviour, and a
+  // spell pointer that is only valid on some characters is a trap.
+  shadowlands_legacy.the_penitent_one_spell     = find_spell( 336011 );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  auto covenant = [ this ]( std::string_view name, unsigned id ) {
+    return ( shadowlands_legacy.legacy_shadowlands_enabled &&
+             util::str_compare_ci( legacy_covenant.chosen, name ) )
+               ? find_spell( id )
+               : spell_data_t::not_found();
+  };
+
+  legacy_covenant.boon_of_the_ascended = covenant( "kyrian", 325013 );
+  legacy_covenant.mindgames            = covenant( "venthyr", 323673 );
+  legacy_covenant.unholy_nova          = covenant( "necrolord", 324724 );
+  legacy_covenant.fae_guardians        = covenant( "night_fae", 327661 );
+  legacy_covenant.wrathful_faerie      =
+      legacy_covenant.fae_guardians->ok() ? find_spell( 327703 ) : spell_data_t::not_found();
+
+  // BracketSim legacy compatibility: report the covenant abilities this
+  // actor can cast, so player_t::init_actions() can put them into the
+  // rotation. SimulationCraft's own action lists never press them.
+  if ( legacy_covenant.boon_of_the_ascended->ok() )
+    legacy_apl_actions.emplace_back( "boon_of_the_ascended" );
+  if ( legacy_covenant.boon_of_the_ascended->ok() )
+    legacy_apl_actions.emplace_back( "ascended_blast,if=buff.boon_of_the_ascended.up" );
+  if ( legacy_covenant.boon_of_the_ascended->ok() )
+    legacy_apl_actions.emplace_back( "ascended_nova,if=buff.boon_of_the_ascended.up&spell_targets.ascended_nova>1" );
+  if ( legacy_covenant.unholy_nova->ok() )
+    legacy_apl_actions.emplace_back( "unholy_nova" );
+  if ( legacy_covenant.fae_guardians->ok() )
+    legacy_apl_actions.emplace_back( "fae_guardians" );
+  if ( legacy_covenant.mindgames->ok() )
+    legacy_apl_actions.emplace_back( "mindgames" );
+
+  legacy_conduits.parse();
+  // Fae Guardians is now modelled, but only its Wrathful Faerie. The Guardian
+  // Faerie is defensive, and the Benevolent Faerie's cooldown-rate effect names
+  // its targets as Label 690 and Categories 1550/1592/1572/1614, which nothing
+  // in surviving data maps onto priest spells - so it is left out rather than
+  // guessed, and this ability is understated by whatever that is worth.
+
+  legacy_covenant.ascended_blast =
+      legacy_covenant.boon_of_the_ascended->ok() ? find_spell( 325283 ) : spell_data_t::not_found();
+  legacy_covenant.ascended_nova =
+      legacy_covenant.boon_of_the_ascended->ok() ? find_spell( 325020 ) : spell_data_t::not_found();
+  legacy_covenant.ascended_eruption =
+      legacy_covenant.boon_of_the_ascended->ok() ? find_spell( 325326 ) : spell_data_t::not_found();
+  legacy_covenant.unholy_transfusion =
+      legacy_covenant.unholy_nova->ok() ? find_spell( 325203 ) : spell_data_t::not_found();
+  legacy_azerite.sacred_flame           = find_azerite_spell( "Sacred Flame" );
+  legacy_azerite.depth_of_the_shadows   = find_azerite_spell( "Depth of the Shadows" );
+  legacy_azerite.chorus_of_insanity     = find_azerite_spell( "Chorus of Insanity" );
+  legacy_azerite.death_throes           = find_azerite_spell( "Death Throes" );
+  legacy_azerite.searing_dialogue       = find_azerite_spell( "Searing Dialogue" );
+  legacy_azerite.spiteful_apparitions   = find_azerite_spell( "Spiteful Apparitions" );
+  legacy_azerite.thought_harvester      = find_azerite_spell( "Thought Harvester" );
+  legacy_azerite.torment_of_torments    = find_azerite_spell( "Torment of Torments" );
+  legacy_azerite.whispers_of_the_damned = find_azerite_spell( "Whispers of the Damned" );
+
   auto CT = [ this ]( std::string_view n ) { return find_talent_spell( talent_tree::CLASS, n ); };
   auto ST = [ this ]( std::string_view n ) { return find_talent_spell( talent_tree::SPECIALIZATION, n ); };
   auto HT = [ this ]( std::string_view n ) { return find_talent_spell( talent_tree::HERO, n ); };
@@ -3506,6 +4101,77 @@ void priest_t::create_buffs()
 {
   base_t::create_buffs();
 
+  // BracketSim legacy compatibility: Boon of the Ascended. Each stack is worth
+  // the percentage in the covenant spell's own effect 5, and the stacks come
+  // from Ascended Blast and Ascended Nova. The maximum is not in current data,
+  // so it is set high enough never to bind - the 10s window and Ascended
+  // Blast's 3s cooldown cap the real total near thirty.
+  // BracketSim legacy compatibility: Pallid Command's Rigor Mortis. It sits on
+  // the priest rather than the mage because the mage is respawned every Unholy
+  // Nova and the buff has to outlive action construction; the mage reads it and
+  // clears it when it despawns.
+  // BracketSim legacy compatibility: Combat Meditation and Lead by Example used
+  // to be built here with the priest's own durations hardcoded. They now live in
+  // the shared player_t soulbind layer, which reads the class-dependent duration
+  // out of legacy_soulbind::class_values() - the priest's 30s and 10s were right
+  // for priest and wrong for the other eleven classes.
+
+  // BracketSim legacy compatibility: Fae Guardians, and the fitted internal
+  // cooldown on the Wrathful Faerie's energize. The 2 seconds is measured from
+  // one live log rather than read from data - see PORT_STATE.md.
+  buffs.legacy_fae_guardians =
+      make_buff( this, "fae_guardians", legacy_covenant.fae_guardians )
+          ->set_chance( legacy_covenant.fae_guardians->ok() ? 1.0 : 0.0 );
+
+  buffs.legacy_wrathful_faerie_icd =
+      make_buff( this, "wrathful_faerie_icd" )->set_duration( 2_s )->set_quiet( true );
+
+  // BracketSim legacy compatibility: Shadow Word: Manipulation (7704).
+  buffs.legacy_shadow_word_manipulation =
+      make_buff( this, "legacy_shadow_word_manipulation", find_spell( 357028 ) )
+          ->set_pct_buff_type( STAT_PCT_BUFF_CRIT )
+          ->set_default_value_from_effect_type( A_MOD_ALL_CRIT_CHANCE );
+
+  buffs.legacy_rigor_mortis =
+      make_buff( this, "rigor_mortis", find_spell( 357165 ) )
+          ->set_default_value_from_effect( 2, 0.01 )
+          ->set_chance( shadowlands_legacy.pallid_command ? 1.0 : 0.0 );
+
+  // BracketSim legacy compatibility: Talbadar's Stratagem. The buff carries the
+  // +55% itself in effect 1, and is retriggered for the shortest of the three
+  // dots so it never outlives the condition that granted it.
+  buffs.legacy_talbadars_stratagem =
+      make_buff( this, "talbadars_stratagem", find_spell( 342416 ) )
+          ->set_default_value_from_effect( 1, 0.01 )
+          ->set_chance( shadowlands_legacy.talbadars_stratagem ? 1.0 : 0.0 );
+
+  buffs.legacy_boon_of_the_ascended =
+      make_buff( this, "boon_of_the_ascended", legacy_covenant.boon_of_the_ascended )
+          ->set_max_stack( 99 )
+          ->set_default_value_from_effect( 5, 0.01 )
+          ->set_chance( legacy_covenant.boon_of_the_ascended->ok() ? 1.0 : 0.0 )
+          ->set_stack_change_callback( [ this ]( buff_t* b, int old_, int cur ) {
+            if ( cur != 0 )
+              return;
+
+            if ( background_actions.legacy_ascended_eruption )
+            {
+              auto e = background_actions.legacy_ascended_eruption;
+              e->base_multiplier = 1.0 + b->check() * b->default_value;
+              e->execute_on_target( target );
+            }
+
+            // BracketSim legacy compatibility: Spheres' Harmony. Effect 1 is
+            // what each stack takes off the cooldown and effect 2 is the cap.
+            if ( shadowlands_legacy.spheres_harmony )
+            {
+              auto rune = find_spell( 356395 );
+              double amount = rune->effectN( 1 ).base_value() * old_;
+              amount = std::min( amount, rune->effectN( 2 ).base_value() );
+              get_cooldown( "boon_of_the_ascended" )->adjust( -timespan_t::from_seconds( amount ) );
+            }
+          } );
+
   // Generic buffs
   buffs.desperate_prayer  = make_buff<buffs::desperate_prayer_t>( *this );
   buffs.power_word_shield = new buffs::power_word_shield_buff_t( this, this );
@@ -3652,6 +4318,12 @@ void priest_t::init_background_actions()
   background_actions.shadow_word_death = new actions::spells::shadow_word_death_t( *this, 200_ms );
   background_actions.atonement         = new actions::heals::atonement_t( *this );
   background_actions.halo              = new actions::spells::halo_t( *this, true );
+
+
+  // BracketSim legacy compatibility: Boon of the Ascended's closing burst.
+  if ( legacy_covenant.boon_of_the_ascended->ok() )
+    background_actions.legacy_ascended_eruption =
+        new actions::spells::legacy_ascended_eruption_t( *this );
 
   // Voidweaver
   background_actions.entropic_rift        = new actions::spells::entropic_rift_t( *this );
@@ -4128,6 +4800,45 @@ void priest_t::combat_begin()
 
 // priest_t::reset ==========================================================
 
+
+// BracketSim legacy compatibility: Vision of Perfection (Heart of Azeroth major
+// essence). The engine procs it and calls this; each spec fires its signature
+// cooldown early, at the fraction of its duration the essence grants.
+void priest_t::vision_of_perfection_proc()
+{
+  auto essence = find_azerite_essence( "Vision of Perfection" );
+  if ( !essence.enabled() )
+    return;
+
+  double mult = essence.spell( 1u )->effectN( 1 ).percent() +
+                essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
+
+  buff_t* window = nullptr;
+  switch ( specialization() )
+  {
+    case PRIEST_SHADOW:
+      window = buffs.voidform;
+      break;
+    case PRIEST_DISCIPLINE:
+      window = buffs.power_infusion;
+      break;
+    case PRIEST_HOLY:
+      window = buffs.apotheosis;
+      break;
+    default:
+      break;
+  }
+
+  if ( !window || mult <= 0 )
+    return;
+
+  timespan_t dur = window->buff_duration() * mult;
+  if ( window->check() )
+    window->extend_duration( dur );
+  else
+    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+}
+
 void priest_t::reset()
 {
   base_t::reset();
@@ -4149,9 +4860,19 @@ void priest_t::create_options()
 {
   base_t::create_options();
 
+  add_option( opt_string( "priest.legacy_covenant", legacy_covenant.chosen ) );
+  add_option( opt_string( "priest.legacy_conduits", legacy_conduits.option ) );
+  add_option( opt_bool( "priest.legacy_shadowlands_enabled",
+                        shadowlands_legacy.legacy_shadowlands_enabled ) );
   add_option( opt_bool( "priest.mindgames_healing_reversal", options.mindgames_healing_reversal ) );
+  add_option( opt_int( "priest.legacy_shadow_word_manipulation_seconds",
+                       options.legacy_shadow_word_manipulation_seconds, 0, 8 ) );
+  add_option( opt_string( "priest.legacy_bwonsamdis_pact_mask",
+                          options.legacy_bwonsamdis_pact_mask ) );
   add_option( opt_bool( "priest.mindgames_damage_reversal", options.mindgames_damage_reversal ) );
   add_option( opt_bool( "priest.self_power_infusion", options.self_power_infusion ) );
+  add_option(
+      opt_int( "priest.legacy_rigor_mortis_stacks", options.legacy_rigor_mortis_stacks, 0, 50 ) );
   // Default is 2, minimum of 1 bounce per second, maximum of 1 bounce per 12 seconds (prayer of mending's cooldown)
   add_option( opt_float( "priest.prayer_of_mending_bounce_rate", options.prayer_of_mending_bounce_rate, 1, 12 ) );
   add_option( opt_bool( "priest.init_insanity", options.init_insanity ) );

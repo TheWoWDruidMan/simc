@@ -28,6 +28,9 @@
 
 #include "simulationcraft.hpp"
 
+// BracketSim legacy compatibility: Shadowlands conduits.
+#include "player/legacy_conduits.hpp"
+
 namespace
 {  // UNNAMED NAMESPACE
 
@@ -708,6 +711,16 @@ struct death_knight_td_t : public actor_target_data_t
 
     // San'layn
     propagate_const<buff_t*> incite_terror;
+
+    // Legacy Azerite (Battle for Azeroth)
+    propagate_const<buff_t*> legacy_deep_cuts;
+
+    // Legacy Shadowlands runeforge legendaries
+    buff_t* legacy_abominations_frenzy;
+    buff_t* legacy_abominations_frenzy_icd;
+    // Legacy Shadowlands conduit: Everfrost. Stacks on the target and raises
+    // the damage Remorseless Winter deals to it.
+    buff_t* legacy_everfrost;
   } debuff;
 
   struct flags_t
@@ -786,6 +799,7 @@ public:
     absorb_buff_t* antimagic_zone;
     propagate_const<buff_t*> blood_draw;
     propagate_const<buff_t*> icebound_fortitude;
+    propagate_const<buff_t*> legacy_helchains;
     propagate_const<buff_t*> rune_mastery;
     propagate_const<buff_t*> icy_talons;
     propagate_const<buff_t*> lichborne;  // NYI
@@ -888,7 +902,78 @@ public:
     propagate_const<buff_t*> swift_and_painful;
     propagate_const<buff_t*> empowered_soul;
 
+    // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+    buff_t* bones_of_the_damned;
+    buff_t* eternal_rune_weapon;
+    buff_t* icy_citadel;
+    buff_t* icy_citadel_builder;
+    buff_t* festermight;
+    buff_t* bloody_runeblade;
+    buff_t* frostwhelps_indignation;
+
+    // BracketSim legacy compatibility: Shadowlands covenant abilities.
+    buff_t* legacy_swarming_mist;
+    buff_t* legacy_abomination_limb = nullptr;
+
+    // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+    buff_t* legacy_crimson_rune_weapon;
+    buff_t* legacy_death_turf;
+    buff_t* legacy_frenzied_monstrosity;
   } buffs;
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. These
+  // powers are still in the live DBC but upstream dropped their class hooks
+  // after Battle for Azeroth, so they are restored here.
+  struct azerite_powers_t
+  {
+    azerite_power_t bloody_runeblade;
+    azerite_power_t bone_spike_graveyard;
+    azerite_power_t bones_of_the_damned;
+    azerite_power_t cankerous_wounds;
+    azerite_power_t cold_hearted;
+    azerite_power_t deep_cuts;
+    azerite_power_t echoing_howl;
+    azerite_power_t eternal_rune_weapon;
+    azerite_power_t festermight;
+    azerite_power_t frostwhelps_indignation;
+    azerite_power_t frozen_tempest;
+    azerite_power_t harrowing_decay;
+    azerite_power_t helchains;
+    azerite_power_t icy_citadel;
+    azerite_power_t killer_frost;
+    azerite_power_t last_surprise;
+    azerite_power_t latent_chill;
+    // Renamed: the modern module already owns magus_of_the_dead.
+    azerite_power_t legacy_magus_of_the_dead;
+    azerite_power_t marrowblood;
+    azerite_power_t runic_barrier;
+  } azerite;
+
+  // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
+  // has no runeforge DBC, so each one is switched on by the bonus id its
+  // original legendary item carried and is inert on any other character.
+  struct shadowlands_legacy_t
+  {
+    bool abominations_frenzy = false;
+    bool absolute_zero = false;
+    bool biting_cold = false;
+    bool bryndaors_might = false;
+    bool crimson_rune_weapon = false;
+    bool deadliest_coil = false;
+    bool deaths_certainty = false;
+    bool frenzied_monstrosity = false;
+    bool gorefiends_domination = false;
+    bool koltiras_favor = false;
+    bool phearomones = false;
+    bool rage_of_the_frozen_champion = false;
+    bool rampant_transference = false;
+    bool superstrain = false;
+    bool vampiric_aura = false;
+    // These two need a covenant ability to hang off, so they only do anything
+    // when the matching covenant is chosen as well.
+    bool insatiable_hunger = false;
+    bool final_sentence = false;
+  } shadowlands_legacy;
 
   // Cooldowns
   struct cooldowns_t
@@ -920,6 +1005,9 @@ public:
     propagate_const<cooldown_t*> army_of_the_dead;
     propagate_const<cooldown_t*> putrefy;
     propagate_const<cooldown_t*> soul_reaper;
+
+    // Legacy Shadowlands runeforge legendaries
+    propagate_const<cooldown_t*> legacy_koltiras_favor_icd;
   } cooldown;
 
   // Active Spells
@@ -964,6 +1052,11 @@ public:
     action_t* frost_strike_sb_offhand;
     propagate_const<action_t*> icy_death_torrent_damage;
     action_t* hyperpyrexia_damage;
+    action_t* legacy_echoing_howl;
+    action_t* legacy_bone_spike_graveyard;
+    action_t* legacy_helchains;
+    action_t* legacy_harrowing_decay;
+    action_t* legacy_cold_hearted_heal;
     propagate_const<action_t*> erw_projectile;
     propagate_const<action_t*> frostreaper;
     propagate_const<action_t*> frozen_dominion_remorseless_winter;
@@ -991,6 +1084,11 @@ public:
     propagate_const<action_t*> putrefy_fk_st;
     propagate_const<action_t*> putrefy_fk_aoe;
     propagate_const<action_t*> dread_plague_death;
+    // Legacy Shadowlands: Superstrain. Reduced-strength copies of the three
+    // diseases, applied whenever any one of them lands.
+    propagate_const<action_t*> legacy_superstrain_blood_plague;
+    propagate_const<action_t*> legacy_superstrain_frost_fever;
+    propagate_const<action_t*> legacy_superstrain_virulent_plague;
   } background_actions;
 
   struct runeforge_actions_t
@@ -1036,8 +1134,11 @@ public:
   {
     // Shared
     propagate_const<gain_t*> antimagic_shell;  // RP from magic damage absorbed
-    gain_t* rune;                              // Rune regeneration
+    gain_t* rune;
+    gain_t* legacy_bloody_runeblade;                              // Rune regeneration
     propagate_const<gain_t*> coldthirst;
+    // BracketSim legacy compatibility: the conduit Spirit Drain (70).
+    propagate_const<gain_t*> legacy_spirit_drain;
     propagate_const<gain_t*> start_of_combat_overflow;
 
     // Blood
@@ -1065,6 +1166,14 @@ public:
 
     // Rider of the Apocalypse
     propagate_const<gain_t*> antimagic_shell_horsemen;  // RP from magic damage absorbed
+
+    // Legacy Shadowlands runeforge legendaries
+    propagate_const<gain_t*> legacy_bryndaors_might;
+    propagate_const<gain_t*> legacy_koltiras_favor;
+    propagate_const<gain_t*> legacy_rage_of_the_frozen_champion;
+    propagate_const<gain_t*> legacy_rampant_transference;
+    propagate_const<gain_t*> legacy_swarming_mist;
+    propagate_const<gain_t*> legacy_final_sentence;
   } gains;
 
   // Specialization
@@ -1577,6 +1686,10 @@ public:
     const spell_data_t* summon_lesser_ghoul;
     const spell_data_t* summon_putrefy_ghoul;
     const spell_data_t* summon_magus;
+    // BracketSim legacy compatibility: the same summon, looked up on the
+    // AZERITE power's condition instead of the modern talent's. See
+    // spell_lookups() for why the two cannot share one lookup.
+    const spell_data_t* legacy_summon_magus;
     const spell_data_t* summon_lotd_magus;
     const spell_data_t* raise_skulker;
     const spell_data_t* summon_lotd;
@@ -1817,6 +1930,7 @@ public:
 
     // Killing machine triggered by
     propagate_const<proc_t*> km_from_crit_aa;
+    propagate_const<proc_t*> km_from_legacy_killer_frost;
     propagate_const<proc_t*> km_from_obliteration_fs;  // Frost Strike during Obliteration
     propagate_const<proc_t*> km_from_obliteration_hb;  // Howling Blast during Obliteration
     propagate_const<proc_t*> km_from_obliteration_ga;  // Glacial Advance during Obliteration
@@ -1827,6 +1941,7 @@ public:
 
     // Killing machine refreshed by
     propagate_const<proc_t*> km_from_crit_aa_wasted;
+    propagate_const<proc_t*> km_from_legacy_killer_frost_wasted;
     propagate_const<proc_t*> km_from_obliteration_fs_wasted;  // Frost Strike during Obliteration
     propagate_const<proc_t*> km_from_obliteration_hb_wasted;  // Howling Blast during Obliteration
     propagate_const<proc_t*> km_from_obliteration_ga_wasted;  // Glacial Advance during Obliteration
@@ -1886,7 +2001,35 @@ public:
     double average_mograines_might_uptime = 0.65;
     bool extra_unholy_reporting           = false;
     bool wcl_reporting_mode               = true;
+    // BracketSim legacy compatibility.
+    bool legacy_shadowlands_enabled       = true;
+    // Shadowlands covenants were chosen, not equipped, so there is no bonus id
+    // to key them off - they are named directly.
+    std::string legacy_covenant           = "none";
   } options;
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities. Midnight
+  // has no covenant DBC, but every one of these spells still resolves, so they
+  // are looked up by id and gated on the chosen covenant.
+  // BracketSim legacy compatibility: Shadowlands conduits. The values live in
+  // legacy_conduits.hpp because Midnight ships neither the ConduitRank table
+  // nor most conduit spells; sockets are given as id:rank pairs.
+  legacy_conduit::set_t legacy_conduits;
+
+  struct legacy_covenant_t
+  {
+    const spell_data_t* shackle_the_unworthy = spell_data_t::not_found();
+    const spell_data_t* swarming_mist = spell_data_t::not_found();
+    const spell_data_t* deaths_due = spell_data_t::not_found();
+    // BracketSim legacy (27 Sep 2026): the Necrolord ability was never wired - 60 Frost/Unholy Necrolord simmed
+    // exactly like no covenant. The modern Abomination Limb is a Blood talent (its debuffs need the talent too).
+    const spell_data_t* abomination_limb = spell_data_t::not_found();
+  } legacy_covenant;
+  cooldown_t* legacy_abomination_limb_proc = nullptr;  // Rime / Runic Corruption / Bone Shield, every effect-4 seconds
+
+  // Runic Power spent while Swarming Mist is up, which is what the Insatiable
+  // Hunger legendary detonates for.
+  double legacy_insatiable_hunger_rp = 0.0;
 
   // Runes
   runes_t _runes;
@@ -1941,6 +2084,7 @@ public:
     cooldown.mind_freeze             = get_cooldown( "mind_freeze" );
 
     // Blood
+    cooldown.legacy_koltiras_favor_icd = get_cooldown( "legacy_koltiras_favor_icd" );
     cooldown.bone_shield_icd     = get_cooldown( "bone_shield_icd" );
     cooldown.blood_boil          = get_cooldown( "blood_boil" );
     cooldown.consumption         = get_cooldown( "consumption" );
@@ -1988,6 +2132,8 @@ public:
   }
 
   // Character Definition overrides
+  // BracketSim legacy compatibility: Vision of Perfection.
+  void vision_of_perfection_proc() override;
   void init_spells() override;
   void init_action_list() override;
   void init_blizzard_action_list() override;
@@ -2755,7 +2901,28 @@ struct death_knight_pet_t : public pet_t
     if ( buffs.stunned->check() )
       return buffs.stunned->remains();
 
-    if ( primary_resource() == RESOURCE_ENERGY )
+    /*
+     * BracketSim: `resource_thresholds` CAN BE EMPTY, and `.front()` on an empty
+     * vector is what crashed every Unholy death knight in this app.
+     *
+     * The vector is filled in `player_t::init_resources` from the costs of each
+     * NON-BACKGROUND action (player.cpp:4657). A lesser ghoul summoned by
+     * Scourge Strike at these brackets has no energy-costing action of its own -
+     * the abilities are not learned yet - so nothing is ever pushed, and the
+     * first time the scheduler asks this pet when it is next available it reads
+     * through a null pointer. Reproduced at levels 30, 60 and 80 alike, which is
+     * why it never looked like a low-level problem.
+     *
+     * `player_t::min_threshold_trigger` guards exactly this case
+     * (player.cpp:4865) and this override, which predates it, does not. With no
+     * thresholds there is no resource to wait for, so the base class's answer is
+     * the right one.
+     *
+     * Found with a stack trace rather than by reading: no debugger is installed
+     * here, so `engine/sc_main.cpp` carries a DbgHelp handler behind
+     * SC_BRACKETSIM_CRASH_TRACE, built only into build-dbg.
+     */
+    if ( primary_resource() == RESOURCE_ENERGY && !resource_thresholds.empty() )
     {
       double energy = resources.current[ RESOURCE_ENERGY ];
 
@@ -2820,6 +2987,16 @@ struct death_knight_pet_t : public pet_t
          dk()->buffs.commander_of_the_dead->check() )
     {
       m *= commander_value;
+    }
+
+    // BracketSim legacy compatibility: Eternal Hunger raises minion damage.
+    // Shadowlands applied it in death_knight_t::composite_player_pet_damage_multiplier,
+    // which Midnight's module does not override, so it is applied on the pet
+    // itself instead - the same set of damage, reached from the other end.
+    // Its other half lengthens Dark Transformation and is handled separately.
+    if ( dk()->legacy_conduits.has( 65 ) )
+    {
+      m *= 1.0 + dk()->legacy_conduits.percent( 65 );
     }
 
     return m;
@@ -3560,6 +3737,18 @@ struct lesser_ghoul_pet_t final : public base_ghoul_pet_t
     }
   };
 
+  // Legacy Azerite: Last Surprise
+  struct legacy_last_surprise_t : public pet_spell_t<lesser_ghoul_pet_t>
+  {
+    legacy_last_surprise_t( std::string_view n, lesser_ghoul_pet_t* p )
+      : pet_spell_t( p, n, p->dk()->find_spell( 279606 ) )
+    {
+      background  = true;
+      aoe         = -1;
+      base_dd_min = base_dd_max = p->dk()->azerite.last_surprise.value( 1 );
+    }
+  };
+
   struct ruptured_viscera_t : public pet_spell_t<lesser_ghoul_pet_t>
   {
     ruptured_viscera_t( std::string_view n, lesser_ghoul_pet_t* p )
@@ -3688,6 +3877,10 @@ struct lesser_ghoul_pet_t final : public base_ghoul_pet_t
 
   void dismiss( bool expired = false ) override
   {
+    // Legacy Azerite: Last Surprise detonates the ghoul as it leaves.
+    if ( dk()->azerite.last_surprise.enabled() && !sim->event_mgr.canceled && legacy_last_surprise )
+      legacy_last_surprise->execute_on_target( dk()->target );
+
     // These expire before ruptured viscera triggers
     mastery_dreadblade_crit->expire();
     grave_mastery->expire();
@@ -3810,6 +4003,9 @@ struct lesser_ghoul_pet_t final : public base_ghoul_pet_t
     ruptured_viscera = get_action<ruptured_viscera_t>( "ruptured_viscera", this );
     death_order      = get_action<death_order_t>( "death_order", this );
     epidemic_order   = get_action<epidemic_order_t>( "epidemic_order", this );
+
+    if ( dk()->azerite.last_surprise.enabled() )
+      legacy_last_surprise = get_action<legacy_last_surprise_t>( "legacy_last_surprise", this );
   }
 
   action_t* create_action( std::string_view name, std::string_view options_str ) override
@@ -3827,6 +4023,7 @@ private:
   action_t* ruptured_viscera;
   action_t* death_order;
   action_t* epidemic_order;
+  action_t* legacy_last_surprise = nullptr;
   bool putrefied;
 
 public:
@@ -7494,6 +7691,18 @@ struct ams_parent_buff_t : public death_knight_buff_base_t<absorb_buff_t>
   {
     cooldown->duration = 0_ms;
     set_absorb_school( SCHOOL_MAGIC );
+
+    // Legacy Azerite: Runic Barrier raises Anti-Magic Shell's duration to the
+    // value on its effect 2. Add the difference rather than setting it, so the
+    // talents that also lengthen the shell are not thrown away. Applied on the
+    // shared parent so every Anti-Magic Shell variant picks it up.
+    if ( p->azerite.runic_barrier.enabled() && spell->duration() > timespan_t::zero() )
+    {
+      timespan_t extra =
+          timespan_t::from_seconds( p->azerite.runic_barrier.spell()->effectN( 2 ).base_value() ) - spell->duration();
+      if ( extra > timespan_t::zero() )
+        set_duration( buff_duration() + extra );
+    }
     if ( option > 0 )
     {
       set_period( 1_s );
@@ -7535,6 +7744,10 @@ struct ams_parent_buff_t : public death_knight_buff_base_t<absorb_buff_t>
 
     max_absorb *= 1.0 + p()->talent.antimagic_barrier->effectN( 2 ).percent();
 
+    // Legacy Azerite: Runic Barrier adds a flat amount to the shield.
+    if ( p()->azerite.runic_barrier.enabled() )
+      max_absorb += p()->azerite.runic_barrier.value( 3 );
+
     max_absorb *= 1.0 + p()->cache.heal_versatility();
 
     if ( horsemen )
@@ -7559,6 +7772,8 @@ struct antimagic_shell_buff_t : public ams_parent_buff_t
     : ams_parent_buff_t( p, name, spell, false )
   {
     set_absorb_source( p->get_stats( "antimagic_shell" ) );
+
+
   }
 };
 
@@ -7712,6 +7927,15 @@ struct melee_t : public death_knight_melee_attack_t
         if ( p()->specialization() == DEATH_KNIGHT_BLOOD && p()->buffs.crimson_scourge->trigger() )
         {
           p()->cooldown.death_and_decay_dynamic->reset( true );
+
+          // Legacy Azerite: Bloody Runeblade rides the Crimson Scourge proc. Its
+          // trigger spell carries a 10s internal cooldown, modelled on the buff.
+          if ( p()->azerite.bloody_runeblade.enabled() && p()->buffs.bloody_runeblade->trigger() )
+          {
+            p()->resource_gain( RESOURCE_RUNIC_POWER,
+                                p()->find_spell( 289349 )->effectN( 1 ).resource( RESOURCE_RUNIC_POWER ),
+                                p()->gains.legacy_bloody_runeblade );
+          }
         }
       }
     }
@@ -7790,6 +8014,26 @@ struct death_knight_disease_t : public death_knight_spell_t
     }
   }
 
+  // Legacy Shadowlands: Superstrain. Set on the reduced-strength copies so they
+  // do not re-apply each other.
+  bool legacy_superstrain_copy = false;
+
+  void impact( action_state_t* state ) override
+  {
+    death_knight_spell_t::impact( state );
+
+    if ( !p()->shadowlands_legacy.superstrain || legacy_superstrain_copy )
+      return;
+
+    for ( action_t* disease : { p()->background_actions.legacy_superstrain_blood_plague.get(),
+                                p()->background_actions.legacy_superstrain_frost_fever.get(),
+                                p()->background_actions.legacy_superstrain_virulent_plague.get() } )
+    {
+      if ( disease && disease->data().id() != data().id() )
+        disease->execute_on_target( state->target );
+    }
+  }
+
   void tick( dot_t* d ) override
   {
     death_knight_spell_t::tick( d );
@@ -7833,10 +8077,29 @@ struct blood_plague_heal_t final : public death_knight_leech_damage_heal_t
 
 struct blood_plague_t final : public death_knight_disease_t
 {
-  blood_plague_t( std::string_view name, death_knight_t* p )
+  blood_plague_t( std::string_view name, death_knight_t* p, bool legacy_superstrain = false )
     : death_knight_disease_t( name, p, p->spell.blood_plague )
   {
     heal = get_action<blood_plague_heal_t>( "blood_plague_heal", p );
+
+    // Legacy Shadowlands: Superstrain. The "reduced effectiveness" is server
+    // side, so this is the multiplier Shadowlands SimC measured in game.
+    if ( legacy_superstrain )
+    {
+      legacy_superstrain_copy = true;
+      base_multiplier *= 0.75;
+    }
+  }
+
+  // Legacy Azerite: Deep Cuts
+  double bonus_ta( const action_state_t* state ) const override
+  {
+    double ta = death_knight_disease_t::bonus_ta( state );
+
+    if ( p()->azerite.deep_cuts.enabled() && get_td( state->target )->debuff.legacy_deep_cuts->up() )
+      ta += p()->azerite.deep_cuts.value();
+
+    return ta;
   }
 
   void tick( dot_t* d ) override
@@ -7966,7 +8229,7 @@ private:
 // Frost Fever =======================================================
 struct frost_fever_t final : public death_knight_disease_t
 {
-  frost_fever_t( std::string_view name, death_knight_t* p )
+  frost_fever_t( std::string_view name, death_knight_t* p, bool legacy_superstrain_copy_ = false )
     : death_knight_disease_t( name, p, p->spell.frost_fever ),
       rp_generation(
           as<int>( p->spec.frost_fever->effectN( 1 ).trigger()->effectN( 1 ).resource( RESOURCE_RUNIC_POWER ) ) )
@@ -7978,6 +8241,14 @@ struct frost_fever_t final : public death_knight_disease_t
       ap_type = attack_power_type::WEAPON_MAINHAND;
       // There's a 0.98 modifier hardcoded in the tooltip if a 2H weapon is equipped, probably server side magic
       base_multiplier *= 0.98;
+    }
+
+    // Legacy Shadowlands: Superstrain. Marking the copy stops it re-applying
+    // the other two diseases, which would recurse without end.
+    if ( legacy_superstrain_copy_ )
+    {
+      legacy_superstrain_copy = true;
+      base_multiplier *= 0.375;
     }
   }
 
@@ -8028,9 +8299,19 @@ struct virulent_plague_erupt_t final : public death_knight_spell_t
 
 struct virulent_plague_t final : public death_knight_disease_t
 {
-  virulent_plague_t( std::string_view name, death_knight_t* p )
+  virulent_plague_t( std::string_view name, death_knight_t* p, bool legacy_superstrain = false )
     : death_knight_disease_t( name, p, p->spell.virulent_plague )
   {
+    // BracketSim legacy compatibility: Lingering Plague.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 125 );
+
+    // Legacy Shadowlands: Superstrain.
+    if ( legacy_superstrain )
+    {
+      legacy_superstrain_copy = true;
+      base_multiplier *= 0.375;
+    }
+
     if ( p->options.wcl_reporting_mode )
       add_child( p->background_actions.virulent_plague_erupt );
   }
@@ -8590,11 +8871,35 @@ struct abomination_limb_t : public death_knight_spell_t
   {
     harmful = false;
     parse_options( options_str );
+
+    // Legacy Shadowlands: Abomination's Frenzy lengthens the channel and cuts
+    // its cooldown.
+    if ( p->shadowlands_legacy.abominations_frenzy )
+    {
+      const spell_data_t* af = p->find_spell( 353447 );
+      dot_duration += af->effectN( 1 ).time_value();
+      cooldown->duration -= timespan_t::from_seconds( af->effectN( 2 ).base_value() );
+    }
   }
 
   void tick( dot_t* dot ) override
   {
     death_knight_spell_t::tick( dot );
+
+    // Legacy Shadowlands: Abomination's Frenzy makes every pull take more damage,
+    // once per target per internal cooldown.
+    if ( p()->shadowlands_legacy.abominations_frenzy )
+    {
+      for ( auto& target : p()->sim->target_non_sleeping_list )
+      {
+        auto td = get_td( target );
+        if ( !td->debuff.legacy_abominations_frenzy_icd->check() )
+        {
+          td->debuff.legacy_abominations_frenzy->trigger();
+          td->debuff.legacy_abominations_frenzy_icd->trigger();
+        }
+      }
+    }
 
     for ( auto& target : p()->sim->target_non_sleeping_list )
     {
@@ -8609,6 +8914,21 @@ struct abomination_limb_t : public death_knight_spell_t
 
     if ( p()->talent.blood.bone_collector.ok() )
       p()->buffs.bone_shield->trigger();
+  }
+
+  void execute() override
+  {
+    death_knight_spell_t::execute();
+
+    // BracketSim legacy compatibility: Abomination Limb is the Necrolord death knight ability and it survived as an
+    // ordinary Blood talent, so a Necrolord death knight of any other spec has
+    // no host for these traits at all.
+    //
+    // Fires the soulbind traits that ride this covenant's class ability.
+    if ( p()->options.legacy_shadowlands_enabled &&
+         util::str_compare_ci( p()->options.legacy_covenant, "necrolord" ) )
+      player->legacy_soulbinds.covenant_ability_cast(
+          player, legacy_soulbind::COVENANT_NECROLORD, cooldown );
   }
 };
 
@@ -8735,6 +9055,13 @@ struct dark_transformation_t : public death_knight_spell_t
                                                      p()->pets.ghoul_pet.active_pet()->dark_transformation_gain, this );
 
     p()->buffs.dark_transformation->trigger();
+
+    // Legacy Shadowlands: Frenzied Monstrosity.
+    p()->buffs.legacy_frenzied_monstrosity->trigger();
+
+    // Legacy Azerite: Helchains
+    if ( p()->azerite.helchains.enabled() )
+      p()->buffs.legacy_helchains->trigger();
 
     if ( p()->talent.unholy.commander_of_the_dead.ok() )
       p()->buffs.commander_of_the_dead->trigger();
@@ -8870,7 +9197,21 @@ struct army_of_the_dead_t final : public death_knight_summon_spell_t
       if ( !p->options.wcl_reporting_mode )
         add_child( summon_magus );
     }
+
+    // Legacy Azerite: Magus of the Dead. Reuses the talent's summon action so
+    // the spawner has a parent to report against, and works whether or not the
+    // modern talent is taken.
+    if ( p->azerite.legacy_magus_of_the_dead.enabled() )
+    {
+      legacy_summon_magus = get_action<summon_magus_t>( "legacy_magus_of_the_dead", p, p->spell.legacy_summon_magus,
+                                                        magus_of_the_dead_e::MAGUS_ARMY_OF_THE_DEAD );
+      p->pets.army_magus.set_creation_event_callback( pets::parent_pet_action_fn( legacy_summon_magus ) );
+      if ( !p->options.wcl_reporting_mode )
+        add_child( legacy_summon_magus );
+    }
   }
+
+  action_t* legacy_summon_magus = nullptr;
 
   void init_finished() override
   {
@@ -8916,6 +9257,12 @@ struct army_of_the_dead_t final : public death_knight_summon_spell_t
   void execute() override
   {
     death_knight_summon_spell_t::execute();
+
+    // Legacy Azerite: Magus of the Dead brings its own Magus along, on top of
+    // the modern talent of the same name. It goes through the same summon action
+    // the talent uses so the spawner has a parent to report against.
+    if ( legacy_summon_magus )
+      legacy_summon_magus->execute();
 
     int n_ghoul                = 0;
     timespan_t abomination_dur = abomination_duration;
@@ -9032,6 +9379,9 @@ struct blood_boil_t final : public death_knight_spell_t
     : death_knight_spell_t( "blood_boil", p, p->talent.blood.blood_boil )
   {
     parse_options( options_str );
+
+    // BracketSim legacy compatibility: Debilitating Malady.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 123 );
 
     aoe              = -1;
     cooldown->hasted = true;
@@ -9493,6 +9843,22 @@ struct dancing_rune_weapon_t final : public death_knight_spell_t
   void execute() override
   {
     death_knight_spell_t::execute();
+
+    // Legacy Azerite: Eternal Rune Weapon
+    if ( p()->azerite.eternal_rune_weapon.enabled() )
+      p()->buffs.eternal_rune_weapon->trigger();
+
+    // Legacy Shadowlands: Crimson Rune Weapon. Dancing Rune Weapon hands out
+    // Bone Shield charges up front and leaves a rune-regeneration window behind
+    // when it fades.
+    if ( p()->shadowlands_legacy.crimson_rune_weapon )
+    {
+      p()->buffs.bone_shield->trigger(
+          as<int>( p()->find_spell( 334525 )->effectN( 2 ).base_value() ) );
+      make_event( *sim, p()->buffs.dancing_rune_weapon->buff_duration(),
+                  [ this ] { p()->buffs.legacy_crimson_rune_weapon->trigger(); } );
+    }
+
     if ( p()->talent.blood.insatiable_blade.ok() )
     {
       p()->buffs.bone_shield->trigger( bone_shield_stack_gain );
@@ -9681,6 +10047,17 @@ struct death_and_decay_base_t : public death_knight_spell_t
   {
     death_knight_spell_t::execute();
 
+    // Legacy Azerite: Bone Spike Graveyard
+    if ( p()->azerite.bone_spike_graveyard.enabled() && p()->background_actions.legacy_bone_spike_graveyard )
+      p()->background_actions.legacy_bone_spike_graveyard->execute_on_target( target );
+
+    // Legacy Shadowlands: Phearomones. Death's Turf lasts as long as the patch
+    // the player is standing in, so the duration comes from this cast rather
+    // than from the buff's own spell, which carries none.
+    if ( p()->shadowlands_legacy.phearomones )
+      p()->buffs.legacy_death_turf->trigger( 1, buff_t::DEFAULT_VALUE(), 1.0,
+                                             data().duration() + 500_ms );
+
     bool cs_was_up = p()->specialization() == DEATH_KNIGHT_BLOOD && p()->buffs.crimson_scourge->up();
 
     // If bone shield isn't up, Relish in Blood doesn't heal or generate any RP
@@ -9730,6 +10107,38 @@ struct death_and_decay_t final : public death_and_decay_base_t
 };
 
 // Death Grip ===============================================================
+// BracketSim legacy compatibility: Death's Due. The Night Fae replacement for
+// Death and Decay, so it reuses that ground effect with its own 341340 pulse.
+// The Strength it siphoned from the enemies standing in it is not modelled.
+struct legacy_deaths_due_t final : public death_and_decay_base_t
+{
+  legacy_deaths_due_t( death_knight_t* p, std::string_view options_str )
+    : death_and_decay_base_t( p, "deaths_due", p->legacy_covenant.deaths_due )
+  {
+    damage = get_action<death_and_decay_damage_t>( "deaths_due_damage", p, p->find_spell( 341340 ) );
+    parse_options( options_str );
+
+    // BracketSim legacy compatibility: the conduit Withering Ground (250)
+    // raises Death's Due's damage. Shadowlands applied it as a base_multiplier
+    // on the damage action, and the damage lives entirely in that child - the
+    // parent is a ground effect that deals none itself.
+    if ( p->legacy_conduits.has( 250 ) && damage )
+      damage->base_multiplier *= 1.0 + p->legacy_conduits.percent( 250 );
+  }
+
+  void execute() override
+  {
+    death_and_decay_base_t::execute();
+
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NIGHT_FAE,
+                                            cooldown );
+  }
+};
+
 struct death_grip_t final : public death_knight_spell_t
 {
   death_grip_t( death_knight_t* p, std::string_view options_str )
@@ -9866,12 +10275,52 @@ struct necrotic_coil_shadowstrike_t final : public death_coil_damage_base_t
   }
 };
 
+// Legacy Azerite: Harrowing Decay =========================================
+// A residual dot laid down by Death Coil.
+
+struct legacy_harrowing_decay_t final
+  : public residual_action::residual_periodic_action_t<death_knight_spell_t>
+{
+  legacy_harrowing_decay_t( std::string_view n, death_knight_t* p )
+    : residual_action::residual_periodic_action_t<death_knight_spell_t>(
+          n, p, p->azerite.harrowing_decay.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() )
+  {
+    background = true;
+    hasted_ticks = tick_zero = false;
+  }
+};
+
 struct death_coil_damage_t final : public death_coil_damage_base_t
 {
+  double legacy_harrowing_decay_amount = 0.0;
+
   death_coil_damage_t( std::string_view name, death_knight_t* p )
     : death_coil_damage_base_t( name, p, p->spell.death_coil_damage )
   {
     background = dual = true;
+
+    // BracketSim legacy compatibility: Embrace Death.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 89 );
+
+    // Legacy Azerite: Harrowing Decay lays down its whole value over the dot.
+    if ( p->azerite.harrowing_decay.enabled() )
+    {
+      const spell_data_t* hd =
+          p->azerite.harrowing_decay.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger();
+      legacy_harrowing_decay_amount =
+          p->azerite.harrowing_decay.value( 1 ) * ( hd->duration() / hd->effectN( 1 ).period() );
+    }
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    death_coil_damage_base_t::impact( s );
+
+    if ( legacy_harrowing_decay_amount > 0 && p()->background_actions.legacy_harrowing_decay )
+    {
+      residual_action::trigger( p()->background_actions.legacy_harrowing_decay, s->target,
+                                legacy_harrowing_decay_amount );
+    }
   }
 };
 
@@ -9879,6 +10328,41 @@ struct death_coil_base_t : public death_knight_spell_t
 {
   death_coil_base_t( std::string_view n, death_knight_t* p, const spell_data_t* s ) : death_knight_spell_t( n, p, s )
   {
+  }
+
+  // Legacy Shadowlands: Deadliest Coil makes Death Coil cheaper and stretches
+  // Dark Transformation; Death's Certainty pulls Death and Decay forward.
+  double cost() const override
+  {
+    double c = death_knight_spell_t::cost();
+
+    if ( p()->shadowlands_legacy.deadliest_coil )
+      c += p()->find_spell( 334949 )->effectN( 1 ).resource( RESOURCE_RUNIC_POWER );
+
+    return std::max( 0.0, c );
+  }
+
+  void execute() override
+  {
+    death_knight_spell_t::execute();
+
+    if ( p()->shadowlands_legacy.deaths_certainty )
+      p()->cooldown.death_and_decay_dynamic->adjust( -timespan_t::from_seconds(
+          p()->find_spell( 334898 )->effectN( 1 ).base_value() / 10 ) );
+
+    if ( p()->shadowlands_legacy.deadliest_coil && p()->buffs.dark_transformation->up() )
+      p()->buffs.dark_transformation->extend_duration( timespan_t::from_seconds(
+          p()->find_spell( 334949 )->effectN( 2 ).base_value() ) );
+  }
+
+  double composite_da_multiplier( const action_state_t* state ) const override
+  {
+    double m = death_knight_spell_t::composite_da_multiplier( state );
+
+    if ( p()->shadowlands_legacy.deaths_certainty )
+      m *= 1.0 + p()->find_spell( 334898 )->effectN( 2 ).percent();
+
+    return m;
   }
 };
 
@@ -9972,6 +10456,22 @@ struct death_strike_heal_t final : public death_knight_heal_t
     return std::max( min_heal, cur_heal );
   }
 
+  // BracketSim legacy compatibility: Bryndaor's Might needs the parent cast's
+  // Runic Power cost, which a background heal cannot reach on its own.
+  double legacy_last_death_strike_cost = 0.0;
+
+  // BracketSim legacy compatibility: Marrowblood scales the Death Strike heal
+  // with the Bone Shield stacks the Blood Death Knight is holding.
+  double bonus_da( const action_state_t* state ) const override
+  {
+    double da = death_knight_heal_t::bonus_da( state );
+
+    if ( p()->azerite.marrowblood.enabled() && p()->buffs.bone_shield->up() )
+      da += p()->azerite.marrowblood.value() * p()->buffs.bone_shield->stack();
+
+    return da;
+  }
+
   double action_multiplier() const override
   {
     double m = death_knight_heal_t::action_multiplier();
@@ -9986,6 +10486,17 @@ struct death_strike_heal_t final : public death_knight_heal_t
     trigger_blood_shield( state );
 
     p()->buffs.voracious->trigger();
+
+    // Legacy Shadowlands: Bryndaor's Might refunds part of the Death Strike
+    // cost when the heal was large enough.
+    if ( p()->shadowlands_legacy.bryndaors_might )
+    {
+      const spell_data_t* bm = p()->find_spell( 334501 );
+      if ( state->result_total > player->resources.max[ RESOURCE_HEALTH ] * bm->effectN( 2 ).percent() )
+        p()->resource_gain( RESOURCE_RUNIC_POWER,
+                            bm->effectN( 1 ).percent() * legacy_last_death_strike_cost,
+                            p()->gains.legacy_bryndaors_might, this );
+    }
 
     death_knight_heal_t::impact( state );
 
@@ -10102,8 +10613,15 @@ struct death_strike_t final : public death_knight_melee_attack_t
 
     if ( hit_any_target )
     {
+      // Legacy Shadowlands: Bryndaor's Might reads this.
+      debug_cast<death_strike_heal_t*>( heal.get() )->legacy_last_death_strike_cost = last_resource_cost;
       heal->execute();
     }
+
+    // Legacy Shadowlands: Death's Certainty.
+    if ( p()->shadowlands_legacy.deaths_certainty )
+      p()->cooldown.death_and_decay_dynamic->adjust( -timespan_t::from_seconds(
+          p()->find_spell( 334898 )->effectN( 1 ).base_value() / 10 ) );
 
     p()->buffs.hemostasis->expire();
     if ( p()->talent.sanlayn.vampiric_strike.ok() && !p()->buffs.gift_of_the_sanlayn->check() )
@@ -10123,6 +10641,18 @@ struct death_strike_t final : public death_knight_melee_attack_t
       p()->cooldown.mid2_2pc->start();
     }
 
+  }
+
+  // Legacy Shadowlands: Death's Certainty raises Death Strike's damage as well
+  // as Death Coil's.
+  double composite_da_multiplier( const action_state_t* state ) const override
+  {
+    double m = death_knight_melee_attack_t::composite_da_multiplier( state );
+
+    if ( p()->shadowlands_legacy.deaths_certainty )
+      m *= 1.0 + p()->find_spell( 334898 )->effectN( 2 ).percent();
+
+    return m;
   }
 
 private:
@@ -10156,6 +10686,20 @@ struct empower_rune_weapon_t final : public death_knight_spell_t
 
     internal_cooldown->duration = min_gcd;
     min_gcd = trigger_gcd = 0_ms;
+  }
+
+  // BracketSim legacy compatibility: Accelerated Cold shortens Empower Rune
+  // Weapon's recharge. The -10% is effect 2 of conduit spell 337822, which
+  // Midnight does not ship; the value is read from the archived 9.2.7 client
+  // data that legacy_conduits.hpp already carries its rank table from.
+  double recharge_multiplier( const cooldown_t& cd ) const override
+  {
+    double m = death_knight_spell_t::recharge_multiplier( cd );
+
+    if ( p()->legacy_conduits.has( 79 ) )
+      m *= 1.0 + ( -10.0 / 100.0 );
+
+    return m;
   }
 
   bool ready() override
@@ -10448,13 +10992,30 @@ struct festering_scythe_t final : public festering_base_t
 
 struct festering_strike_t final : public festering_base_t
 {
+  // BracketSim legacy compatibility: Cankerous Wounds.
+  double cankerous_wounds_chance = 0.0;
+
   festering_strike_t( death_knight_t* p, std::string_view options_str )
     : festering_base_t( "festering_strike", p, p->spec.festering_strike )
   {
     parse_options( options_str );
 
+    if ( p->azerite.cankerous_wounds.enabled() )
+      cankerous_wounds_chance = p->azerite.cankerous_wounds.spell()->effectN( 2 ).base_value() / 100;
+
     if ( p->talent.unholy.festering_scythe.ok() )
       set_replacement_action( get_action<festering_scythe_t>( "festering_scythe", p ), p->buffs.festering_scythe, !p->options.wcl_reporting_mode );
+  }
+
+  // Flat extra damage on the strike itself.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = festering_base_t::bonus_da( s );
+
+    if ( p()->azerite.cankerous_wounds.enabled() )
+      da += p()->azerite.cankerous_wounds.value( 1 );
+
+    return da;
   }
 
   void execute() override
@@ -10699,12 +11260,20 @@ struct frostwyrms_fury_t final : public fwf_action_base_t
   {
     fwf_damage = get_action<frostwyrms_fury_damage_t>( "frostwyrms_fury_damage", p, p->spell.frostwyrms_fury_damage );
     set_replacement_action( new chosen_of_frostbrood_fwf_t( p, options_str ), p->buffs.chosen_of_frostbrood_fwf );
+
+    // Legacy Shadowlands: Absolute Zero.
+    if ( p->shadowlands_legacy.absolute_zero )
+      cooldown->duration *= 1.0 + p->find_spell( 334692 )->effectN( 1 ).percent();
     // Stun is NYI
   }
 
   void execute() override
   {
     fwf_action_base_t::execute();
+
+    // Legacy Azerite: Frostwhelp's Indignation
+    if ( p()->azerite.frostwhelps_indignation.enabled() )
+      p()->buffs.frostwhelps_indignation->trigger();
 
     if ( was_replaced )
       return;
@@ -10732,6 +11301,46 @@ struct frost_strike_strike_t final : public death_knight_melee_attack_t
   {
     background = special = true;
     weapon               = w;
+
+    // BracketSim legacy compatibility: Unleashed Frenzy. Modelled as a flat
+    // gain rather than the stacking Strength buff, which has no host here.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 122 );
+  }
+
+  // Legacy Azerite: Killer Frost and Latent Chill both add flat damage here.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = death_knight_melee_attack_t::bonus_da( s );
+
+    if ( p()->azerite.killer_frost.enabled() )
+      da += p()->azerite.killer_frost.value( 1 );
+
+    if ( p()->azerite.latent_chill.enabled() )
+    {
+      int empty_runes = as<int>( p()->_runes.runes_depleted() + p()->_runes.runes_regenerating() );
+      if ( empty_runes >= as<int>( p()->azerite.latent_chill.spell()->effectN( 2 ).base_value() ) )
+      {
+        double lc_damage = p()->azerite.latent_chill.value( 1 );
+        // Unlike most traits this one halves its value on the off hand.
+        if ( weapon && weapon->slot == SLOT_OFF_HAND )
+          lc_damage /= 2.0;
+
+        da += lc_damage;
+      }
+    }
+
+    return da;
+  }
+
+  // Legacy Azerite: Killer Frost can hand out a Killing Machine on a crit.
+  void legacy_trigger_killer_frost( const action_state_t* s ) const
+  {
+    if ( p()->azerite.killer_frost.enabled() && s->result == RESULT_CRIT &&
+         p()->rng().roll( p()->azerite.killer_frost.spell()->effectN( 2 ).percent() ) )
+    {
+      p()->trigger_killing_machine( false, p()->procs.km_from_legacy_killer_frost,
+                                    p()->procs.km_from_legacy_killer_frost_wasted );
+    }
   }
 
   double composite_da_multiplier( const action_state_t* state ) const override
@@ -10758,6 +11367,8 @@ struct frost_strike_strike_t final : public death_knight_melee_attack_t
       residual_action::trigger( p()->background_actions.hyperpyrexia_damage, s->target,
                                 s->result_amount * p()->talent.frost.hyperpyrexia->effectN( 1 ).percent() );
     }
+
+    legacy_trigger_killer_frost( s );
   }
 
 public:
@@ -10982,6 +11593,14 @@ struct frost_strike_t final : public frost_strike_base_t
 
     if ( was_replaced )
       return;
+
+    // BracketSim legacy compatibility: Icy Citadel banks a stack whenever Frost
+    // Strike crits while Pillar of Frost is up.
+    if ( p()->azerite.icy_citadel.enabled() && p()->buffs.pillar_of_frost->up() &&
+         execute_state && execute_state->result == RESULT_CRIT )
+    {
+      p()->buffs.icy_citadel_builder->trigger();
+    }
 
     auto td = get_td( target );
     if ( p()->talent.frost.shattering_blade.ok() && td->debuff.razorice->at_max_stacks() )
@@ -11319,6 +11938,10 @@ struct vampiric_strike_blood_t : public heart_strike_base_t
     heart_strike_base_t::execute();
 
     p()->trigger_drw_action( DRW_ACTION_VAMPIRIC_STRIKE );
+
+    // Legacy Azerite: Deep Cuts marks the primary target.
+    if ( p()->azerite.deep_cuts.enabled() && execute_state && result_is_hit( execute_state->result ) )
+      get_td( execute_state->target )->debuff.legacy_deep_cuts->trigger();
   }
 };
 
@@ -11328,6 +11951,11 @@ struct heart_strike_t : public heart_strike_base_t
     : heart_strike_base_t( n, p, p->talent.blood.heart_strike ), vampiric_strike( nullptr )
   {
     parse_options( options_str );
+
+    // BracketSim legacy compatibility: Withering Plague. In Shadowlands this
+    // only applied while Blood Plague was on the target; Heart Strike applies
+    // Blood Plague itself, so it is effectively always up on its own target.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 80 );
     if ( p->talent.sanlayn.vampiric_strike.ok() )
     {
       vampiric_strike      = new vampiric_strike_blood_t( "vampiric_strike", p, false );
@@ -11358,6 +11986,11 @@ struct heart_strike_t : public heart_strike_base_t
     heart_strike_base_t::execute();
 
     p()->trigger_drw_action( DRW_ACTION_HEART_STRIKE );
+
+    // Legacy Shadowlands: Gorefiend's Domination.
+    if ( p()->shadowlands_legacy.gorefiends_domination )
+      p()->cooldown.vampiric_blood->adjust( -timespan_t::from_seconds(
+          p()->find_spell( 334580 )->effectN( 1 ).base_value() ) );
   }
 
 private:
@@ -11452,6 +12085,81 @@ struct howling_blades_t final : public death_knight_spell_t
       p()->trigger_killing_machine( false, p()->procs.km_from_howling_blades,
                                     p()->procs.km_from_howling_blades_wasted );
     }
+  }
+};
+
+// Legacy Azerite: Cold Hearted ============================================
+// Battle for Azeroth never implemented the healing half; the current tooltip
+// reads "Icebound Fortitude heals for <e1> every sec and its cooldown is
+// reduced by <e2> seconds", so both halves are modelled here.
+
+struct legacy_cold_hearted_heal_t final : public death_knight_heal_t
+{
+  legacy_cold_hearted_heal_t( std::string_view n, death_knight_t* p )
+    : death_knight_heal_t( n, p, p->find_spell( 288426 ) )
+  {
+    background = true;
+    target = p;
+    base_dd_min = base_dd_max = p->azerite.cold_hearted.value( 1 );
+    dot_duration = timespan_t::zero();
+  }
+};
+
+// Legacy Azerite: Helchains ===============================================
+
+struct legacy_helchains_damage_t final : public death_knight_spell_t
+{
+  legacy_helchains_damage_t( std::string_view n, death_knight_t* p ) : death_knight_spell_t( n, p, p->find_spell( 290814 ) )
+  {
+    background = true;
+    aoe = -1;
+    base_dd_min = base_dd_max = p->azerite.helchains.value( 1 );
+  }
+};
+
+// Legacy Azerite: Bone Spike Graveyard ====================================
+
+struct legacy_bone_spike_graveyard_heal_t final : public death_knight_heal_t
+{
+  legacy_bone_spike_graveyard_heal_t( std::string_view n, death_knight_t* p )
+    : death_knight_heal_t( n, p, p->azerite.bone_spike_graveyard.spell() )
+  {
+    background = true;
+    target = p;
+    base_dd_min = base_dd_max = p->azerite.bone_spike_graveyard.value( 2 );
+  }
+};
+
+struct legacy_bone_spike_graveyard_t final : public death_knight_spell_t
+{
+  action_t* heal;
+
+  legacy_bone_spike_graveyard_t( std::string_view n, death_knight_t* p )
+    : death_knight_spell_t( n, p, p->azerite.bone_spike_graveyard.spell() ),
+      heal( get_action<legacy_bone_spike_graveyard_heal_t>( "legacy_bone_spike_graveyard_heal", p ) )
+  {
+    aoe = -1;
+    background = true;
+    base_dd_min = base_dd_max = p->azerite.bone_spike_graveyard.value( 1 );
+  }
+
+  void execute() override
+  {
+    death_knight_spell_t::execute();
+
+    heal->execute();
+  }
+};
+
+// Legacy Azerite: Echoing Howl ============================================
+
+struct legacy_echoing_howl_t final : public death_knight_spell_t
+{
+  legacy_echoing_howl_t( std::string_view n, death_knight_t* p ) : death_knight_spell_t( n, p, p->find_spell( 275918 ) )
+  {
+    aoe        = -1;
+    background = true;
+    base_dd_min = base_dd_max = p->azerite.echoing_howl.value();
   }
 };
 
@@ -11590,6 +12298,16 @@ struct howling_blast_t final : public death_knight_spell_t
 
     if ( p()->buffs.rime->up() )
     {
+      // Legacy Shadowlands: Rage of the Frozen Champion.
+      if ( p()->shadowlands_legacy.rage_of_the_frozen_champion )
+        p()->resource_gain( RESOURCE_RUNIC_POWER,
+                            p()->find_spell( 341725 )->effectN( 1 ).resource( RESOURCE_RUNIC_POWER ),
+                            p()->gains.legacy_rage_of_the_frozen_champion );
+
+      // Legacy Azerite: Echoing Howl
+      if ( p()->azerite.echoing_howl.enabled() && p()->background_actions.legacy_echoing_howl )
+        p()->background_actions.legacy_echoing_howl->execute_on_target( target );
+
       if ( p()->talent.frost.avalanche.ok() )
         avalanche->execute_on_target( target );
 
@@ -11684,6 +12402,14 @@ struct marrowrend_t final : public death_knight_melee_attack_t
   {
     death_knight_melee_attack_t::execute();
 
+    // Legacy Azerite: Bones of the Damned can add a Bone Shield charge.
+    if ( p()->azerite.bones_of_the_damned.enabled() )
+    {
+      if ( rng().roll( p()->azerite.bones_of_the_damned.spell()->effectN( 1 ).percent() ) )
+        p()->buffs.bone_shield->trigger();  // the extra charge is not in spell data
+      p()->buffs.bones_of_the_damned->trigger();
+    }
+
     p()->trigger_drw_action( DRW_ACTION_MARROWREND );
 
     if ( p()->talent.deathbringer.dark_talons.ok() && p()->talent.icy_talons->ok() &&
@@ -11737,6 +12463,15 @@ struct mind_freeze_t final : public death_knight_spell_t
   {
     death_knight_spell_t::execute();
 
+    // BracketSim legacy compatibility: the conduit Spirit Drain (70) hands back
+    // Runic Power on an interrupt. Note the divide by ten - the rank value is
+    // 200 at rank 11, and that is 20 Runic Power, not 200.
+    if ( p()->legacy_conduits.has( 70 ) )
+    {
+      p()->resource_gain( RESOURCE_RUNIC_POWER, p()->legacy_conduits.value( 70 ) / 10.0,
+                          p()->gains.legacy_spirit_drain, this );
+    }
+
     if ( p()->talent.coldthirst.ok() )
     {
       p()->resource_gain( RESOURCE_RUNIC_POWER, p()->spell.coldthirst_gain->effectN( 1 ).base_value() * 0.1,
@@ -11766,6 +12501,14 @@ struct obliterate_strike_t final : public death_knight_melee_attack_t
     special    = true;
     may_miss   = false;
     weapon     = w;
+
+    // BracketSim legacy compatibility: Eradicating Blow.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 83 );
+
+    // Legacy Shadowlands: Koltira's Favor. Obliterate's parent action deals no
+    // damage of its own, so the bonus has to sit on the strikes.
+    if ( p->shadowlands_legacy.koltiras_favor )
+      base_multiplier *= 1.0 + p->find_spell( 334583 )->effectN( 2 ).percent();
 
     inexorable_assault = get_action<inexorable_assault_damage_t>( "inexorable_assault", p );
   }
@@ -11915,6 +12658,19 @@ struct obliterate_t final : public death_knight_melee_attack_t
       make_event<delayed_execute_event_t>( *sim, p(), mh, execute_state->target, mh_delay );
       if ( oh )
         make_event<delayed_execute_event_t>( *sim, p(), oh, execute_state->target, oh_delay );
+
+      // Legacy Shadowlands: Koltira's Favor. The rune count sits on the linked
+      // spell rather than on the trait's own effect.
+      if ( p()->shadowlands_legacy.koltiras_favor && p()->cooldown.legacy_koltiras_favor_icd->is_ready() )
+      {
+        const spell_data_t* kf = p()->find_spell( 334583 );
+        if ( p()->rng().roll( kf->proc_chance() ) )
+        {
+          p()->replenish_rune( as<unsigned int>( kf->effectN( 1 ).trigger()->effectN( 1 ).base_value() ),
+                               p()->gains.legacy_koltiras_favor );
+          p()->cooldown.legacy_koltiras_favor_icd->start();
+        }
+      }
     }
 
     if ( p()->buffs.exterminate->up() )
@@ -12271,7 +13027,9 @@ struct remorseless_winter_damage_t final : public death_knight_spell_t
   remorseless_winter_damage_t( std::string_view n, death_knight_t* p, const spell_data_t* data )
     : death_knight_spell_t( n, p, data ),
       biting_cold_target_threshold( 0 ),
+      legacy_biting_cold_target_threshold( 0 ),
       triggered_biting_cold( false ),
+      triggered_legacy_biting_cold( false ),
       triggered_frozen_dominion( false ),
       frozen_dominion_impacted{ true }
   {
@@ -12292,8 +13050,32 @@ struct remorseless_winter_damage_t final : public death_knight_spell_t
       biting_cold_target_threshold = p->talent.frost.biting_cold->effectN( 1 ).base_value();
     }
 
+    // Legacy Shadowlands: the Biting Cold legendary shares its name with the
+    // current talent but carries its own threshold and damage bonus.
+    if ( p->shadowlands_legacy.biting_cold )
+    {
+      const spell_data_t* bc = p->find_spell( 334678 );
+      legacy_biting_cold_target_threshold = bc->effectN( 1 ).base_value();
+      base_multiplier *= 1.0 + bc->effectN( 2 ).percent();
+    }
+
     if ( p->talent.frost.frozen_dominion.ok() )
       p->register_on_kill_callback( [ & ]( player_t* t ) { clear_frozen_dominion_impacted( t ); } );
+  }
+
+  // BracketSim legacy compatibility: Everfrost raises Remorseless Winter's own
+  // damage against a target it has already hit, so it ramps across the channel.
+  double composite_target_multiplier( player_t* t ) const override
+  {
+    double m = death_knight_spell_t::composite_target_multiplier( t );
+
+    if ( p()->legacy_conduits.has( 91 ) )
+    {
+      if ( auto td = get_td( t ) )
+        m *= 1.0 + td->debuff.legacy_everfrost->stack_value();
+    }
+
+    return m;
   }
 
   void reset() override
@@ -12305,6 +13087,8 @@ struct remorseless_winter_damage_t final : public death_knight_spell_t
   void clear_state()
   {
     triggered_biting_cold = false;
+    triggered_legacy_biting_cold = false;
+    triggered_legacy_frozen_tempest = false;
     if ( p()->talent.frost.frozen_dominion.ok() )
     {
       triggered_frozen_dominion = false;
@@ -12351,11 +13135,33 @@ struct remorseless_winter_damage_t final : public death_knight_spell_t
   {
     death_knight_spell_t::impact( state );
 
+    // BracketSim legacy compatibility: Everfrost stacks on whatever this pulse
+    // hits, so the channel ramps its own damage.
+    if ( p()->legacy_conduits.has( 91 ) )
+      get_td( state->target )->debuff.legacy_everfrost->trigger();
+
+    // Legacy Shadowlands: Biting Cold.
+    if ( p()->shadowlands_legacy.biting_cold && !triggered_legacy_biting_cold &&
+         state->n_targets >= legacy_biting_cold_target_threshold )
+    {
+      p()->buffs.rime->trigger( 1, buff_t::DEFAULT_VALUE(), 1.0 );
+      triggered_legacy_biting_cold = true;
+    }
+
     if ( state->n_targets >= biting_cold_target_threshold && p()->talent.frost.biting_cold.ok() &&
          !triggered_biting_cold )
     {
       p()->buffs.rime->trigger( 1, buff_t::DEFAULT_VALUE(), 1.0 );
       triggered_biting_cold = true;
+    }
+
+    // Legacy Azerite: Frozen Tempest hands out a Rime proc once per cast when
+    // the pulse catches enough targets.
+    if ( p()->azerite.frozen_tempest.enabled() && !triggered_legacy_frozen_tempest &&
+         state->n_targets >= p()->azerite.frozen_tempest.spell()->effectN( 1 ).base_value() )
+    {
+      p()->buffs.rime->trigger( 1, buff_t::DEFAULT_VALUE(), 1.0 );
+      triggered_legacy_frozen_tempest = true;
     }
 
     if ( p()->talent.frost.everfrost.ok() )
@@ -12370,9 +13176,23 @@ struct remorseless_winter_damage_t final : public death_knight_spell_t
     }
   }
 
+  // Legacy Azerite: Frozen Tempest
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = death_knight_spell_t::bonus_da( s );
+
+    if ( p()->azerite.frozen_tempest.ok() )
+      da += p()->azerite.frozen_tempest.value( 2 );
+
+    return da;
+  }
+
 private:
   double biting_cold_target_threshold;
+  double legacy_biting_cold_target_threshold;
   bool triggered_biting_cold;
+  bool triggered_legacy_biting_cold;
+  bool triggered_legacy_frozen_tempest = false;
   bool triggered_frozen_dominion;
   target_specific_t<bool> frozen_dominion_impacted;
 };
@@ -12652,6 +13472,243 @@ struct scourge_strike_t final : public scourge_strike_base_t
   }
 };
 
+
+// BracketSim legacy compatibility: Shadowlands covenant abilities =========
+// Midnight has no covenant DBC, but every covenant spell still resolves in the
+// current client data, so these are looked up by id and gated on the chosen
+// covenant rather than on an item.
+
+// Shackle the Unworthy (Kyrian)
+struct legacy_shackle_the_unworthy_t final : public death_knight_spell_t
+{
+  legacy_shackle_the_unworthy_t( death_knight_t* p, std::string_view options_str )
+    : death_knight_spell_t( "shackle_the_unworthy", p, p->legacy_covenant.shackle_the_unworthy )
+  {
+    parse_options( options_str );
+    base_tick_time = p->legacy_covenant.shackle_the_unworthy->effectN( 1 ).period();
+
+    // BracketSim legacy compatibility: Proliferation (conduit 128) raises
+    // Shackle the Unworthy's damage.
+    //
+    // Its other half lengthened the dot by 3 seconds, which SimulationCraft
+    // read from effect 2 of conduit spell 338664. Midnight does not ship that
+    // spell, and the duration does not scale with rank, so there is nowhere to
+    // read it from - it is left out rather than typed in from a tooltip.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 128 );
+  }
+
+  void execute() override
+  {
+    death_knight_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_KYRIAN,
+                                            cooldown );
+
+    // Legacy Shadowlands: Final Sentence rides this cast.
+    if ( p()->shadowlands_legacy.final_sentence )
+    {
+      p()->replenish_rune(
+          as<unsigned int>( p()->find_spell( 353823 )->effectN( 1 ).resource( RESOURCE_RUNE ) ),
+          p()->gains.legacy_final_sentence );
+    }
+  }
+};
+
+// Swarming Mist (Venthyr)
+struct legacy_swarming_mist_damage_t final : public death_knight_spell_t
+{
+  int energize_target_cap;
+  int energize_tick;
+  int energize_amount;
+
+  legacy_swarming_mist_damage_t( death_knight_t* p )
+    : death_knight_spell_t( "swarming_mist_damage", p,
+                            p->legacy_covenant.swarming_mist->effectN( 1 ).trigger() ),
+      energize_target_cap(
+          as<int>( p->legacy_covenant.swarming_mist->effectN( 3 ).base_value() ) ),
+      energize_tick( 0 ),
+      energize_amount( as<int>( p->legacy_covenant.swarming_mist->ok()
+                                    ? p->find_spell( 312546 )->effectN( 1 ).resource( RESOURCE_RUNIC_POWER )
+                                    : 0 ) )
+  {
+    background = true;
+    aoe = -1;
+    reduced_aoe_targets = p->legacy_covenant.swarming_mist->effectN( 5 ).base_value();
+
+    // BracketSim legacy compatibility: Impenetrable Gloom (conduit 126) raises
+    // the mist's damage. Its second half added dodge, which this port does not
+    // measure.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 126 );
+  }
+
+  void execute() override
+  {
+    energize_tick = 0;
+    death_knight_spell_t::execute();
+  }
+
+  void impact( action_state_t* state ) override
+  {
+    death_knight_spell_t::impact( state );
+
+    if ( energize_tick < energize_target_cap )
+    {
+      p()->resource_gain( RESOURCE_RUNIC_POWER, energize_amount,
+                          p()->gains.legacy_swarming_mist, this );
+      energize_tick++;
+    }
+  }
+};
+
+// The Insatiable Hunger legendary detonates when Swarming Mist ends, scaled by
+// the Runic Power spent while it was up.
+struct legacy_insatiable_hunger_damage_t final : public death_knight_spell_t
+{
+  double rp_multiplier;
+
+  legacy_insatiable_hunger_damage_t( death_knight_t* p )
+    : death_knight_spell_t( "insatiable_hunger_damage", p, p->find_spell( 353720 ) ),
+      rp_multiplier( p->find_spell( 353729 )->effectN( 1 ).percent() )
+  {
+    background = true;
+    aoe = -1;
+  }
+
+  double composite_da_multiplier( const action_state_t* state ) const override
+  {
+    double m = death_knight_spell_t::composite_da_multiplier( state );
+
+    m *= 1.0 + p()->legacy_insatiable_hunger_rp * rp_multiplier;
+
+    return m;
+  }
+};
+
+struct legacy_swarming_mist_buff_t final : public buff_t
+{
+  legacy_swarming_mist_damage_t* damage;
+  legacy_insatiable_hunger_damage_t* insatiable;
+
+  legacy_swarming_mist_buff_t( death_knight_t* p )
+    : buff_t( p, "swarming_mist", p->legacy_covenant.swarming_mist ),
+      damage( new legacy_swarming_mist_damage_t( p ) ),
+      insatiable( new legacy_insatiable_hunger_damage_t( p ) )
+  {
+    cooldown->duration = 0_ms;  // Controlled by the action
+    set_tick_callback( [ this ]( buff_t*, int, timespan_t ) { damage->execute(); } );
+    set_partial_tick( true );
+    add_invalidate( CACHE_DODGE );
+  }
+
+  void expire_override( int stacks, timespan_t remaining ) override
+  {
+    buff_t::expire_override( stacks, remaining );
+
+    auto p = debug_cast<death_knight_t*>( player );
+    if ( p->shadowlands_legacy.insatiable_hunger )
+      insatiable->execute();
+  }
+};
+
+// BracketSim legacy (27 Sep 2026): Abomination Limb, Necrolord - upstream shadowlands.
+struct legacy_abomination_limb_damage_t final : public death_knight_spell_t
+{
+  int bone_shield_stack_gain;
+  legacy_abomination_limb_damage_t( death_knight_t* p )
+    : death_knight_spell_t( "abomination_limb_damage", p, p->legacy_covenant.abomination_limb->effectN( 2 ).trigger() ),
+      bone_shield_stack_gain( as<int>( p->legacy_covenant.abomination_limb->effectN( 3 ).base_value() ) )
+  {
+    background = true;
+    aoe = -1;
+    reduced_aoe_targets = p->legacy_covenant.abomination_limb->effectN( 5 ).base_value();
+  }
+
+  void execute() override
+  {
+    death_knight_spell_t::execute();
+    // On cast, then every effect-4 seconds: the spec's own proc.
+    if ( p()->legacy_abomination_limb_proc->is_ready() )
+    {
+      switch ( p()->specialization() )
+      {
+        case DEATH_KNIGHT_BLOOD:  p()->buffs.bone_shield->trigger( bone_shield_stack_gain ); break;
+        case DEATH_KNIGHT_FROST:  p()->buffs.rime->trigger(); break;
+        case DEATH_KNIGHT_UNHOLY: p()->trigger_runic_corruption( p()->procs.rp_runic_corruption, 0, 1.0 ); break;
+        default: break;
+      }
+      p()->legacy_abomination_limb_proc->start();
+    }
+  }
+};
+
+struct legacy_abomination_limb_buff_t final : public buff_t
+{
+  legacy_abomination_limb_damage_t* damage;
+  legacy_abomination_limb_buff_t( death_knight_t* p )
+    : buff_t( p, "abomination_limb", p->legacy_covenant.abomination_limb ),
+      damage( new legacy_abomination_limb_damage_t( p ) )
+  {
+    cooldown->duration = 0_ms;  // Controlled by the action
+    set_tick_callback( [ this ]( buff_t*, int, timespan_t ) { damage->execute(); } );
+    set_partial_tick( true );
+  }
+};
+
+struct legacy_abomination_limb_t final : public death_knight_spell_t
+{
+  legacy_abomination_limb_t( death_knight_t* p, std::string_view options_str )
+    : death_knight_spell_t( "abomination_limb", p, p->legacy_covenant.abomination_limb )
+  {
+    may_crit = may_miss = may_dodge = may_parry = false;
+    parse_options( options_str );
+    dot_duration = base_tick_time = 0_ms;  // the periodic half lives on the buff
+  }
+
+  void init_finished() override
+  {
+    death_knight_spell_t::init_finished();
+    if ( action_t* d = p()->find_action( "abomination_limb_damage" ) )
+      add_child( d );
+  }
+
+  void execute() override
+  {
+    death_knight_spell_t::execute();
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NECROLORD, cooldown );
+    p()->buffs.legacy_abomination_limb->trigger();
+  }
+};
+
+struct legacy_swarming_mist_t final : public death_knight_spell_t
+{
+  legacy_swarming_mist_t( death_knight_t* p, std::string_view options_str )
+    : death_knight_spell_t( "swarming_mist", p, p->legacy_covenant.swarming_mist )
+  {
+    may_crit = may_miss = may_dodge = may_parry = false;
+    parse_options( options_str );
+
+    // The periodic half lives on the buff.
+    dot_duration = base_tick_time = 0_ms;
+  }
+
+  void execute() override
+  {
+    death_knight_spell_t::execute();
+    // BracketSim legacy compatibility: the soulbind traits that ride this
+    // covenant ability. The shared player_t layer owns them because they are
+    // identical on every class bar a duration that tracks whatever ability
+    // they ride; only the host and its cooldown are class knowledge.
+    player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_VENTHYR,
+                                            cooldown );
+
+    p()->buffs.legacy_swarming_mist->trigger();
+    p()->legacy_insatiable_hunger_rp = 0.0;
+  }
+};
+
 // Soul Reaper ==============================================================
 struct soul_reaper_t final : public death_knight_spell_t
 {
@@ -12707,6 +13764,17 @@ struct antimagic_shell_t final : public death_knight_absorb_t
     target                    = p;
     parse_options( options_str );
     absorb_buff = p->buffs.antimagic_shell;
+
+    // Legacy Azerite: Runic Barrier lengthens the shell. The absorb buff takes
+    // its duration from this action, so the extension has to be applied here as
+    // well as on the buff.
+    if ( p->azerite.runic_barrier.enabled() )
+    {
+      timespan_t target_duration =
+          timespan_t::from_seconds( p->azerite.runic_barrier.spell()->effectN( 2 ).base_value() );
+      if ( target_duration > data().duration() )
+        dot_duration = target_duration;
+    }
 
     min_interval += p->talent.antimagic_barrier->effectN( 1 ).base_value() / 1000;
     interval += p->talent.antimagic_barrier->effectN( 1 ).base_value() / 1000;
@@ -12771,6 +13839,15 @@ struct icebound_fortitude_t final : public death_knight_spell_t
     parse_options( options_str );
     harmful = false;
     target  = p;
+
+    // Legacy Azerite: Cold Hearted. The current tooltip reads "its cooldown is
+    // reduced by <e2> seconds" - Battle for Azeroth's code added instead, which
+    // no longer matches the data.
+    if ( p->azerite.cold_hearted.enabled() )
+    {
+      cooldown->duration -=
+          timespan_t::from_seconds( p->azerite.cold_hearted.spell()->effectN( 2 ).base_value() );
+    }
   }
 
   void execute() override
@@ -13003,6 +14080,15 @@ double death_knight_t::resource_gain( resource_e resource_type, double amount, g
     buffs.rune_carved_plates_physical_buff->trigger( as<int>( amount ) );
   }
 
+  // Legacy Shadowlands: Rampant Transference.
+  if ( shadowlands_legacy.rampant_transference && resource_type == RESOURCE_RUNIC_POWER &&
+       in_death_and_decay() )
+  {
+    double bonus_rp = amount * find_spell( 353882 )->effectN( 3 ).percent();
+    actual_amount += player_t::resource_gain( resource_type, bonus_rp,
+                                              gains.legacy_rampant_transference, action );
+  }
+
   return actual_amount;
 }
 
@@ -13161,6 +14247,9 @@ void death_knight_t::create_options()
 {
   player_t::create_options();
 
+  add_option( opt_bool( "deathknight.legacy_shadowlands_enabled", options.legacy_shadowlands_enabled ) );
+  add_option( opt_string( "deathknight.legacy_covenant", options.legacy_covenant ) );
+  add_option( opt_string( "deathknight.legacy_conduits", legacy_conduits.option ) );
   add_option( opt_bool( "deathknight.disable_aotd", options.disable_aotd ) );
   add_option( opt_bool( "deathknight.split_ghoul_regen", options.split_ghoul_regen ) );
   add_option( opt_float( "deathknight.ams_absorb_percent", options.ams_absorb_percent, 0.0, 1.0 ) );
@@ -14024,6 +15113,31 @@ void death_knight_t::set_runeforges()
 
 void death_knight_t::create_actions()
 {
+  // Legacy Azerite: these hang off abilities every specialization can cast, so
+  // they are created before any spec-specific branch.
+  if ( azerite.bone_spike_graveyard.enabled() )
+  {
+    background_actions.legacy_bone_spike_graveyard =
+        get_action<legacy_bone_spike_graveyard_t>( "legacy_bone_spike_graveyard", this );
+  }
+
+  if ( azerite.helchains.enabled() )
+  {
+    background_actions.legacy_helchains = get_action<legacy_helchains_damage_t>( "legacy_helchains", this );
+  }
+
+  if ( azerite.harrowing_decay.enabled() )
+  {
+    background_actions.legacy_harrowing_decay =
+        get_action<legacy_harrowing_decay_t>( "legacy_harrowing_decay", this );
+  }
+
+  if ( azerite.cold_hearted.enabled() )
+  {
+    background_actions.legacy_cold_hearted_heal =
+        get_action<legacy_cold_hearted_heal_t>( "legacy_cold_hearted", this );
+  }
+
   background_actions.death_coil_damage = get_action<death_coil_damage_t>( "death_coil_damage", this );
 
   // Runeforges
@@ -14105,6 +15219,18 @@ void death_knight_t::create_actions()
   if ( talent.deathbringer.exterminate.ok() || talent.deathbringer.echoing_fury.ok() )
   {
     background_actions.exterminate = get_action<exterminate_t>( "exterminate", this );
+  }
+
+  // Legacy Shadowlands: Superstrain. Every spec applies at least one disease,
+  // so this cannot sit inside a spec-gated block.
+  if ( shadowlands_legacy.superstrain )
+  {
+    background_actions.legacy_superstrain_blood_plague =
+        get_action<blood_plague_t>( "blood_plague_superstrain", this, true );
+    background_actions.legacy_superstrain_frost_fever =
+        get_action<frost_fever_t>( "frost_fever_superstrain", this, true );
+    background_actions.legacy_superstrain_virulent_plague =
+        get_action<virulent_plague_t>( "virulent_plague_superstrain", this, true );
   }
   if ( talent.deathbringer.exterminate.ok() || talent.deathbringer.echoing_fury.ok() )
   {
@@ -14292,6 +15418,11 @@ void death_knight_t::create_actions()
       {
         background_actions.hyperpyrexia_damage = get_action<hyperpyrexia_damage_t>( "hyperpyrexia", this );
       }
+      // Legacy Azerite
+      if ( azerite.echoing_howl.enabled() )
+      {
+        background_actions.legacy_echoing_howl = get_action<legacy_echoing_howl_t>( "legacy_echoing_howl", this );
+      }
     }
 
     if ( talent.frost.empower_rune_weapon.ok() )
@@ -14352,6 +15483,9 @@ action_t* death_knight_t::create_action( std::string_view name, std::string_view
     return new death_grip_t( this, options_str );
 
   // Blood Actions
+  // BracketSim legacy: the Necrolord covenant version when the Blood talent is not taken.
+  if ( name == "abomination_limb" && legacy_covenant.abomination_limb->ok() )
+    return new legacy_abomination_limb_t( this, options_str );
   if ( name == "abomination_limb" )
     return new abomination_limb_t( this, options_str );
   if ( name == "blood_boil" )
@@ -14418,6 +15552,14 @@ action_t* death_knight_t::create_action( std::string_view name, std::string_view
     return new putrefy_t( this, options_str );
   if ( name == "soul_reaper" )
     return new soul_reaper_t( this, options_str );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  if ( name == "shackle_the_unworthy" && legacy_covenant.shackle_the_unworthy->ok() )
+    return new legacy_shackle_the_unworthy_t( this, options_str );
+  if ( name == "swarming_mist" && legacy_covenant.swarming_mist->ok() )
+    return new legacy_swarming_mist_t( this, options_str );
+  if ( name == "deaths_due" && legacy_covenant.deaths_due->ok() )
+    return new legacy_deaths_due_t( this, options_str );
 
   // Dynamic actions
   // any_dnd and dnd_any return defile if talented, or death and decay otherwise
@@ -14720,17 +15862,37 @@ void death_knight_t::create_pets()
     {
       pets.dancing_rune_weapon_pet.set_creation_callback(
           []( death_knight_t* p ) { return new pets::dancing_rune_weapon_pet_t( p, "dancing_rune_weapon" ); } );
-      pets.dancing_rune_weapon_pet.set_default_duration( talent.blood.dancing_rune_weapon->duration() );
+      // BracketSim legacy compatibility: Meat Shield (conduit 121) lengthens
+      // the summon. Conduit spell 338435 is absent from Midnight, so the three
+      // seconds are read from the archived 9.2.7 client data - the same source
+      // legacy_conduits.hpp already carries its rank table from. That value is
+      // effect 2 and is NOT rank scaled; the rank table holds effect 1, which
+      // is the stamina half.
+      //
+      // Only this half is ported. The other is a stacking maximum-health buff
+      // off Bone Shield, which a damage harness cannot see and which is not
+      // the reason anyone socketed the conduit for damage.
+      const timespan_t legacy_meat_shield =
+          legacy_conduits.has( 121 ) ? timespan_t::from_seconds( 3.0 ) : 0_ms;
+
+      pets.dancing_rune_weapon_pet.set_default_duration(
+          talent.blood.dancing_rune_weapon->duration() + legacy_meat_shield );
       // As of Dec 19 2025, the first rune weapon does not get the 4s extension from everlasting bond.  Only the everlasting bond weapon does
       if ( bugs && talent.blood.everlasting_bond.ok() )
-        pets.dancing_rune_weapon_pet.set_default_duration( talent.blood.dancing_rune_weapon->duration() );
+        pets.dancing_rune_weapon_pet.set_default_duration(
+            talent.blood.dancing_rune_weapon->duration() + legacy_meat_shield );
       pets.dancing_rune_weapon_pet.set_max_pets( 1 );
 
       if ( talent.blood.everlasting_bond.ok() )
       {
         pets.everlasting_bond_pet.set_creation_callback(
             []( death_knight_t* p ) { return new pets::dancing_rune_weapon_pet_t( p, "everlasting_bond" ); } );
-        pets.everlasting_bond_pet.set_default_duration( spell.everlasting_bond_summon->duration() );
+        // BracketSim legacy compatibility: Meat Shield (conduit 121). Shadowlands
+        // gave the same extension to the T28 second weapon, so the pair stays
+        // matched here.
+        pets.everlasting_bond_pet.set_default_duration(
+            spell.everlasting_bond_summon->duration() +
+            ( legacy_conduits.has( 121 ) ? timespan_t::from_seconds( 3.0 ) : 0_ms ) );
         pets.everlasting_bond_pet.set_max_pets( 1 );
       }
 
@@ -14798,6 +15960,103 @@ void death_knight_t::init_spells()
 {
   player_t::init_spells();
   set_runeforges();
+
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
+  azerite.runic_barrier            = find_azerite_spell( "Runic Barrier" );
+
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
+  // off the bonus id the original legendary item carried.
+  auto legacy = [ this ]( int bonus_id ) {
+    return options.legacy_shadowlands_enabled &&
+           range::any_of( items, [ bonus_id ]( const item_t& item ) {
+             return range::contains( item.parsed.bonus_id, bonus_id );
+           } );
+  };
+
+  // BracketSim legacy compatibility: Unity (bonus 8119), the 9.2 legendary whose
+  // effect is whichever covenant legendary matches the covenant you are in. A
+  // real Unity item carries 8119 and NOT the legendary's own bonus id, so a
+  // power keyed only off its own id misses every Unity wearer. Both routes are
+  // checked here, and Unity opens only the one door its covenant names.
+  auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
+  {
+    return legacy( bonus_id ) ||
+           ( legacy( 8119 ) && util::str_compare_ci( options.legacy_covenant, covenant_name ) );
+    // Death Knight keeps its covenant choice on options rather than on a
+    // `chosen` member of legacy_covenant_t, which every other class uses.
+  };
+
+  shadowlands_legacy.abominations_frenzy        = legacy_unity( 7458, "necrolord" );
+  shadowlands_legacy.absolute_zero              = legacy( 6946 );
+  shadowlands_legacy.biting_cold                = legacy( 6945 );
+  shadowlands_legacy.bryndaors_might            = legacy( 6940 );
+  shadowlands_legacy.crimson_rune_weapon        = legacy( 6941 );
+  shadowlands_legacy.deadliest_coil             = legacy( 6952 );
+  shadowlands_legacy.deaths_certainty           = legacy( 6951 );
+  shadowlands_legacy.frenzied_monstrosity       = legacy( 6950 );
+  shadowlands_legacy.gorefiends_domination      = legacy( 6943 );
+  shadowlands_legacy.koltiras_favor             = legacy( 6944 );
+  shadowlands_legacy.phearomones                = legacy( 6954 );
+  shadowlands_legacy.rage_of_the_frozen_champion = legacy( 7160 );
+  shadowlands_legacy.rampant_transference       = legacy_unity( 7466, "night_fae" );
+  shadowlands_legacy.superstrain                = legacy( 6953 );
+  shadowlands_legacy.vampiric_aura              = legacy( 6942 );
+  shadowlands_legacy.insatiable_hunger          = legacy_unity( 7468, "venthyr" );
+  shadowlands_legacy.final_sentence             = legacy_unity( 7467, "kyrian" );
+
+  // BracketSim legacy compatibility: Shadowlands covenant abilities.
+  auto covenant = [ this ]( std::string_view name, unsigned id ) {
+    return ( options.legacy_shadowlands_enabled &&
+             util::str_compare_ci( options.legacy_covenant, name ) )
+               ? find_spell( id )
+               : spell_data_t::not_found();
+  };
+
+  legacy_covenant.shackle_the_unworthy = covenant( "kyrian", 312202 );
+  legacy_covenant.swarming_mist        = covenant( "venthyr", 311648 );
+  legacy_covenant.deaths_due           = covenant( "night_fae", 324128 );
+  // Only when the Blood talent of the same name is not taken - that one is the modern ability.
+  legacy_covenant.abomination_limb     = talent.blood.abomination_limb.ok() ? spell_data_t::not_found()
+                                                                            : covenant( "necrolord", 315443 );
+  legacy_abomination_limb_proc = get_cooldown( "legacy_abomination_limb_proc" );
+  if ( legacy_covenant.abomination_limb->ok() )
+  {
+    legacy_abomination_limb_proc->duration =
+        timespan_t::from_seconds( legacy_covenant.abomination_limb->effectN( 4 ).base_value() );
+    legacy_apl_actions.emplace_back( "abomination_limb" );
+  }
+
+  // BracketSim legacy compatibility: report the covenant abilities this
+  // actor can cast, so player_t::init_actions() can put them into the
+  // rotation. SimulationCraft's own action lists never press them.
+  if ( legacy_covenant.shackle_the_unworthy->ok() )
+    legacy_apl_actions.emplace_back( "shackle_the_unworthy" );
+  if ( legacy_covenant.swarming_mist->ok() )
+    legacy_apl_actions.emplace_back( "swarming_mist" );
+  if ( legacy_covenant.deaths_due->ok() )
+    legacy_apl_actions.emplace_back( "deaths_due" );
+
+  legacy_conduits.parse();
+  azerite.bone_spike_graveyard     = find_azerite_spell( "Bone Spike Graveyard" );
+  azerite.cold_hearted             = find_azerite_spell( "Cold Hearted" );
+  azerite.deep_cuts                = find_azerite_spell( "Deep Cuts" );
+  azerite.marrowblood              = find_azerite_spell( "Marrowblood" );
+  azerite.bones_of_the_damned      = find_azerite_spell( "Bones of the Damned" );
+  azerite.eternal_rune_weapon      = find_azerite_spell( "Eternal Rune Weapon" );
+  azerite.bloody_runeblade         = find_azerite_spell( "Bloody Runeblade" );
+  azerite.frozen_tempest           = find_azerite_spell( "Frozen Tempest" );
+  azerite.killer_frost             = find_azerite_spell( "Killer Frost" );
+  azerite.icy_citadel              = find_azerite_spell( "Icy Citadel" );
+  azerite.latent_chill             = find_azerite_spell( "Latent Chill" );
+  azerite.echoing_howl             = find_azerite_spell( "Echoing Howl" );
+  azerite.frostwhelps_indignation  = find_azerite_spell( "Frostwhelp's Indignation" );
+  azerite.last_surprise            = find_azerite_spell( "Last Surprise" );
+  azerite.festermight              = find_azerite_spell( "Festermight" );
+  azerite.harrowing_decay          = find_azerite_spell( "Harrowing Decay" );
+  azerite.cankerous_wounds         = find_azerite_spell( "Cankerous Wounds" );
+  azerite.legacy_magus_of_the_dead = find_azerite_spell( "Magus of the Dead" );
+  azerite.helchains                = find_azerite_spell( "Helchains" );
+
   // Specialization
 
   // Generic baselines
@@ -15202,11 +16461,12 @@ void death_knight_t::spell_lookups()
   runeforge_spell.unholy_strength    = conditional_spell_lookup( has_runeforge( RUNEFORGE_FALLEN_CRUSADER ), 53365 );
 
   // Diseases
-  spell.blood_plague =
-      conditional_spell_lookup( spec.blood_death_knight->ok() || talent.unholy.superstrain.ok(), 55078 );
-  spell.frost_fever =
-      conditional_spell_lookup( talent.frost.howling_blast.ok() || talent.unholy.superstrain.ok(), 55095 );
-  spell.virulent_plague = conditional_spell_lookup( talent.unholy.outbreak.ok(), 191587 );
+  spell.blood_plague = conditional_spell_lookup(
+      spec.blood_death_knight->ok() || talent.unholy.superstrain.ok() || shadowlands_legacy.superstrain, 55078 );
+  spell.frost_fever = conditional_spell_lookup(
+      talent.frost.howling_blast.ok() || talent.unholy.superstrain.ok() || shadowlands_legacy.superstrain, 55095 );
+  spell.virulent_plague = conditional_spell_lookup(
+      talent.unholy.outbreak.ok() || shadowlands_legacy.superstrain, 191587 );
 
   // Blood
   spell.abomination_limb_debuff     = conditional_spell_lookup( talent.blood.abomination_limb.ok(), 1263566 );
@@ -15348,6 +16608,22 @@ void death_knight_t::spell_lookups()
   spell.summon_lesser_ghoul  = conditional_spell_lookup( talent.unholy.scourge_strike.ok(), 275430 );
   spell.summon_putrefy_ghoul = conditional_spell_lookup( talent.unholy.putrefy.ok(), 1277098 );
   spell.summon_magus         = conditional_spell_lookup( talent.unholy.magus_of_the_dead.ok(), 317776 );
+  /*
+   * BracketSim legacy compatibility: THE AZERITE POWER IS NOT THE TALENT.
+   *
+   * Army of the Dead's legacy branch summons a Magus from the Azerite power and
+   * reused `spell.summon_magus` for it, with a comment saying it "works whether
+   * or not the modern talent is taken". It did not: the lookup above is gated on
+   * the TALENT, so an Unholy death knight with the Azerite power and without the
+   * talent built `legacy_magus_of_the_dead` on spell id 0 and the run ended with
+   * "could not find spell data for Action 'legacy_magus_of_the_dead' (0)".
+   *
+   * At level 50 the talent is not affordable and the Azerite power is exactly
+   * what a character of that era wears, so this is the normal case there rather
+   * than a corner - the author's own a test character hit it. A separate lookup on the
+   * Azerite's own condition leaves every modern path untouched.
+   */
+  spell.legacy_summon_magus  = conditional_spell_lookup( azerite.legacy_magus_of_the_dead.enabled(), 317776 );
   spell.summon_lotd_magus    = conditional_spell_lookup( talent.unholy.lord_of_the_dead.ok(), 1242294 );
   spell.summon_lotd          = conditional_spell_lookup( talent.unholy.lord_of_the_dead.ok(), 1292072 );
   spell.raise_skulker        = conditional_spell_lookup( talent.unholy.all_will_serve.ok(), 196910 );
@@ -15699,6 +16975,32 @@ inline death_knight_td_t::death_knight_td_t( player_t& target, death_knight_t& p
       make_debuff( p.talent.frost.everfrost.ok(), *this, "everfrost", p.talent.frost.everfrost->effectN( 1 ).trigger() )
           ->set_default_value( p.talent.frost.everfrost->effectN( 1 ).percent() );
 
+  // Legacy Azerite: Deep Cuts marks a Heart Strike's primary target so Blood
+  // Plague ticks harder on it.
+  debuff.legacy_deep_cuts =
+      make_debuff( p.azerite.deep_cuts.enabled(), *this, "legacy_deep_cuts", p.find_spell( 272685 ) );
+
+  // Legacy Shadowlands conduit: Everfrost. Spell 337989 is not in current data,
+  // so the duration and stack cap are Shadowlands' own and are stated here
+  // rather than being silently invented: 8 seconds, 10 stacks.
+  debuff.legacy_everfrost =
+      make_debuff( p.legacy_conduits.has( 91 ), *this, "legacy_everfrost" )
+          ->set_default_value( p.legacy_conduits.percent( 91 ) )
+          ->set_duration( 8_s )
+          ->set_max_stack( 10 );
+
+  // Legacy Shadowlands: Abomination's Frenzy. The second debuff is the per-mob
+  // internal cooldown the original implementation used to stop Abomination Limb
+  // reapplying the damage debuff on every pulse.
+  debuff.legacy_abominations_frenzy =
+      make_debuff( p.shadowlands_legacy.abominations_frenzy, *this, "legacy_abominations_frenzy",
+                   p.find_spell( 353546 ) )
+          ->set_default_value_from_effect_type( A_MOD_DAMAGE_FROM_CASTER );
+  debuff.legacy_abominations_frenzy_icd =
+      make_debuff( p.shadowlands_legacy.abominations_frenzy, *this, "legacy_abominations_frenzy_icd",
+                   p.find_spell( 353447 ) )
+          ->set_duration( p.find_spell( 353447 )->internal_cooldown() );
+
   debuff.frostreaper = make_debuff( p.talent.frost.frostreaper.ok(), *this, "frostreaper", p.spell.frostreaper_debuff )
                            ->set_refresh_duration_callback( [ & ]( const buff_t* b, timespan_t time ) {
                              p.background_actions.frostreaper->execute_on_target( b->player );
@@ -15762,6 +17064,60 @@ void death_knight_t::create_buffs()
   // buff_t( player, id, name, chance=-1, cd=-1, quiet=false, reverse=false, activated=true )
   // buff_t( player, name, spellname, chance=-1, cd=-1, quiet=false, reverse=false, activated=true )
 
+  // BracketSim legacy compatibility: Battle for Azeroth Azerite trait buffs.
+  buffs.bones_of_the_damned = make_buff<stat_buff_t>( this, "bones_of_the_damned",
+      azerite.bones_of_the_damned.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() )
+    ->add_stat( STAT_ARMOR, azerite.bones_of_the_damned.value( 1 ) );
+  buffs.eternal_rune_weapon = make_buff<stat_buff_t>( this, "eternal_rune_weapon",
+      azerite.eternal_rune_weapon.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() )
+    ->add_stat( STAT_STRENGTH, azerite.eternal_rune_weapon.value() );
+  buffs.icy_citadel = make_buff<stat_buff_t>( this, "icy_citadel", find_spell( 272723 ) )
+    ->add_stat( STAT_STRENGTH, azerite.icy_citadel.value( 1 ) );
+  buffs.icy_citadel_builder = make_buff( this, "icy_citadel_builder",
+      azerite.icy_citadel.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() );
+  buffs.festermight = make_buff<stat_buff_t>( this, "festermight", find_spell( 274373 ) )
+    ->add_stat( STAT_STRENGTH, azerite.festermight.value() )
+    ->set_refresh_behavior( buff_refresh_behavior::DISABLED );
+  buffs.bloody_runeblade = make_buff<stat_buff_t>( this, "bloody_runeblade", find_spell( 289349 ) )
+    ->add_stat( STAT_HASTE_RATING, azerite.bloody_runeblade.value( 2 ) )
+    ->set_cooldown( azerite.bloody_runeblade.spell()->effectN( 1 ).trigger()->internal_cooldown() );
+  buffs.frostwhelps_indignation = make_buff<stat_buff_t>( this, "frostwhelps_indignation", find_spell( 287338 ) )
+    ->add_stat( STAT_MASTERY_RATING, azerite.frostwhelps_indignation.value( 2 ) );
+
+  // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+  // BracketSim legacy compatibility: Swarming Mist (Venthyr covenant).
+  if ( legacy_covenant.abomination_limb->ok() )
+    buffs.legacy_abomination_limb = new legacy_abomination_limb_buff_t( this );
+  else
+    buffs.legacy_abomination_limb = make_buff( this, "abomination_limb_legacy", spell_data_t::not_found() );
+
+  if ( legacy_covenant.swarming_mist->ok() )
+    buffs.legacy_swarming_mist = new legacy_swarming_mist_buff_t( this );
+  else
+    buffs.legacy_swarming_mist = make_buff( this, "swarming_mist", spell_data_t::not_found() );
+
+  buffs.legacy_crimson_rune_weapon = make_buff( this, "legacy_crimson_rune_weapon", find_spell( 334526 ) )
+                                         ->set_default_value_from_effect( 1 )
+                                         ->set_affects_regen( true )
+                                         ->set_chance( shadowlands_legacy.crimson_rune_weapon ? 1.0 : 0.0 );
+  buffs.legacy_death_turf = make_buff( this, "legacy_death_turf", find_spell( 335180 ) )
+                                ->set_default_value_from_effect( 1 )
+                                ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+                                ->set_chance( shadowlands_legacy.phearomones ? 1.0 : 0.0 );
+  // The tooltip halves the haste for Blood, and Rampant Transference lengthens
+  // the window and raises the value again.
+  if ( shadowlands_legacy.phearomones && specialization() == DEATH_KNIGHT_BLOOD )
+    buffs.legacy_death_turf->default_value = find_spell( 335177 )->effectN( 2 ).percent();
+  if ( shadowlands_legacy.rampant_transference )
+  {
+    buffs.legacy_death_turf->modify_default_value( find_spell( 353882 )->effectN( 1 ).percent() )
+                           ->modify_duration( find_spell( 353882 )->effectN( 2 ).time_value() );
+  }
+  buffs.legacy_frenzied_monstrosity = make_buff( this, "legacy_frenzied_monstrosity", find_spell( 334896 ) )
+                                          ->add_invalidate( CACHE_AUTO_ATTACK_SPEED )
+                                          ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
+                                          ->set_chance( shadowlands_legacy.frenzied_monstrosity ? 1.0 : 0.0 );
+
   // Shared
   buffs.antimagic_shell = make_buff<antimagic_shell_buff_t>( this, "antimagic_shell", spec.antimagic_shell );
 
@@ -15775,9 +17131,34 @@ void death_knight_t::create_buffs()
           ->set_duration( talent.icebound_fortitude->duration() )
           ->set_cooldown( 0_ms );  // Handled by the action
 
+  // Legacy Azerite: Cold Hearted heals every second while Icebound Fortitude runs.
+  if ( azerite.cold_hearted.enabled() )
+  {
+    buffs.icebound_fortitude->set_tick_zero( true )
+        ->set_period( 1_s )
+        ->set_tick_behavior( buff_tick_behavior::CLIP )
+        ->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) {
+          if ( background_actions.legacy_cold_hearted_heal )
+            background_actions.legacy_cold_hearted_heal->execute();
+        } );
+  }
+
   buffs.rune_mastery = make_fallback( talent.rune_mastery.ok(), this, "rune_mastery", spell.rune_mastery_buff )
                            ->set_chance( 0.15 )  // This was found through testing 2022 July 21.  Not in spelldata.
                            ->set_default_value( talent.rune_mastery->effectN( 1 ).percent() );
+
+  // Legacy Azerite: Helchains pulses area damage while Dark Transformation runs.
+  buffs.legacy_helchains =
+      make_buff( this, "legacy_helchains",
+                 azerite.helchains.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() )
+          ->set_tick_zero( true )
+          ->set_period( 1_s )
+          ->set_tick_behavior( buff_tick_behavior::CLIP )
+          ->set_chance( azerite.helchains.enabled() ? 1.0 : 0.0 )
+          ->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) {
+            if ( background_actions.legacy_helchains )
+              background_actions.legacy_helchains->execute_on_target( target );
+          } );
 
   buffs.icy_talons =
       make_fallback( talent.icy_talons.ok(), this, "icy_talons", talent.icy_talons->effectN( 1 ).trigger() )
@@ -16023,6 +17404,16 @@ void death_knight_t::create_buffs()
               }
             } );
 
+    // Legacy Shadowlands: Vampiric Aura lengthens Vampiric Blood and raises the
+    // leech it grants. Both are flat modifiers on the buff's own spell rather
+    // than an aura the player carries.
+    if ( shadowlands_legacy.vampiric_aura )
+    {
+      const spell_data_t* va = find_spell( 334547 );
+      buffs.vampiric_blood->modify_duration( timespan_t::from_millis( va->effectN( 2 ).base_value() ) );
+      buffs.vampiric_blood->modify_default_value( va->effectN( 3 ).percent() );
+    }
+
     buffs.voracious = make_buff( this, "voracious", spell.voracious_buff )->set_trigger_spell( talent.blood.voracious );
 
     buffs.dance_of_midnight_1 = make_fallback( talent.blood.dance_of_midnight_1.ok(), this, "dance_of_midnight_1", spell.dance_of_midnight_1_buff )
@@ -16109,7 +17500,12 @@ void death_knight_t::create_buffs()
 
   buffs.rime = make_fallback( spec.rime->ok(), this, "rime", spell.rime_buff )
                    ->set_trigger_spell( spec.rime )
-                   ->set_chance( spec.rime->effectN( 2 ).percent() )
+                   // Legacy Shadowlands: Rage of the Frozen Champion raises the
+                   // Rime chance; the flat modifier is on the legendary spell.
+                   ->set_chance( spec.rime->effectN( 2 ).percent() +
+                                 ( shadowlands_legacy.rage_of_the_frozen_champion
+                                       ? find_spell( 341724 )->effectN( 1 ).percent()
+                                       : 0.0 ) )
                    ->set_stack_change_callback( [ this ]( buff_t*, int, int new_ ) {
                      if ( talent.deathbringer.bind_in_darkness.ok() )
                      {
@@ -16261,8 +17657,13 @@ void death_knight_t::init_gains()
   // Shared
   gains.antimagic_shell          = get_gain( "Antimagic Shell" );
   gains.rune                     = get_gain( "Rune Regeneration" );
+  gains.legacy_bloody_runeblade  = get_gain( "Bloody Runeblade (Azerite)" );
   gains.start_of_combat_overflow = get_gain( "Start of Combat Overflow" );
   gains.coldthirst               = get_gain( "Coldthirst" );
+  // BracketSim legacy compatibility: the conduit Spirit Drain (70) gets its
+  // own gain bucket rather than sharing Coldthirst's - a shared bucket makes
+  // the report say Coldthirst paid for Runic Power it never granted.
+  gains.legacy_spirit_drain      = get_gain( "Spirit Drain" );
 
   // Blood
   gains.blood_mist       = get_gain( "Blood Mist" );
@@ -16286,6 +17687,14 @@ void death_knight_t::init_gains()
   gains.forbidden_knowledge = get_gain( "Forbidden Knowledge" );
   gains.superstrain         = get_gain( "Superstrain" );
 
+  // Legacy Shadowlands runeforge legendaries
+  gains.legacy_bryndaors_might             = get_gain( "Bryndaor's Might" );
+  gains.legacy_koltiras_favor              = get_gain( "Koltira's Favor" );
+  gains.legacy_rage_of_the_frozen_champion = get_gain( "Rage of the Frozen Champion (Legendary)" );
+  gains.legacy_rampant_transference        = get_gain( "Rampant Transference" );
+  gains.legacy_swarming_mist               = get_gain( "Swarming Mist" );
+  gains.legacy_final_sentence              = get_gain( "Final Sentence" );
+
   // Rider of the Apocalypse
   gains.antimagic_shell_horsemen = get_gain( "Antimagic Shell Horsemen" );
 }
@@ -16300,6 +17709,8 @@ void death_knight_t::init_procs()
   procs.killing_machine_fsc   = get_proc( "Killing Machine spent on Frostscythe" );
 
   procs.km_from_crit_aa         = get_proc( "Killing Machine: Critical auto attacks" );
+  procs.km_from_legacy_killer_frost        = get_proc( "Killing Machine: Killer Frost (Azerite)" );
+  procs.km_from_legacy_killer_frost_wasted = get_proc( "Killing Machine wasted: Killer Frost (Azerite)" );
   procs.km_from_obliteration_fs = get_proc( "Killing Machine: Frost Strike" );
   procs.km_from_obliteration_hb = get_proc( "Killing Machine: Howling Blast" );
   procs.km_from_obliteration_ga = get_proc( "Killing Machine: Glacial Advance" );
@@ -16579,6 +17990,45 @@ void death_knight_t::activate()
 }
 
 // death_knight_t::reset ====================================================
+
+
+// BracketSim legacy compatibility: Vision of Perfection (Heart of Azeroth major
+// essence). The engine procs it and calls this; each spec fires its signature
+// cooldown early, at the fraction of its duration the essence grants.
+void death_knight_t::vision_of_perfection_proc()
+{
+  auto essence = find_azerite_essence( "Vision of Perfection" );
+  if ( !essence.enabled() )
+    return;
+
+  double mult = essence.spell( 1u )->effectN( 1 ).percent() +
+                essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
+
+  buff_t* window = nullptr;
+  switch ( specialization() )
+  {
+    case DEATH_KNIGHT_BLOOD:
+      window = buffs.dancing_rune_weapon;
+      break;
+    case DEATH_KNIGHT_FROST:
+      window = buffs.pillar_of_frost;
+      break;
+    case DEATH_KNIGHT_UNHOLY:
+      window = buffs.dark_transformation;
+      break;
+    default:
+      break;
+  }
+
+  if ( !window || mult <= 0 )
+    return;
+
+  timespan_t dur = window->buff_duration() * mult;
+  if ( window->check() )
+    window->extend_duration( dur );
+  else
+    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+}
 
 void death_knight_t::reset()
 {
@@ -17038,6 +18488,10 @@ void death_knight_t::parse_player_effects()
       parse_effects( buffs.voracious );
       parse_effects( buffs.dancing_rune_weapon );
       parse_effects( buffs.vampiric_blood, effect_mask_t( true ).disable( 2, 4 ) );
+      // Legacy Shadowlands: Frenzied Monstrosity adds attack speed and damage
+      // while Dark Transformation is up.
+      if ( shadowlands_legacy.frenzied_monstrosity )
+        parse_effects( buffs.legacy_frenzied_monstrosity );
       parse_effects( buffs.sanguine_ground );
       parse_effects( buffs.bone_shield, IGNORE_STACKS );
       parse_effects( buffs.perseverance_of_the_ebon_blade );
