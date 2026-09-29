@@ -50,6 +50,9 @@ Based on upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2
     the cooldown.
   - Devourer Demon Hunter: effects that only proc from class abilities proc only from the Void Ray tick outside
     Metamorphosis, as players report from the live game.
+- **30 September 2026: on-use weapons.** A weapon with a use effect (Fyr'alath the Dreamrender) that no action list
+  mentions is pressed like the other legacy buttons; most specs only press on-use items by trinket slot, so its
+  Rage of Fyr'alath was never used.
 
 ## Building
 

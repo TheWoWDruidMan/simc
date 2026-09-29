@@ -4444,6 +4444,37 @@ void player_t::create_actions()
   // second channel is finished. Interrupting immediately turns a three second
   // channel into a one global cooldown purchase, which is exactly what every
   // Shadowlands action list did with it.
+  // BracketSim, 30 September 2026: an ON-USE WEAPON. Most class action lists press on-use items only by trinket slot
+  // (use_item,slot=trinket1/2); few carry the catch-all use_items. Fyr'alath the Dreamrender was worn at 70 - on lists
+  // and in players' own sims - and its Rage of Fyr'alath was never pressed: only its mark ticked (84 dps). A weapon
+  // with a use effect that no action list mentions is pressed like the other legacy buttons.
+  if ( is_player() && !util::str_compare_ci( legacy_apl_placement, "none" ) )
+  {
+    auto mentioned = [ this ]( const std::string& needle ) {
+      for ( auto apl : action_priority_list )
+      {
+        if ( util::str_in_str_ci( apl->action_list_str, needle ) )
+          return true;
+        for ( const auto& ap : apl->action_list )
+          if ( util::str_in_str_ci( ap.action_, needle ) )
+            return true;
+      }
+      return false;
+    };
+    for ( auto slot : { SLOT_MAIN_HAND, SLOT_OFF_HAND } )
+    {
+      const auto& it = items[ slot ];
+      if ( !it.active() || !it.has_use_special_effect() )
+        continue;
+      std::string slot_name = util::slot_type_string( slot );
+      if ( mentioned( "use_items" ) || mentioned( "slot=" + slot_name ) || mentioned( "name=" + it.name_str ) )
+        continue;
+      std::string action = "use_item,slot=" + slot_name;
+      if ( range::find( legacy_apl_actions, action ) == legacy_apl_actions.end() )
+        legacy_apl_actions.emplace_back( action );
+    }
+  }
+
   if ( is_player() && legacy_soulbinds.has( legacy_soulbind::VOLATILE_SOLVENT ) &&
        !util::str_compare_ci( legacy_apl_placement, "none" ) )
   {
