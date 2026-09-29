@@ -42,3 +42,18 @@ Based on upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2
 ## Building
 
 Build exactly as upstream SimulationCraft (CMake). See `README.md`.
+
+### The in-browser engine ("Run on my PC")
+
+The WebAssembly engine bracketsim.gg sends to browsers is built from this branch with Emscripten (emsdk) and CMake:
+
+```
+emcmake cmake -G Ninja -S . -B build-wasm -DCMAKE_BUILD_TYPE=Release -DSC_NO_NETWORKING=ON -DSC_NO_THREADING=ON \
+  -DBUILD_GUI=OFF "-DCMAKE_CXX_FLAGS=-O3 -fwasm-exceptions -msimd128" "-DCMAKE_CXX_FLAGS_RELEASE=-O3" \
+  "-DCMAKE_EXE_LINKER_FLAGS=-O3 -sMODULARIZE=1 -sEXPORT_NAME=createBracketSimC -sINVOKE_RUN=0 -sEXIT_RUNTIME=0 \
+   -sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=web,worker,node -sFORCE_FILESYSTEM=1 -sEXPORTED_RUNTIME_METHODS=callMain,FS \
+   -sASSERTIONS=0 -fwasm-exceptions -sMALLOC=mimalloc"
+cmake --build build-wasm --target simc
+```
+
+`simc.js` and `simc.wasm` are served as `engine/bracketsim-engine.js` and `engine/bracketsim-engine.wasm`.
