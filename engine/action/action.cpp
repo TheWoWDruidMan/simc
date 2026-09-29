@@ -11,6 +11,7 @@
 #include "dbc/data_enums.hh"
 #include "dbc/dbc.hpp"
 #include "dbc/sc_spell_info.hpp"
+#include "dbc/trait_data.hpp"
 #include "player/action_priority_list.hpp"
 #include "player/actor_target_data.hpp"
 #include "player/pet.hpp"
@@ -1111,6 +1112,18 @@ bool action_t::verify_actor_level() const
 {
   if ( !background && data().id() && !data().is_level( player->true_level ) && data().level() <= MAX_LEVEL )
   {
+    // BracketSim (29 Sep 2026): a spell a TAKEN talent teaches is usable at any level, as in the game - the talent
+    // tree decides when it is learnt, not the spell's own level. Fire Blast (108853) is level 32 in the spell data
+    // and a Fire talent, so every level-30 Fire Mage was simmed without it (a player's report: +11% at 30).
+    for ( const auto& [ tree, entry, rank ] : player->player_traits )
+    {
+      if ( !rank )
+        continue;
+      const trait_data_t* trait = trait_data_t::find( entry, player->dbc->ptr );
+      if ( trait && ( trait->id_spell == data().id() || trait->id_override_spell == data().id() ) )
+        return true;
+    }
+
     sim->error( "{} attempting to use {} at level {}, requires level {}.", *player, *this, player->true_level,
                 data().level() );
     return false;

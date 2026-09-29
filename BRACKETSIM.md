@@ -38,6 +38,11 @@ Based on upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2
     spell power (104%, passive 1258016).
   - Mistweaver: attack power from spell power (passive 1258138) and Intellect as the converted primary stat.
   - Comment-only updates in other files.
+- **29 September 2026 (later): spell levels and Acid Rain's row.**
+  - A spell a taken talent teaches is usable at any level (the talent tree decides when it is learnt, as in game).
+  - Fire Blast (108853) is learnt below level 30: spell level set to 13 through the hotfix system, as upstream does
+    for Felblade. Level-30 mages were simmed without it.
+  - Acid Rain damage has its own row instead of being counted under Healing Rain.
 
 ## Building
 

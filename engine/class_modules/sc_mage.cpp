@@ -8936,6 +8936,15 @@ public:
       .operation( hotfix::HOTFIX_SET )
       .modifier( 30.0 )
       .verification_value( 0.0 );
+
+    // BracketSim (29 Sep 2026, a player's report): Fire Blast is on a level-30 mage's bar in the game, but its spell
+    // data says level 32, so every level-30 mage was simmed without it (30 Fire: +11% with it). Same fix upstream uses
+    // for Felblade's level. The player sets it to 13.
+    hotfix::register_spell( "Mage", "2026-09-29", "Fire Blast is learnt below level 30 (BracketSim).", 108853 )
+      .field( "spell_level" )
+      .operation( hotfix::HOTFIX_SET )
+      .modifier( 13.0 )
+      .verification_value( 32.0 );
   }
 
   bool valid() const override { return true; }

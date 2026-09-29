@@ -9913,7 +9913,7 @@ struct healing_rain_t : public shaman_heal_t
     if ( player->find_talent_spell( talent_tree::SPECIALIZATION, "Acid Rain" ).ok() )
     {
       acid_rain = new acid_rain_damage_t( player );
-      add_child( acid_rain );
+      // Its own row, not Healing Rain's child (29 Sep, the author): a damage breakdown reading "Healing Rain" confused people.
       timespan_t period = player->find_spell( 378463 )->effectN( 1 ).period();
       if ( period > 0_ms )
         acid_rain_period = period;
