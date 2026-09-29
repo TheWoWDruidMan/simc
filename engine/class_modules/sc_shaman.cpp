@@ -9867,14 +9867,72 @@ struct healing_rain_t : public shaman_heal_t
     }
   };
 
+  // BracketSim (29 Sep 2026, the author: "do acid rain for me"): Acid Rain, the Restoration talent 378443 - "deal Nature
+  // damage every 1 sec to up to 5 enemies inside of your Healing Rain". The damage is spell 378597 and the pulse
+  // period is read from 378463. This engine only knew Healing Rain as a heal, so the talent did nothing and a
+  // damage-simmed Restoration Shaman could never value it.
+  struct acid_rain_damage_t : public shaman_spell_t
+  {
+    acid_rain_damage_t( shaman_t* player ) : shaman_spell_t( "acid_rain", player, player->find_spell( 378597 ) )
+    {
+      background = ground_aoe = true;
+      aoe = 5;
+    }
+  };
+
+  action_t* acid_rain;
+  timespan_t acid_rain_period;
+
+  // BracketSim (29 Sep 2026): Healing Rain is a TALENT in this build, so find_specialization_spell() returns
+  // not_found and the action was made background - it was never cast, with or without Acid Rain.
+  static const spell_data_t* healing_rain_spell( shaman_t* player )
+  {
+    const spell_data_t* s = player->find_specialization_spell( "Healing Rain" );
+    if ( s->ok() )
+      return s;
+    const spell_data_t* t = player->find_talent_spell( talent_tree::SPECIALIZATION, "Healing Rain" );
+    return t->ok() ? t : s;
+  }
+
   healing_rain_t( shaman_t* player, util::string_view options_str )
-    : shaman_heal_t( "healing_rain", player, player->find_specialization_spell( "Healing Rain" ),
-                     options_str )
+    : shaman_heal_t( "healing_rain", player, healing_rain_spell( player ),
+                     options_str ), acid_rain( nullptr ), acid_rain_period( 1_s )
   {
     base_tick_time = data().effectN( 2 ).period();
     dot_duration   = data().duration();
     hasted_ticks   = false;
     tick_action    = new healing_rain_aoe_tick_t( player );
+    // BracketSim (29 Sep 2026): this build's spell data gives the heal no period, so the dot ticked forever at the
+    // same instant ("Simulation stuck"). Healing is not measured here: without a period there are no heal ticks.
+    if ( base_tick_time <= 0_ms )
+    {
+      dot_duration = 0_ms;
+      tick_action  = nullptr;
+    }
+
+    if ( player->find_talent_spell( talent_tree::SPECIALIZATION, "Acid Rain" ).ok() )
+    {
+      acid_rain = new acid_rain_damage_t( player );
+      add_child( acid_rain );
+      timespan_t period = player->find_spell( 378463 )->effectN( 1 ).period();
+      if ( period > 0_ms )
+        acid_rain_period = period;
+    }
+  }
+
+  void execute() override
+  {
+    shaman_heal_t::execute();
+
+    if ( acid_rain )
+    {
+      make_event<ground_aoe_event_t>( *sim, player,
+        ground_aoe_params_t()
+          .target( player->target )
+          .duration( data().duration() > 0_ms ? data().duration() : 10_s )
+          .pulse_time( acid_rain_period )
+          .action( acid_rain ) );
+    }
   }
 };
 

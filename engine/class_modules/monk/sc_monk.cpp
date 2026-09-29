@@ -6935,6 +6935,15 @@ void monk_t::init_base_stats()
       base.attack_power_per_agility              = 1.0;
       resources.active_resource[ RESOURCE_MANA ] = false;
       break;
+    case MONK_MISTWEAVER:
+      // BracketSim (29 Sep 2026): Mistweaver had no primary-stat conversion at all - intellect gave no spell power and
+      // nothing gave attack power, so its kicks and melee scaled off nothing (41 DPS at level 30). Spell power from
+      // intellect, and the passive 1258138 "Mistweaver Monk": attack power = 104% of spell power (aura 404).
+      base.spell_power_per_intellect = 1.0;
+      for ( const spelleffect_data_t& e : find_spell( 1258138 )->effects() )
+        if ( e.type() == E_APPLY_AURA && e.subtype() == A_OVERRIDE_AP_PER_SP )
+          base.attack_power_per_spell_power = e.percent();
+      break;
     case MONK_WINDWALKER:
       if ( base.distance < 1 )
         base.distance = 5;
@@ -8066,11 +8075,14 @@ stat_e monk_t::convert_hybrid_stat( stat_e s ) const
         case MONK_BREWMASTER:
         case MONK_WINDWALKER:
           return STAT_AGILITY;
+        // BracketSim (29 Sep 2026): a Mistweaver wears the intellect half of hybrid gear.
+        case MONK_MISTWEAVER:
+          return STAT_INTELLECT;
         default:
           return STAT_NONE;
       }
     case STAT_AGI_INT:
-      return STAT_AGILITY;
+      return specialization() == MONK_MISTWEAVER ? STAT_INTELLECT : STAT_AGILITY;
     case STAT_STR_AGI:
       return STAT_AGILITY;
     case STAT_STR_INT:

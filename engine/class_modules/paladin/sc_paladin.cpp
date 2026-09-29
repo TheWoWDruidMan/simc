@@ -3916,6 +3916,16 @@ void paladin_t::init_base_stats()
   base.attack_power_per_strength = 1.0;
   base.spell_power_per_intellect = 1.0;
 
+  // BracketSim (29 Sep 2026): Holy's passive 1258016 "Holy Paladin" sets attack power to 104% of spell power (aura 404,
+  // A_OVERRIDE_AP_PER_SP). The engine never applied it, so a Holy Paladin in intellect gear had the attack power of its
+  // strength alone and Crusader Strike and melee did next to nothing.
+  if ( specialization() == PALADIN_HOLY )
+  {
+    for ( const spelleffect_data_t& e : find_spell( 1258016 )->effects() )
+      if ( e.type() == E_APPLY_AURA && e.subtype() == A_OVERRIDE_AP_PER_SP )
+        base.attack_power_per_spell_power = e.percent();
+  }
+
   // Ignore mana for non-holy
   if ( specialization() != PALADIN_HOLY )
   {

@@ -284,8 +284,16 @@ struct holy_shock_t : public paladin_spell_t
   holy_shock_heal_t* heal;
   bool dmg;
 
+  // BracketSim (29 Sep 2026): find_specialization_spell( 20473 ) no longer resolves in this build, and an action on
+  // spell_data_t::not_found() is made background - Holy Shock was never cast. Holy keeps the spell by its own data.
+  static const spell_data_t* holy_shock_spell( paladin_t* p )
+  {
+    const spell_data_t* s = p->find_specialization_spell( 20473 );
+    return s->ok() || p->specialization() != PALADIN_HOLY ? s : p->find_spell( 20473 );
+  }
+
   holy_shock_t( paladin_t* p, util::string_view options_str ) :
-    paladin_spell_t( "holy_shock", p, p->find_specialization_spell( 20473 ) ), dmg( false )
+    paladin_spell_t( "holy_shock", p, holy_shock_spell( p ) ), dmg( false )
   {
     add_option( opt_bool( "damage", dmg ) );
     parse_options( options_str );
@@ -301,7 +309,7 @@ struct holy_shock_t : public paladin_spell_t
 
   // Constructor for background holy shock (from divine toll/resonance)
   holy_shock_t( paladin_t* p, bool dmg_ = false ) :
-    paladin_spell_t( "holy_shock_dt", p, p->find_specialization_spell( 20473 ) ),
+    paladin_spell_t( "holy_shock_dt", p, holy_shock_spell( p ) ),
     dmg( dmg_ )
   {
     background = true;
@@ -348,8 +356,10 @@ struct holy_shock_t : public paladin_spell_t
 
 struct judgment_holy_t : public judgment_t
 {
+  // BracketSim (29 Sep 2026): Holy's Judgment is spell 275773. This constructor passed no spell at all, so Judgment
+  // was spell_data_t::nil() - no damage and no cooldown - and a Holy Paladin cast it every global cooldown for 0.
   judgment_holy_t( paladin_t* p, util::string_view name, util::string_view options_str ) :
-    judgment_t( p, name, options_str )
+    judgment_t( p, name, options_str, p->find_spell( 275773 ) )
   {
     parse_options( options_str );
     base_multiplier *= 1.0 + p->spec.holy_paladin->effectN( 11 ).percent();

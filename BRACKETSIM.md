@@ -1,7 +1,7 @@
 # BracketSim engine
 
 This is a **modified version of [SimulationCraft](https://github.com/simulationcraft/simc)**, used by BracketSim to
-simulate World of Warcraft characters at levelling brackets (levels 30 to 80). It is not the official SimulationCraft:
+simulate World of Warcraft characters at Legacy brackets (levels 30 to 80). It is not the official SimulationCraft:
 please do not report problems with this version to the SimulationCraft project.
 
 Licence: GNU General Public License, version 3, the same as SimulationCraft (see `LICENSE`). Every change here is
@@ -31,6 +31,13 @@ Based on upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2
     Elysian Decree, Abomination Limb, Celestial Spirits.
   - Soulbinds and conduits: Grove Invigoration stacks, Exploiter, Seeds of Rampant Growth.
   - Chillglobe's use proxy can only be fired by its item (an off-GCD trinket line looped it).
+- **29 September 2026: healer damage and Acid Rain.**
+  - Restoration Shaman: Acid Rain (talent 378443) - Healing Rain deals Nature damage to enemies inside it while the
+    talent is taken; Healing Rain resolves from the talent when the spec spell no longer does.
+  - Holy Paladin: Judgment uses Holy's own spell (275773); Holy Shock resolves from its spell data; attack power from
+    spell power (104%, passive 1258016).
+  - Mistweaver: attack power from spell power (passive 1258138) and Intellect as the converted primary stat.
+  - Comment-only updates in other files.
 
 ## Building
 
