@@ -43,6 +43,13 @@ Based on upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2
   - Fire Blast (108853) is learnt below level 30: spell level set to 13 through the hotfix system, as upstream does
     for Felblade. Level-30 mages were simmed without it.
   - Acid Rain damage has its own row instead of being counted under Healing Rain.
+- **29 September 2026 (night): three trinkets and a Devourer rule.**
+  - Pendant of the Violet Eye and Meteorite Crystal: every spell or special attack in the 20 seconds after use adds a
+    stack (up to 20), and all stacks go when it ends. The engine had added one stack per use and never removed it.
+  - Dragonspine Trophy: 1 proc per minute behind its 20 second cooldown (as wowsims), not 100% on the first hit after
+    the cooldown.
+  - Devourer Demon Hunter: effects that only proc from class abilities proc only from the Void Ray tick outside
+    Metamorphosis, as players report from the live game.
 
 ## Building
 

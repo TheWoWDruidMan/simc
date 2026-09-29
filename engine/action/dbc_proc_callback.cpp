@@ -221,6 +221,15 @@ void dbc_proc_callback_t::trigger( const proc_data_t& source_data, player_t* tar
     if ( !proc_data_t::check_proc_trigger( source_data, proc_data, type ) )
       return;
 
+    // BracketSim, 29 September 2026: a Devourer's "only procs from class abilities" effects. Every Devourer damage
+    // spell carries Allow Class Ability Procs (416) - Consume, Devour and both Void Ray ticks - so the data cannot tell
+    // them apart, but the live game does: Solace of the Fallen "stacks only off void ray (non meta void ray
+    // specifically)" (a level-30 player) and does not proc for a Devourer otherwise (the author). Until a log
+    // says more, such an effect procs for a Devourer only from the non-Metamorphosis Void Ray tick.
+    if ( proc_data.can_only_proc_from_class_abilities && listener->specialization() == DEMON_HUNTER_DEVOURER &&
+         !( state && state->action && state->action->name_str == "void_ray_tick" ) )
+      return;
+
     // Additional trigger condition to check before performing proc chance process.
     if ( trigger_type == trigger_fn_type::CONDITION &&
          !( *trigger_fn )( this, source_data.spell, target, state, type ) )

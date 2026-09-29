@@ -98,6 +98,8 @@ namespace item
   void shadowmourne( special_effect_t& );
   void nibelung( special_effect_t& );
   void dislodged_foreign_object( special_effect_t& );
+  void stack_per_cast_use( special_effect_t& );
+  void dragonspine_trophy( special_effect_t& );
   void souldrinker( special_effect_t& );
   void gurthalak( special_effect_t& );
   void dragonwrath( special_effect_t& );
@@ -3670,6 +3672,77 @@ void item::black_blood_of_yshaarj( special_effect_t& effect )
   new dbc_proc_callback_t( effect.item -> player, effect );
 }
 
+/*
+ * DRAGONSPINE TROPHY (28830, driver 34774) - BracketSim, 29 September 2026.
+ *
+ * The modern driver says Proc Chance 100% with a 20 second internal cooldown, so the engine procced it on the first
+ * hit after every cooldown: 14.5 procs and 47.7% uptime at level 35 Survival, against a hard ceiling of 50%. A 30s
+ * player: "basically capped at 40% max uptime". wowsims (tbc sim/common/melee_trinkets.go) model it as
+ * 1.0 PPM on melee and ranged hits, weapon specials included, behind the 20 second cooldown - that is the rate here,
+ * old-style PPM (per hit, scaled by the hitting weapon's speed) as for the other legacy chance-on-hit effects.
+ */
+void item::dragonspine_trophy( special_effect_t& effect )
+{
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY | PF_RANGED | PF_RANGED_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  effect.ppm_         = 1.0;
+  chance_on_hit( effect );
+}
+
+/*
+ * PENDANT OF THE VIOLET EYE (29601) AND METEORITE CRYSTAL (64999) - BracketSim, 29 September 2026.
+ *
+ * Use: for 20 seconds, every spell or ability used adds one stack of Versatility (Enlightenment 35095 /
+ * Meteoric Inspiration 65000, 20 stacks); every stack goes when the 20 seconds end. The generic use handler
+ * triggered the STACK aura directly - one stack per use - and that aura has no duration of its own, so the
+ * stacks never went away: a level-35 Affliction warlock sat at 1, then 2, then 3 stacks all fight. In game it
+ * is up to 20 stacks for 20 seconds every two minutes.
+ *
+ * What counts is the use spell's own proc flags (special attacks, spells, heals). A Devourer's Void Ray tick is
+ * a spell hit of its own here, so one Void Ray fills both trinkets - as a level-30 player reports from
+ * the game. The tooltip's "abilities with no mana cost will not trigger" is not the live rule: the modern proc
+ * flags include Yellow Melee, and 30s warriors run the Pendant.
+ */
+void item::stack_per_cast_use( special_effect_t& effect )
+{
+  player_t* p = effect.player;
+  const spell_data_t* use = effect.driver();
+  const spell_data_t* stack_spell = use->effectN( 1 ).trigger();
+  if ( !stack_spell || !stack_spell->ok() )
+    return;
+
+  auto stacks = make_buff<stat_buff_t>( p, util::tokenize_fn( stack_spell->name_cstr() ), stack_spell, effect.item );
+
+  auto window = make_buff( p, util::tokenize_fn( use->name_cstr() ) + "_use", use, effect.item );
+  window->set_cooldown( 0_ms )
+      ->set_duration( use->duration() )
+      ->set_stack_change_callback( [ stacks ]( buff_t*, int, int n ) {
+        if ( n == 0 )
+          stacks->expire();
+      } );
+
+  auto driver = new special_effect_t( p );
+  driver->name_str     = util::tokenize_fn( stack_spell->name_cstr() ) + "_driver";
+  driver->type         = SPECIAL_EFFECT_EQUIP;
+  driver->source       = SPECIAL_EFFECT_SOURCE_ITEM;
+  // No item on the driver: with one, the callback reads the trinket's 2-minute USE cooldown as an internal
+  // cooldown and stacks once per window (measured: max 1 stack). The stack buff carries the item's scaling.
+  driver->spell_id     = use->id();
+  driver->cooldown_    = 0_ms;
+  driver->proc_chance_ = 1.0;
+  // Hostile spells and special attacks only. With the spell's helpful flags a Devourer looped forever at one instant
+  // (the stack gain re-fed a helpful event); a damage sim loses nothing by leaving heals out.
+  driver->proc_flags_  = PF_MELEE_ABILITY | PF_RANGED_ABILITY | PF_NONE_HARMFUL | PF_MAGIC_SPELL;
+  driver->proc_flags2_ = PF2_ALL_HIT;
+  driver->custom_buff  = stacks;
+  p->special_effects.push_back( driver );
+
+  auto cb = new dbc_proc_callback_t( p, *driver );
+  cb->activate_with_buff( window );
+
+  effect.custom_buff = window;
+}
+
 struct flurry_of_xuen_melee_t : public melee_attack_t
 {
   flurry_of_xuen_melee_t( player_t* player ) :
@@ -6961,6 +7034,9 @@ void unique_gear::register_special_effects()
   register_special_effect( 109841, item::gurthalak                       );  // 78478
   register_special_effect( 109839, item::gurthalak                       );  // 78487
   register_special_effect( 21153,  item::bonereavers_edge                );
+  register_special_effect( 34774,  item::dragonspine_trophy              ); /* Dragonspine Trophy */
+  register_special_effect( 29601,  item::stack_per_cast_use              ); /* Pendant of the Violet Eye */
+  register_special_effect( 64999,  item::stack_per_cast_use              ); /* Meteorite Crystal */
   register_special_effect( 21162,  item::sulfuras                        ); /* Sulfuras, Hand of Ragnaros */
   register_special_effect( 34584,  item::love_struck                     ); /* Masquerade Gown (no client data) */
   register_special_effect( 71406,  item::tiny_abomination_in_a_jar       );
