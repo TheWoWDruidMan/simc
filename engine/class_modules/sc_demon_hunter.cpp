@@ -428,6 +428,7 @@ public:
 
     // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
     buff_t* legacy_furious_gaze;
+    buff_t* legacy_cycle_of_binding = nullptr;  // Vengeance, 30 Sep 2026
     buff_t* revolving_blades;
     buff_t* seething_power;
     buff_t* thirsting_blades;
@@ -456,6 +457,9 @@ public:
     azerite_power_t revolving_blades;
     azerite_power_t seething_power;
     azerite_power_t thirsting_blades;
+    // Vengeance (30 Sep 2026)
+    azerite_power_t essence_sever;
+    azerite_power_t cycle_of_binding;
   } azerite;
 
   // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
@@ -1236,7 +1240,10 @@ public:
   {
     // Havoc
     real_ppm_t* demonic_appetite;
+    // Vengeance legacy azerite (30 Sep 2026)
+    real_ppm_t* legacy_essence_sever = nullptr;
   } rppm;
+  action_t* legacy_essence_sever = nullptr;  // 279450, fired from Fracture
 
   // Shuffled proc objects
   struct shuffled_rngs_t
@@ -3646,6 +3653,18 @@ struct demon_hunter_sigil_t : public demon_hunter_spell_t
     {
       unsigned num_souls = as<unsigned>( dh()->talent.vengeance.soul_sigils->effectN( 1 ).base_value() );
       dh()->spawn_soul_fragment( dh()->proc.soul_fragment_from_soul_sigils, soul_fragment::LESSER, num_souls, false );
+    }
+
+    // BracketSim legacy azerite (30 Sep 2026): Cycle of Binding - the Agility buff, and every sigil's cooldown
+    // shortened by the trait's second value in seconds (on top of the modern talent of the same name).
+    if ( hit_any_target && dh()->azerite.cycle_of_binding.enabled() )
+    {
+      dh()->buff.legacy_cycle_of_binding->trigger();
+      const timespan_t cut = -timespan_t::from_seconds( dh()->azerite.cycle_of_binding.value( 2 ) );
+      for ( cooldown_t* cd : { dh()->cooldown.sigil_of_flame, dh()->cooldown.sigil_of_spite, dh()->cooldown.sigil_of_misery,
+                               dh()->cooldown.sigil_of_silence, dh()->cooldown.sigil_of_chains } )
+        if ( cd )
+          cd->adjust( cut );
     }
   }
 
@@ -8345,6 +8364,20 @@ struct fel_rush_t : public inertia_trigger_t<demon_hunter_attack_t>
   }
 };
 
+// Essence Sever (BracketSim legacy azerite, 30 Sep 2026) ===================
+// Power 355 (278501): Fracture/Shear has a chance (279449, 1.5 RPPM) to deal the trait's first value as Fire damage
+// to up to 4 nearby enemies (279450).
+struct legacy_essence_sever_t : public demon_hunter_spell_t
+{
+  legacy_essence_sever_t( demon_hunter_t* p ) : demon_hunter_spell_t( "essence_sever", p, p->find_spell( 279450 ) )
+  {
+    background = may_crit = true;
+    aoe        = as<int>( data().max_targets() > 0 ? data().max_targets() : 4 );
+    base_dd_min = base_dd_max = p->azerite.essence_sever.value( 1 );
+    spell_power_mod.direct = attack_power_mod.direct = 0;
+  }
+};
+
 // Fracture =================================================================
 
 struct fracture_t : public voidfall_building_trigger_t<
@@ -8403,6 +8436,9 @@ struct fracture_t : public voidfall_building_trigger_t<
     {
       add_child( p->active.warblades_hunger );
     }
+
+    if ( p->azerite.essence_sever.enabled() && !p->legacy_essence_sever )
+      p->legacy_essence_sever = new legacy_essence_sever_t( p );
   }
 
   double composite_energize_amount( const action_state_t* s ) const override
@@ -8432,6 +8468,10 @@ struct fracture_t : public voidfall_building_trigger_t<
      */
     if ( result_is_hit( s->result ) )
     {
+      if ( dh()->legacy_essence_sever && dh()->rppm.legacy_essence_sever &&
+           dh()->rppm.legacy_essence_sever->trigger() )
+        dh()->legacy_essence_sever->execute_on_target( s->target );
+
       mh->set_target( s->target );
       mh->execute();
 
@@ -10529,6 +10569,11 @@ void demon_hunter_t::create_buffs()
   using namespace buffs;
 
   // BracketSim legacy compatibility: Battle for Azeroth Azerite trait buffs.
+  // Cycle of Binding (power 354, 278502; 30 Sep 2026): a sigil that hits grants its first value of Agility for 6 s
+  // (278769).
+  buff.legacy_cycle_of_binding = make_buff<stat_buff_t>( this, "legacy_cycle_of_binding",
+      azerite.cycle_of_binding.enabled() ? find_spell( 278769 ) : spell_data_t::not_found() )
+      ->add_stat( STAT_AGILITY, azerite.cycle_of_binding.value( 1 ) );
   {
     // Furious Gaze has no trigger reference in its own trait data, so the buff
     // spell is named directly, exactly as Battle for Azeroth SimC did.
@@ -11439,6 +11484,9 @@ void demon_hunter_t::init_rng()
       rppm.demonic_appetite = get_rppm( "demonic_appetite", spec.demonic_appetite );
       break;
     case DEMON_HUNTER_VENGEANCE:
+      // BracketSim legacy azerite (30 Sep 2026): Essence Sever's driver 279449 - 1.5 RPPM, haste-scaled.
+      if ( azerite.essence_sever.enabled() )
+        rppm.legacy_essence_sever = get_rppm( "legacy_essence_sever", find_spell( 279449 ) );
       break;
     default:
       break;
@@ -11490,6 +11538,8 @@ void demon_hunter_t::init_spells()
   azerite.revolving_blades              = find_azerite_spell( "Revolving Blades" );
   azerite.seething_power                = find_azerite_spell( "Seething Power" );
   azerite.thirsting_blades              = find_azerite_spell( "Thirsting Blades" );
+  azerite.essence_sever                 = find_azerite_spell( "Essence Sever" );
+  azerite.cycle_of_binding              = find_azerite_spell( "Cycle of Binding" );
 
   // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
   // off the bonus id the original legendary item carried.

@@ -219,6 +219,37 @@ struct holy_prism_t : public paladin_spell_t
 // find_class_spell returns spell 20473, which has the cooldown/cost/etc stuff, but the actual
 // damage and healing information is in spells 25912 and 25914, respectively.
 
+/*
+ * BracketSim legacy azerite, Holy (30 Sep 2026) - the DAMAGE halves, for the damage sims healers are listed by.
+ *   Glimmer of Light (power 139, 287268): Holy Shock leaves a Glimmer on its target for 30 s (287280); every Holy
+ *     Shock damages all targets carrying one for the power's first value.
+ *   Radiant Incandescence (power 452, 277674): a Holy Shock critical strike deals its first value again every second
+ *     for 3 s (278145, periodic Holy damage) - "an additional ${$s1*3} damage".
+ * Both are fixed amounts from the trait (azerite_power_t::value scales with the item level), not spell power.
+ */
+struct legacy_glimmer_of_light_t : public paladin_spell_t
+{
+  legacy_glimmer_of_light_t( paladin_t* p ) : paladin_spell_t( "glimmer_of_light", p, p->find_spell( 287280 ) )
+  {
+    background = may_crit = true;
+    callbacks  = false;
+    base_dd_min = base_dd_max = p->legacy_azerite.glimmer_of_light.value( 1 );
+    spell_power_mod.direct = attack_power_mod.direct = 0;
+  }
+};
+
+struct legacy_radiant_incandescence_t : public paladin_spell_t
+{
+  legacy_radiant_incandescence_t( paladin_t* p )
+    : paladin_spell_t( "radiant_incandescence", p, p->find_spell( 278145 ) )
+  {
+    background = tick_may_crit = true;
+    may_crit = callbacks = hasted_ticks = false;
+    base_td = p->legacy_azerite.radiant_incandescence.value( 1 );
+    spell_power_mod.tick = attack_power_mod.tick = 0;
+  }
+};
+
 struct holy_shock_damage_t : public paladin_spell_t
 {
   double crit_chance_boost;
@@ -230,6 +261,40 @@ struct holy_shock_damage_t : public paladin_spell_t
     trigger_gcd           = 0_ms;
     // this grabs the 30% base crit bonus from 272906
     crit_chance_boost = p->spec.holy_shock_2->effectN( 1 ).percent();
+
+    if ( p->legacy_azerite.glimmer_of_light.enabled() && !p->active.legacy_glimmer_of_light )
+      p->active.legacy_glimmer_of_light = new legacy_glimmer_of_light_t( p );
+    if ( p->legacy_azerite.radiant_incandescence.enabled() && !p->active.legacy_radiant_incandescence )
+      p->active.legacy_radiant_incandescence = new legacy_radiant_incandescence_t( p );
+  }
+
+  void execute() override
+  {
+    // Glimmer of Light: every glimmered target is hit first, then this target's glimmer is (re)applied.
+    if ( auto glimmer = p()->active.legacy_glimmer_of_light )
+    {
+      const timespan_t now = sim->current_time();
+      auto& list = p()->legacy_glimmers;
+      list.erase( std::remove_if( list.begin(), list.end(),
+                                  [ now ]( const auto& g ) { return g.second <= now || g.first->is_sleeping(); } ),
+                  list.end() );
+      for ( const auto& g : list )
+        glimmer->execute_on_target( g.first );
+      const timespan_t until = now + p()->find_spell( 287280 )->duration();
+      auto it = range::find_if( list, [ this ]( const auto& g ) { return g.first == target; } );
+      if ( it != list.end() )
+        it->second = until;
+      else
+        list.emplace_back( target, until );
+    }
+    paladin_spell_t::execute();
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    paladin_spell_t::impact( s );
+    if ( s->result == RESULT_CRIT && p()->active.legacy_radiant_incandescence )
+      p()->active.legacy_radiant_incandescence->execute_on_target( s->target );
   }
 
   double composite_crit_chance() const override

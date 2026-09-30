@@ -170,7 +170,12 @@ public:
     action_t* legacy_conduit_expurgation;
     action_t* afterimage;
     action_t* guided_prayer;
+    // BracketSim legacy azerite (Holy, 30 Sep 2026): Glimmer of Light and Radiant Incandescence damage.
+    action_t* legacy_glimmer_of_light = nullptr;
+    action_t* legacy_radiant_incandescence = nullptr;
   } active;
+  // Targets carrying a Glimmer of Light and when it runs out (Holy Shock refreshes it, 30 s). Cleared on reset.
+  std::vector<std::pair<player_t*, timespan_t>> legacy_glimmers;
 
   // Buffs
   struct buffs_t
@@ -840,6 +845,10 @@ public:
     azerite_power_t expurgation;
     azerite_power_t lights_decree;
     azerite_power_t relentless_inquisitor;
+
+    // Holy (30 Sep 2026) - their damage halves, for damage sims
+    azerite_power_t glimmer_of_light;
+    azerite_power_t radiant_incandescence;
   } legacy_azerite;
 
   // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight

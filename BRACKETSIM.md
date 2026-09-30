@@ -53,6 +53,8 @@ Based on upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2
 - **30 September 2026: on-use weapons.** A weapon with a use effect (Fyr'alath the Dreamrender) that no action list
   mentions is pressed like the other legacy buttons; most specs only press on-use items by trinket slot, so its
   Rage of Fyr'alath was never used.
+- **30 September 2026 (later): five azerite traits' damage.** Holy Paladin: Glimmer of Light and Radiant
+  Incandescence. Discipline Priest: Contemptuous Homily. Vengeance Demon Hunter: Essence Sever and Cycle of Binding.
 
 ## Building
 

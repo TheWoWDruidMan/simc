@@ -3980,6 +3980,7 @@ void paladin_t::reset()
 {
   player_t::reset();
 
+  legacy_glimmers.clear();
   active_consecration = nullptr;
   active_boj_cons = nullptr;
   all_active_consecrations.clear();
@@ -4846,6 +4847,8 @@ void paladin_t::init_spells()
   legacy_azerite.avengers_might        = find_azerite_spell( "Avenger's Might" );
   legacy_azerite.grace_of_the_justicar = find_azerite_spell( "Grace of the Justicar" );
   legacy_azerite.indomitable_justice   = find_azerite_spell( "Indomitable Justice" );
+  legacy_azerite.glimmer_of_light      = find_azerite_spell( "Glimmer of Light" );
+  legacy_azerite.radiant_incandescence = find_azerite_spell( "Radiant Incandescence" );
 
   // Shared talents
   talents.lay_on_hands                    = find_talent_spell( talent_tree::CLASS, "Lay on Hands" );

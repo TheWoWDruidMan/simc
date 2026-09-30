@@ -3778,6 +3778,7 @@ void priest_t::init_spells()
 
   // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
   legacy_azerite.sanctum                = find_azerite_spell( "Sanctum" );
+  legacy_azerite.contemptuous_homily    = find_azerite_spell( "Contemptuous Homily" );
 
   // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
   // off the bonus id the original legendary item carried.

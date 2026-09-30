@@ -289,6 +289,7 @@ public:
     azerite_power_t thought_harvester;
     azerite_power_t torment_of_torments;
     azerite_power_t whispers_of_the_damned;
+    azerite_power_t contemptuous_homily;  // Discipline (30 Sep 2026): Penance damage + Shadow Word: Pain extension
   } legacy_azerite;
 
   // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight

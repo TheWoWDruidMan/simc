@@ -258,6 +258,14 @@ protected:
       background = dual = direct_tick = tick_may_crit = may_crit = true;
       dot_extension      = priest().talents.discipline.painful_punishment->effectN( 1 ).time_value();
       triggers_atonement = true;
+      // BracketSim legacy azerite (30 Sep 2026): Contemptuous Homily (power 398, 278629) - every Penance bolt deals
+      // its second value more damage (a flat Spell Direct Amount modifier) and extends Shadow Word: Pain by its first
+      // value in milliseconds.
+      if ( priest().legacy_azerite.contemptuous_homily.enabled() )
+      {
+        base_dd_adder += priest().legacy_azerite.contemptuous_homily.value( 2 );
+        dot_extension += timespan_t::from_millis( priest().legacy_azerite.contemptuous_homily.value( 1 ) );
+      }
     }
 
     action_state_t* new_state() override
