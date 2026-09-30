@@ -62,6 +62,9 @@ Based on upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2
   Casting Item's Level" (354) is valued at the item level the game gives it, passed as
   `bracketsim_consumable_ilvl=<item id>:<item level>/...`; read at the character's level it came out about double
   (Elixir of the Mongoose 10 Agility and 3 Critical Strike, 5 and 1 in game). Unset, nothing changes.
+- **30 September 2026 (late): Light's Decree for every paladin spec.** In game it can be picked as Retribution and
+  keeps working as Holy or Protection (every Holy Power spent during Avenging Wrath); its damage action was only
+  created for Retribution.
 
 ## Building
 

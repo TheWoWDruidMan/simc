@@ -3709,6 +3709,8 @@ bool paladin_td_t::standing_in_consecration()
 
 void paladin_t::create_actions()
 {
+  create_legacy_lights_decree();
+
   // Holy
   if ( specialization() == PALADIN_HOLY )
   {

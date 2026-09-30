@@ -1337,11 +1337,19 @@ void paladin_t::trigger_es_explosion( player_t* target )
 
 // Initialization
 
+// Light's Decree for EVERY paladin spec (30 Sep 2026, the author): in game a paladin can pick it while Retribution and keep it
+// active as Holy or Protection, where every Holy Power spent during Avenging Wrath triggers it - measured on his own
+// level 50 Protection paladin. The trigger already sits in the shared Holy Power spender; only the damage action was
+// Retribution's.
+void paladin_t::create_legacy_lights_decree()
+{
+  if ( legacy_azerite.lights_decree.enabled() && !active.legacy_lights_decree )
+    active.legacy_lights_decree = new legacy_lights_decree_t( this );
+}
+
 void paladin_t::create_ret_actions()
 {
-  // Legacy Azerite
-  if ( legacy_azerite.lights_decree.enabled() )
-    active.legacy_lights_decree = new legacy_lights_decree_t( this );
+  // Legacy Azerite (Light's Decree: create_legacy_lights_decree, every spec)
 
   if ( legacy_azerite.expurgation.enabled() )
     active.legacy_expurgation = new legacy_expurgation_t( this );

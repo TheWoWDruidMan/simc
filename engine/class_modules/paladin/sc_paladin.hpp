@@ -1051,6 +1051,7 @@ public:
   void init_spells_retribution();
   void generate_action_prio_list_ret();
   void create_ret_actions();
+  void create_legacy_lights_decree();
   action_t* create_action_retribution( util::string_view name, util::string_view options_str );
 
   void create_buffs_protection();
