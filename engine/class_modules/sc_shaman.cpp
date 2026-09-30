@@ -7817,8 +7817,6 @@ struct lava_burst_t : public shaman_spell_t
     if ( p()->legacy_azerite.igneous_potential.ok() )
       b += p()->legacy_azerite.igneous_potential.value( 2 );
 
-    // Legacy Azerite: Lava Shock is spent on the next Lava Burst.
-    b += p()->buff.lava_shock->stack_value();
 
     return b;
   }
@@ -7978,9 +7976,6 @@ struct lava_burst_t : public shaman_spell_t
 
   void execute() override
   {
-    // Legacy Azerite: Lava Shock.
-    p()->buff.lava_shock->expire();
-
     bool had_ancestral_swiftness_buff = p()->buff.ancestral_swiftness->check();
     shaman_spell_t::execute();
     bool ancestral_swiftness_consumed = had_ancestral_swiftness_buff && !p()->buff.ancestral_swiftness->check();
@@ -9018,9 +9013,17 @@ struct earth_shock_t : public shaman_spell_t
     return m;
   }
 
+  // Legacy Azerite: Lava Shock (30 Sep 2026). Its spell data names Earth Shock (8042) and its overload as the
+  // affected spells; it was on Lava Burst before, which also handed Restoration a bonus it cannot get in game.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    return shaman_spell_t::bonus_da( s ) + p()->buff.lava_shock->stack_value();
+  }
+
   void execute() override
   {
       shaman_spell_t::execute();
+      p()->buff.lava_shock->expire();
       p()->buff.mid2_ele_4pc_spender->decrement();
 
       // BracketSim legacy compatibility: Echoes of Great Sundering arms the next

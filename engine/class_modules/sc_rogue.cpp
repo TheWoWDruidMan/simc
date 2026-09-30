@@ -9076,7 +9076,7 @@ void actions::rogue_action_t<Base>::spend_combo_points( const action_state_t* st
 
   // Legacy Azerite: Replicating Shadows. One roll per Combo Point spent to
   // splash the finisher's damage and copy Rupture to a nearby target.
-  if ( p()->specialization() == ROGUE_SUBTLETY && p()->active.legacy_replicating_shadows &&
+  if ( p()->active.legacy_replicating_shadows &&
        ab::rng().roll( max_spend * p()->azerite.replicating_shadows.spell_ref().effectN( 2 ).percent() ) )
   {
     p()->active.legacy_replicating_shadows->execute_on_target( state->target );
@@ -12019,7 +12019,9 @@ void rogue_t::init_spells()
       get_background_action<actions::legacy_nothing_personal_t>( "legacy_nothing_personal" );
   }
 
-  if ( azerite.replicating_shadows.ok() && specialization() == ROGUE_SUBTLETY )
+  // Any spec that spends Combo Points on a target with Rupture (30 Sep 2026: picked as Subtlety, it keeps working as
+  // Assassination - the trait names Rupture, which both specs cast).
+  if ( azerite.replicating_shadows.ok() )
   {
     active.legacy_replicating_shadows =
       get_background_action<actions::legacy_replicating_shadows_t>( "legacy_replicating_shadows" );

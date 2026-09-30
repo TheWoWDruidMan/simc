@@ -3710,6 +3710,10 @@ bool paladin_td_t::standing_in_consecration()
 void paladin_t::create_actions()
 {
   create_legacy_lights_decree();
+  // Legacy Azerite: Inner Light, every spec that casts Shield of the Righteous (30 Sep 2026: picked as Protection it
+  // keeps working as Holy, whose damage rotation casts it).
+  if ( legacy_azerite.inner_light.enabled() )
+    active.legacy_inner_light_damage = new legacy_inner_light_damage_t( this );
 
   // Holy
   if ( specialization() == PALADIN_HOLY )
@@ -3720,10 +3724,6 @@ void paladin_t::create_actions()
   else if ( specialization() == PALADIN_PROTECTION )
   {
     paladin_t::create_prot_actions();
-
-    // Legacy Azerite: Inner Light
-    if ( legacy_azerite.inner_light.enabled() )
-      active.legacy_inner_light_damage = new legacy_inner_light_damage_t( this );
   }
   // Ret
   else if ( specialization() == PALADIN_RETRIBUTION )

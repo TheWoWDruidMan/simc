@@ -65,6 +65,10 @@ Based on upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2
 - **30 September 2026 (late): Light's Decree for every paladin spec.** In game it can be picked as Retribution and
   keeps working as Holy or Protection (every Holy Power spent during Avenging Wrath); its damage action was only
   created for Retribution.
+- **30 September 2026 (night): azerite traits across specs.** An audit of every trait against every other spec of its
+  class: Arcanic Pulsar now adds its flat Starsurge damage (never modelled, and missing entirely on the off-spec
+  Starsurge), Replicating Shadows works for any spec with Rupture, Inner Light's damage exists for every paladin spec,
+  and Lava Shock empowers Earth Shock as its spell data says (it was on Lava Burst).
 
 ## Building
 

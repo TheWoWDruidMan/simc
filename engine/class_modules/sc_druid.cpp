@@ -9246,6 +9246,10 @@ struct starsurge_offspec_t final : public trigger_call_of_the_elder_druid_t<drui
     form_mask = MOONKIN_FORM | CASTER_FORM;
     base_costs[ RESOURCE_MANA ] = 0.0;  // so we don't need to enable mana regen
 
+    // Legacy Azerite: Arcanic Pulsar's flat Starsurge damage (effect 2), which a druid of any spec gets once the
+    // trait is picked as Balance (30 Sep 2026). Only the Celestial Alignment half is Balance's.
+    base_dd_adder += p->legacy_azerite.arcanic_pulsar.value( 2 );
+
     if ( p->talent.master_shapeshifter.ok() )
     {
       const auto& eff = p->talent.master_shapeshifter->effectN( 2 );
@@ -9310,6 +9314,10 @@ struct starsurge_t final : public trigger_call_of_the_elder_druid_t<ap_spender_t
   DRUID_ABILITY( starsurge_t, base_t, "starsurge", p->talent.starsurge )
   {
     form_mask |= CASTER_FORM; // spec version can be cast with no form despite spell data form mask
+
+    // Legacy Azerite: Arcanic Pulsar's flat Starsurge damage (effect 2) - never modelled before 30 Sep 2026; only
+    // its Celestial Alignment half was.
+    base_dd_adder += p->legacy_azerite.arcanic_pulsar.value( 2 );
 
     if ( p->talent.power_of_goldrinn.ok() )
     {
