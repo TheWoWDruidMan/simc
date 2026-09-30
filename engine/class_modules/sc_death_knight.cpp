@@ -918,6 +918,7 @@ public:
     // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
     buff_t* legacy_crimson_rune_weapon;
     buff_t* legacy_death_turf;
+    buff_t* legacy_deaths_due_strength = nullptr;  // 324165, 30 Sep 2026
     buff_t* legacy_frenzied_monstrosity;
   } buffs;
 
@@ -6587,6 +6588,20 @@ struct death_knight_melee_attack_t : public death_knight_action_t<melee_attack_t
     special    = true;
     may_glance = false;
   }
+
+  void execute() override
+  {
+    death_knight_action_t::execute();
+
+    // BracketSim legacy covenant (30 Sep 2026): Death's Due (324128). While standing in it, Heart Strike, Scourge Strike
+    // (and Clawing Shadows) and Obliterate steal Strength: +2% per cast, 4 stacks, 12 s (324165). A player report: in
+    // game Death's Due REPLACES Death and Decay and keeps its effects - see legacy_deaths_due_t.
+    if ( !background && hit_any_target && p()->buffs.legacy_deaths_due_strength &&
+         p()->legacy_covenant.deaths_due->ok() && p()->in_death_and_decay() &&
+         ( name_str == "heart_strike" || name_str == "scourge_strike" || name_str == "clawing_shadows" ||
+           name_str == "obliterate" ) )
+      p()->buffs.legacy_deaths_due_strength->trigger();
+  }
 };
 
 // ==========================================================================
@@ -10118,12 +10133,25 @@ struct legacy_deaths_due_t final : public death_and_decay_base_t
     damage = get_action<death_and_decay_damage_t>( "deaths_due_damage", p, p->find_spell( 341340 ) );
     parse_options( options_str );
 
+    // One cooldown with Death and Decay (both are category 1877, 1 charge, 30 s): shared by name, so the rotation's
+    // cooldown.death_and_decay checks read it and the two can never both be up (30 Sep 2026).
+    // The duration and charges were already read from the spell into the action's own cooldown, so they are carried
+    // across - a fresh named cooldown starts at zero, and Death's Due was cast 150 times a fight when they were not.
+    cooldown_t* own = cooldown;
+    cooldown = p->get_cooldown( "death_and_decay" );
+    cooldown->duration = own->duration;
+    cooldown->charges  = own->charges;
+    p->cooldown.death_and_decay_dynamic = cooldown;
+
     // BracketSim legacy compatibility: the conduit Withering Ground (250)
     // raises Death's Due's damage. Shadowlands applied it as a base_multiplier
     // on the damage action, and the damage lives entirely in that child - the
     // parent is a ground effect that deals none itself.
+    // SET, not multiplied: every Death and Decay line in the rotation builds its own Death's Due now (30 Sep 2026)
+    // and they share this one damage action - multiplying stacked the conduit once per line (Blood: 5 lines, a
+    // 10,808-damage tick and triple the DPS).
     if ( p->legacy_conduits.has( 250 ) && damage )
-      damage->base_multiplier *= 1.0 + p->legacy_conduits.percent( 250 );
+      damage->base_multiplier = 1.0 + p->legacy_conduits.percent( 250 );
   }
 
   void execute() override
@@ -15536,6 +15564,11 @@ action_t* death_knight_t::create_action( std::string_view name, std::string_view
     return new army_of_the_dead_t( this, options_str );
   if ( name == "dark_transformation" )
     return new dark_transformation_t( name, this, options_str );
+  // BracketSim legacy covenant (30 Sep 2026): Death's Due REPLACES Death and Decay (315442 "Death's Due overrides
+  // Death and Decay"), so the rotation's Death and Decay lines cast it - one ground effect, one cooldown, Death and
+  // Decay's own effects kept (legacy_deaths_due_t shares its base). It was a second, separate button.
+  if ( name == "death_and_decay" && legacy_covenant.deaths_due->ok() )
+    return new legacy_deaths_due_t( this, options_str );
   if ( name == "death_and_decay" )
     return new death_and_decay_t( this, options_str );
   if ( name == "death_coil" )
@@ -16033,8 +16066,11 @@ void death_knight_t::init_spells()
     legacy_apl_actions.emplace_back( "shackle_the_unworthy" );
   if ( legacy_covenant.swarming_mist->ok() )
     legacy_apl_actions.emplace_back( "swarming_mist" );
+  // Death's Due is pressed as Death and Decay (which it replaces - create_action above), so it shares Death and
+  // Decay's one cooldown instead of being a second button beside it. Unholy and Frost only cast Death and Decay in
+  // their AoE lists, so it still has to be put in front of the rotation for single target.
   if ( legacy_covenant.deaths_due->ok() )
-    legacy_apl_actions.emplace_back( "deaths_due" );
+    legacy_apl_actions.emplace_back( "death_and_decay" );
 
   legacy_conduits.parse();
   azerite.bone_spike_graveyard     = find_azerite_spell( "Bone Spike Graveyard" );
@@ -17100,6 +17136,11 @@ void death_knight_t::create_buffs()
                                          ->set_default_value_from_effect( 1 )
                                          ->set_affects_regen( true )
                                          ->set_chance( shadowlands_legacy.crimson_rune_weapon ? 1.0 : 0.0 );
+  // BracketSim legacy covenant (30 Sep 2026): Death's Due's Strength steal - +2% Strength per stack, 4 stacks, 12 s.
+  buffs.legacy_deaths_due_strength = make_buff( this, "legacy_deaths_due_strength", find_spell( 324165 ) )
+                                         ->set_default_value_from_effect( 1 )
+                                         ->set_pct_buff_type( STAT_PCT_BUFF_STRENGTH )
+                                         ->set_chance( legacy_covenant.deaths_due->ok() ? 1.0 : 0.0 );
   buffs.legacy_death_turf = make_buff( this, "legacy_death_turf", find_spell( 335180 ) )
                                 ->set_default_value_from_effect( 1 )
                                 ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )

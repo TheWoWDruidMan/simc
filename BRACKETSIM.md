@@ -55,6 +55,9 @@ Based on upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2
   Rage of Fyr'alath was never used.
 - **30 September 2026 (later): five azerite traits' damage.** Holy Paladin: Glimmer of Light and Radiant
   Incandescence. Discipline Priest: Contemptuous Homily. Vengeance Demon Hunter: Essence Sever and Cycle of Binding.
+- **30 September 2026 (night): Death's Due replaces Death and Decay.** Night Fae Death Knights cast Death's Due in
+  place of Death and Decay (one shared cooldown, one ground effect, every Death and Decay bonus still applies) instead
+  of both. Heart Strike, Scourge Strike, Clawing Shadows and Obliterate inside it steal Strength (324165).
 
 ## Building
 
