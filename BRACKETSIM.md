@@ -69,6 +69,10 @@ Based on upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2
   class: Arcanic Pulsar now adds its flat Starsurge damage (never modelled, and missing entirely on the off-spec
   Starsurge), Replicating Shadows works for any spec with Rupture, Inner Light's damage exists for every paladin spec,
   and Lava Shock empowers Earth Shock as its spell data says (it was on Lava Burst).
+- **1 October 2026: SimulationCraft merged up to date.** 73 upstream changes, including live game data build 69933
+  (Blizzard's hotfixes, e.g. Shadow Priest and Augmentation tuning) and upstream rotation updates. Mage's Frostfire /
+  Ice Lance refactor taken as upstream wrote it, with the legacy hooks (Duplicative Incineration, Molten Skyfall,
+  Flames of Alacrity, Slick Ice, Tunnel of Ice, Cold Front, Glacial Fragments, Packed Ice, Whiteout) re-applied.
 
 ## Building
 

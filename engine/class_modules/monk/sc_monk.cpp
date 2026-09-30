@@ -1432,11 +1432,10 @@ struct charred_passions_t : base_action_t
 
 struct base_blackout_kick_t : monk_melee_attack_t
 {
-  cooldown_t *rising_sun_kick;
   proc_t *rising_sun_kick_reset;
 
   base_blackout_kick_t( monk_t *player, std::string_view name, const spell_data_t *spell_data )
-    : monk_melee_attack_t( player, name, spell_data ), rising_sun_kick( nullptr ), rising_sun_kick_reset( nullptr )
+    : monk_melee_attack_t( player, name, spell_data ), rising_sun_kick_reset( nullptr )
   {
     // TODO: check this
     ap_type = attack_power_type::WEAPON_BOTH;
@@ -1456,7 +1455,6 @@ struct base_blackout_kick_t : monk_melee_attack_t
     if ( !p()->talent.windwalker.teachings_of_the_monastery->ok() )
       return;
 
-    rising_sun_kick       = p()->get_cooldown( "rising_sun_kick" );
     rising_sun_kick_reset = p()->get_proc( "Teachings of the Monastery - Rising Sun Kick Reset" );
   }
 
@@ -1470,7 +1468,7 @@ struct base_blackout_kick_t : monk_melee_attack_t
     double chance = p()->talent.windwalker.teachings_of_the_monastery->effectN( 1 ).percent();
     if ( rng().roll( chance ) )
     {
-      rising_sun_kick->reset( true );
+      p()->cooldown.rising_sun_kick->reset( true );
       rising_sun_kick_reset->occur();
     }
   }
@@ -1578,7 +1576,10 @@ struct blackout_kick_t : overwhelming_force_t<charred_passions_t<teachings_of_th
     {
       double rwk_chance = p()->talent.windwalker.rushing_wind_kick->effectN( 1 ).percent();
       if ( p()->rng().roll( rwk_chance ) )
+      {
+        p()->cooldown.rising_sun_kick->reset( true );
         p()->buff.rushing_wind_kick->trigger();
+      }
 
       double eb_chance = p()->talent.windwalker.energy_burst->effectN( 1 ).percent();
       if ( p()->rng().roll( eb_chance ) )
@@ -3305,7 +3306,10 @@ struct chi_burst_t : monk_spell_t
         add_parse_entry( TBase::da_multiplier_effects )
             .set_buff( player->buff.balanced_stratagem_magic )
             .set_value( effect.percent() )
-            .set_eff( &effect );
+            .set_eff( &effect )
+            .add_parse_callback( this, PARSE_CALLBACK_POST_EXECUTE, [ & ]( action_state_t * ) {
+              TBase::p()->buff.balanced_stratagem_magic->consume( this );
+            } );
     }
   };
 
@@ -5106,6 +5110,8 @@ void aspect_of_harmony_t::construct_actions( monk_t *player )
     purified_spirit = new spender_t::purified_spirit_t<actions::monk_spell_t>(
         player, player->talent.master_of_harmony.purified_spirit_damage, this );
     damage->add_child( purified_spirit );
+
+    spender->set_expire_callback( [ & ]( buff_t *, int, timespan_t ) { purified_spirit->execute(); } );
   }
 }
 
@@ -5234,12 +5240,6 @@ aspect_of_harmony_t::spender_t::spender_t( monk_t *player, aspect_of_harmony_t *
     pool( 0.0 )
 {
   set_default_value( 0.0 );
-
-  if ( aspect_of_harmony->purified_spirit )
-    set_stack_change_callback( [ = ]( buff_t *, int, int new_ ) {
-      if ( !new_ )
-        aspect_of_harmony->purified_spirit->execute();
-    } );
 }
 
 void aspect_of_harmony_t::spender_t::reset()

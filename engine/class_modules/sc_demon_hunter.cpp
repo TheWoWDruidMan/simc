@@ -5786,6 +5786,8 @@ struct the_hunt_dot_t : public demon_hunter_spell_t
     // RE-HOMED on the upstream merge of 19 September 2026: this struct used to
     // be nested inside the_hunt_base_t and upstream lifted it to top level.
     base_td_multiplier *= 1.0 + p->legacy_conduits.percent( 281 );
+    // 09/20/2026 The Hunt does not benefit from chaotic disposition
+    affected_by.chaotic_disposition = false;
   }
 };
 
@@ -5801,6 +5803,9 @@ struct the_hunt_base_t
     {
       dual          = true;
       impact_action = p->active.the_hunt_dot;
+
+      // 09/20/2026 The Hunt does not benefit from chaotic disposition
+      affected_by.chaotic_disposition = false;
     }
 
     void impact( action_state_t* s ) override
@@ -6804,9 +6809,9 @@ struct collapsing_star_t : public demon_hunter_spell_t
     {
       double m = base_t::composite_da_multiplier( s );
 
-      if ( s->chain_target == 0 )
+      if ( s->chain_target != 0 )
       {
-        m *= 1.0 + dh()->spec.collapsing_star_spell->effectN( 2 ).percent();
+        m *= dh()->spec.collapsing_star_spell->effectN( 2 ).percent();
       }
 
       return m;
@@ -14103,12 +14108,6 @@ public:
         .operation( hotfix::HOTFIX_SET )
         .modifier( 16.0 )
         .verification_value( 50.0 );
-    hotfix::register_effect( "Demon Hunter", "2025-03-26",
-                             "Collapsing star still only does 50% additional damage to primary target", 1290193 )
-        .field( "base_value" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( 50.0 )
-        .verification_value( 75.0 );
   }
 };
 
