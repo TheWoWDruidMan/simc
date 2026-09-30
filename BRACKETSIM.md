@@ -58,6 +58,10 @@ Based on upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2
 - **30 September 2026 (night): Death's Due replaces Death and Decay.** Night Fae Death Knights cast Death's Due in
   place of Death and Decay (one shared cooldown, one ground effect, every Death and Decay bonus still applies) instead
   of both. Heart Strike, Scourge Strike, Clawing Shadows and Obliterate inside it steal Strength (324165).
+- **30 September 2026 (late): old flasks and elixirs at the item's level.** A consumable whose spell "Scales with
+  Casting Item's Level" (354) is valued at the item level the game gives it, passed as
+  `bracketsim_consumable_ilvl=<item id>:<item level>/...`; read at the character's level it came out about double
+  (Elixir of the Mongoose 10 Agility and 3 Critical Strike, 5 and 1 in game). Unset, nothing changes.
 
 ## Building
 

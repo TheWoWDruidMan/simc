@@ -933,14 +933,28 @@ special_effect_t* dbc_consumable_base_t::create_special_effect()
   effect->type = SPECIAL_EFFECT_USE;
   effect->source = SPECIAL_EFFECT_SOURCE_ITEM;
 
-  if ( item_data && item_data->crafting_quality )
+  // BracketSim (30 Sep 2026): an old consumable whose spell "Scales with Casting Item's Level" (354) is valued at the
+  // item level the game gives it, passed in bracketsim_consumable_ilvl (Elixir of the Mongoose: 12 in game, 23 in the
+  // item data; read at the character's level it came out about double). No entry, no change.
+  int game_ilvl = 0;
+  if ( item_data && !item_data->crafting_quality && driver()->flags( spell_attribute::SX_SCALE_ILEVEL ) )
+  {
+    for ( auto pair : util::string_split<std::string_view>( player->bracketsim.consumable_ilvl, "/" ) )
+    {
+      auto parts = util::string_split<std::string_view>( pair, ":" );
+      if ( parts.size() == 2 && util::to_unsigned( parts[ 0 ] ) == item_data->id )
+        game_ilvl = util::to_int( parts[ 1 ] );
+    }
+  }
+
+  if ( item_data && ( item_data->crafting_quality || game_ilvl > 0 ) )
   {
     // Dragonflight consumables with crafting quality use the items ilevel for action/buff effect values, so if the
     // item_data has a crafting quality, create an item for the effect to use
     consumable_item = std::make_unique<item_t>( player, "" );
     consumable_item->parsed.data.name = item_data->name;
     consumable_item->parsed.data.id = item_data->id;
-    consumable_item->parsed.data.level = item_data->level;
+    consumable_item->parsed.data.level = game_ilvl > 0 ? game_ilvl : item_data->level;
     consumable_item->parsed.data.inventory_type = INVTYPE_TRINKET;  // DF consumables use trinket CR multipliers
     consumable_item->parsed.data.crafting_quality = item_data->crafting_quality;
 

@@ -14034,6 +14034,7 @@ void player_t::create_options()
   add_option( opt_string( "bracketsim_creature_damage", bracketsim.creature_damage ) );
   add_option( opt_string( "bracketsim_timed_stat", bracketsim.timed_stat ) );
   add_option( opt_string( "bracketsim_raid_haste", bracketsim.raid_haste ) );
+  add_option( opt_string( "bracketsim_consumable_ilvl", bracketsim.consumable_ilvl ) );
   add_option( opt_float( "bracketsim_dragonwrath_chance",
                          bracketsim.dragonwrath_chance, 0.0, 1.0 ) );
 

@@ -358,6 +358,10 @@ struct player_t : public actor_t
     // `find_spell` returns not_found below that), so every character in the
     // 30-45 brackets uses drums instead and had nothing at all until this.
     std::string raid_haste;
+    // "<item id>:<item level>/..." (30 Sep 2026): the item level the GAME gives an old consumable whose spell scales
+    // with the casting item's level (Elixir of the Mongoose: 12 in game, 23 in the item data - read at 23 it gave
+    // double). Only those consumables read it; unset changes nothing.
+    std::string consumable_ilvl;
     // Dragonwrath, Tarecgosa's Rest: the chance a damaging class spell is
     // duplicated. MEASURED at 8.53% from a real log (18 procs, 211 eligible
     // hits, 95% interval 5.46-13.08%) - see item::dragonwrath. Zero turns the
