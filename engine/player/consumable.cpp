@@ -936,8 +936,11 @@ special_effect_t* dbc_consumable_base_t::create_special_effect()
   // BracketSim (30 Sep 2026): an old consumable whose spell "Scales with Casting Item's Level" (354) is valued at the
   // item level the game gives it, passed in bracketsim_consumable_ilvl (Elixir of the Mongoose: 12 in game, 23 in the
   // item data; read at the character's level it came out about double). No entry, no change.
+  // BracketSim (2 Oct 2026): crafted consumables too. Flask of Tempered Aggression reads 21 Critical Strike on a level 80
+  // in game (confirmed) and the engine gave 56 - the crafted path values it at the item data's level with no regard for
+  // the character. An entry in bracketsim_consumable_ilvl now applies to a crafted item as well; no entry, no change.
   int game_ilvl = 0;
-  if ( item_data && !item_data->crafting_quality && driver()->flags( spell_attribute::SX_SCALE_ILEVEL ) )
+  if ( item_data && ( item_data->crafting_quality || driver()->flags( spell_attribute::SX_SCALE_ILEVEL ) ) )
   {
     for ( auto pair : util::string_split<std::string_view>( player->bracketsim.consumable_ilvl, "/" ) )
     {

@@ -96,3 +96,5 @@ cmake --build build-wasm --target simc
 Since 1 October 2026 the WebAssembly build defines NDEBUG like the native release build (the release flags had dropped
 it, leaving every assert() active in the browser): 1.8x faster, identical output. `build-wasm-fast.bat` is the Windows
 script that runs these steps.
+
+- 2026-10-02: crafted consumables (Dragonflight / The War Within flasks, phials, potions) honour `bracketsim_consumable_ilvl` too. Flask of Tempered Aggression reads 21 Critical Strike on a level 80 in game; the engine gave 56. With the tooltip item level (23) it gives 21. (`engine/player/consumable.cpp`)
