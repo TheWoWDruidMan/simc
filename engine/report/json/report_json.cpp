@@ -875,12 +875,17 @@ void to_json( JsonOutput& arr, const ::report::json::report_configuration_t& rep
     stats_to_json( root[ "stats" ], p.stats_list );
 
     // add pet stats as a separate property
+    // BracketSim (3 Oct 2026): pets that share a name (Nibelung's 8 Val'kyr) each wrote to the same key, so only the
+    // last one survived and the report showed one Val'kyr's damage. The 2nd, 3rd... get "<name>#2", "#3"...
     JsonOutput stats_pets = root[ "stats_pets" ];
+    std::unordered_map<std::string, int> pet_name_count;
     for ( const auto& pet : p.pet_list )
     {
       if ( has_valid_stats( pet->stats_list ) )
       {
-        stats_to_json( stats_pets[ pet->name_str ], pet->stats_list );
+        int n = ++pet_name_count[ pet->name_str ];
+        std::string key = n == 1 ? pet->name_str : fmt::format( "{}#{}", pet->name_str, n );
+        stats_to_json( stats_pets[ key.c_str() ], pet->stats_list );
       }
     }
   }

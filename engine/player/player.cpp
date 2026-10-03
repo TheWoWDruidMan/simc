@@ -4409,6 +4409,38 @@ void player_t::create_actions()
     }
   }
 
+  // BracketSim: the on-use trinket fallback (bracketsim.trinket_fallback). At the very top of the default list, so a
+  // run_action_list below cannot hide it; the condition is false until the trinket has gone unused for that long.
+  if ( is_player() && !is_enemy() && !is_pet() && bracketsim.trinket_fallback > 0 )
+  {
+    auto& def = get_action_priority_list( "default" )->action_list;
+    for ( int n = 2; n >= 1; n-- )
+    {
+      const auto& it = items[ n == 1 ? SLOT_TRINKET_1 : SLOT_TRINKET_2 ];
+      if ( !it.active() || !it.has_use_special_effect() )
+        continue;
+      // Instant uses only: a cast or channel costs casting time the rotation may have skipped it to keep (forcing one on
+      // a 50 Mistweaver cost its execute-range Touch of Death).
+      const auto* use = it.special_effect( SPECIAL_EFFECT_SOURCE_NONE, SPECIAL_EFFECT_USE );
+      const spell_data_t* drv = use ? use->driver() : nullptr;
+      if ( drv && ( drv->cast_time() > 0_ms || drv->flags( spell_attribute::SX_CHANNELED ) ||
+                    drv->flags( spell_attribute::SX_CHANNELED_2 ) ) )
+        continue;
+      // Just above the first jump to another list (run_action_list never returns, so below it is dead), so the lines
+      // the rotation puts first keep their place - at the very top it cost a 80 Mistweaver Touch of Death casts.
+      auto at = std::find_if( def.begin(), def.end(), []( const action_priority_t& e ) {
+        return util::str_prefix_ci( e.action_, "call_action_list" ) ||
+               util::str_prefix_ci( e.action_, "run_action_list" ) ||
+               util::str_prefix_ci( e.action_, "swap_action_list" );
+      } );
+      // A flat list with no jump (the healer damage lists) ends in a filler that is always ready, so the end is never
+      // reached: there it goes at the top.
+      if ( at == def.end() )
+        at = def.begin();
+      def.insert( at, { fmt::format( "use_item,slot=trinket{},if=bracketsim_trinket_fallback.{}", n, n ), "" } );
+    }
+  }
+
   // BracketSim legacy compatibility: put the Shadowlands covenant abilities into
   // the rotation. Without this an imported profile never presses them at all and
   // still reports a perfectly plausible number, which is the worst kind of wrong.
@@ -6662,6 +6694,28 @@ void player_t::combat_begin()
   // from the pull, or that ramp on a timer rather than on a proc.
   legacy_soulbinds.combat_begin( this );
 
+  // BracketSim: a trinket the rotation never pressed in this actor's first fight is pressed on cooldown from the pull
+  // (bracketsim.trinket_fallback).
+  if ( is_player() && !is_enemy() && !is_pet() && bracketsim.trinket_fallback > 0 )
+  {
+    for ( int n = 0; n < 2; n++ )
+    {
+      // Probe fight: mark the trinket's cooldown so a press at 0.000 (pre-pull, or a stance the engine sets at the pull)
+      // is told apart from no press - reset() leaves last_start at 0 either way.
+      if ( bracketsim.trinket_rotation_presses[ n ] == -1 )
+      {
+        const std::string sig =
+            fmt::format( "use_item,slot=trinket{},if=bracketsim_trinket_fallback.{}", n + 1, n + 1 );
+        for ( auto a : action_list )
+          if ( a->signature_str == sig && a->cooldown && a->cooldown->up() )
+            a->cooldown->last_start = timespan_t::min();
+      }
+      bracketsim.trinket_fallback_on[ n ] = bracketsim.trinket_rotation_presses[ n ] == 0;
+      if ( bracketsim.trinket_fallback_on[ n ] && sim->log )
+        sim->print_log( "{} trinket{}: the rotation never presses it, pressed on cooldown", *this, n + 1 );
+    }
+  }
+
   // Trigger registered pre-pull functions
   for ( const auto& f : precombat_begin_functions )
   {
@@ -6733,6 +6787,35 @@ void player_t::combat_end()
   for ( auto* pet : pet_list )
   {
     pet->combat_end();
+  }
+
+  // BracketSim trinket fallback probe (bracketsim.trinket_fallback): did the rotation press each on-use trinket in this
+  // first fight? The fallback line shares the item's cooldown with every other use of it, so its cooldown says.
+  // (use_item_t keeps its own item pointer; action_t::item stays null - hence the signature match.)
+  if ( is_player() && !is_enemy() && !is_pet() && bracketsim.trinket_fallback > 0 )
+  {
+    for ( int n = 0; n < 2; n++ )
+    {
+      if ( bracketsim.trinket_rotation_presses[ n ] != -1 )
+        continue;
+      const std::string sig = fmt::format( "use_item,slot=trinket{},if=bracketsim_trinket_fallback.{}", n + 1, n + 1 );
+      for ( auto a : action_list )
+      {
+        if ( a->signature_str != sig || !a->cooldown )
+          continue;
+        // A pre-pull press counts as the rotation using it: 70 Prot's Tome of Light's Devotion is a stance switch the
+        // rotation sets once before the pull, and pressing it again on cooldown flipped it to the defensive stance (-2%).
+        bool precombat = false;
+        for ( auto pa : precombat_action_list )
+          if ( pa != a && pa->cooldown == a->cooldown )
+            precombat = true;
+        bracketsim.trinket_rotation_presses[ n ] =
+            ( precombat || a->cooldown->down() || a->cooldown->last_start != timespan_t::min() ) ? 1 : 0;
+        if ( sim->log )
+          sim->print_log( "{} trinket{} probe: the rotation {} it", *this, n + 1,
+                          bracketsim.trinket_rotation_presses[ n ] ? "presses" : "never presses" );
+      }
+    }
   }
 
   if ( !is_pet() )
@@ -7140,6 +7223,7 @@ void player_t::reset()
   sim->print_debug( "Resetting {}.", *this );
 
   last_cast = timespan_t::zero();
+  bracketsim.trinket_fallback_on[ 0 ] = bracketsim.trinket_fallback_on[ 1 ] = false;
   gcd_ready = timespan_t::zero();
   off_gcd_ready = timespan_t::min();
   cast_while_casting_ready = timespan_t::min();
@@ -10906,6 +10990,11 @@ struct use_items_t : public action_t
     if ( check_existing )
     {
       range::for_each( use_item_actions, [ &slot_order ]( const use_item_t* action ) {
+        // BracketSim: the trinket fallback line is not the rotation's own use - use_items keeps the slot.
+        if ( action->signature_str.find( "bracketsim_trinket_fallback" ) != std::string::npos )
+        {
+          return;
+        }
         slot_e slot = util::parse_slot_type( action->item_slot );
         if ( slot == SLOT_INVALID )
         {
@@ -12322,6 +12411,12 @@ std::unique_ptr<expr_t> player_t::create_expression( util::string_view expressio
 
   if ( expression_str == "in_combat" )
     return make_ref_expr( "in_combat", in_combat );
+
+  if ( expression_str == "bracketsim_trinket_fallback.1" || expression_str == "bracketsim_trinket_fallback.2" )
+  {
+    int n = expression_str.back() == '1' ? 0 : 1;
+    return make_fn_expr( expression_str, [ this, n ] { return bracketsim.trinket_fallback_on[ n ]; } );
+  }
 
   if ( expression_str == "in_boss_encounter" )
     return make_ref_expr( "in_boss_encounter", in_boss_encounter );
@@ -14035,6 +14130,7 @@ void player_t::create_options()
   add_option( opt_string( "bracketsim_timed_stat", bracketsim.timed_stat ) );
   add_option( opt_string( "bracketsim_raid_haste", bracketsim.raid_haste ) );
   add_option( opt_string( "bracketsim_consumable_ilvl", bracketsim.consumable_ilvl ) );
+  add_option( opt_int( "bracketsim_trinket_fallback", bracketsim.trinket_fallback, 0, 600 ) );
   add_option( opt_float( "bracketsim_dragonwrath_chance",
                          bracketsim.dragonwrath_chance, 0.0, 1.0 ) );
 

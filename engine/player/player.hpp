@@ -367,6 +367,15 @@ struct player_t : public actor_t
     // hits, 95% interval 5.46-13.08%) - see item::dragonwrath. Zero turns the
     // legendary off and sims the staff as a plain weapon.
     double dragonwrath_chance = 0.0853;
+    // On-use trinkets the rotation never presses (3 Oct 2026). Many rotations hold a buff trinket for a cooldown a
+    // low-level character has not learned (Arms waits for Avatar, Fury for Recklessness, Devastation for Dragonrage)
+    // and the healer damage lists have no trinket line, so the trinket did nothing all fight - 12 of 40 level-30 specs.
+    // Each actor's first fight is a probe: a trinket the rotation never presses in a whole fight is pressed on cooldown
+    // from the pull in every later fight. One the rotation does press (however late - 60 Elemental waits for its 2nd
+    // Fire Elemental) is left to the rotation: pressing those at a fixed time cost up to 1.3%. 0 = off.
+    int trinket_fallback = 1;
+    int trinket_rotation_presses[ 2 ] = { -1, -1 };  // -1 not probed yet, 0 never, 1 presses it
+    bool trinket_fallback_on[ 2 ] = { false, false };
     buff_t* raid_haste_buff = nullptr;
     // Kept alive for register_timed_buff_triggers, which holds the vector BY
     // REFERENCE. A temporary here would dangle.
