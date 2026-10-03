@@ -12412,6 +12412,24 @@ std::unique_ptr<expr_t> player_t::create_expression( util::string_view expressio
   if ( expression_str == "in_combat" )
     return make_ref_expr( "in_combat", in_combat );
 
+  // BracketSim (3 Oct 2026): seconds left on a Pendant of the Violet Eye / Meteorite Crystal window (one stack per
+  // cast), 0 when neither is up or worn. A rotation can hold a big spell for the end of the window, when the stacks
+  // are highest, without naming a buff that only exists while the trinket is worn (unknown buffs fail at init).
+  // Shadow: Void Volley held to the last 5 s, +3.6% on a 30 with the Pendant (a player's idea, measured).
+  if ( expression_str == "bracketsim_cast_stack_window_remains" )
+  {
+    std::vector<buff_t*> windows;
+    for ( const char* n : { "enlightenment_use", "meteoric_inspiration_use" } )
+      if ( auto b = buff_t::find( this, n ) )
+        windows.push_back( b );
+    return make_fn_expr( expression_str, [ windows ] {
+      double r = 0;
+      for ( auto b : windows )
+        r = std::max( r, b->remains().total_seconds() );
+      return r;
+    } );
+  }
+
   if ( expression_str == "bracketsim_trinket_fallback.1" || expression_str == "bracketsim_trinket_fallback.2" )
   {
     int n = expression_str.back() == '1' ? 0 : 1;
