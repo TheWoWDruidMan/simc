@@ -5274,7 +5274,13 @@ struct priest_module_t final : public module_t
             return;
 
           // Always create PI as it's a commonly simmed external
-          auto pi_buff = make_buff( p, "power_infusion", p->find_spell( 10060 ) )
+          //
+          // BracketSim (3 Oct 2026): Power Infusion is level 58 in the spell data, so below 58 find_spell() returned
+          // nothing and the buff was empty - a level-30 priest with PI talented pressed it and gained no haste, and a
+          // PI from another priest (external_buffs) gave nobody anything. In game the talent teaches it at any level
+          // (the author: "priests can use PI at 30"), and the buff is the CASTER's spell, so the receiver's level is beside
+          // the point. The buff is always built from the full spell; only the talent or an external grants it.
+          auto pi_buff = make_buff( p, "power_infusion", dbc::find_spell( p, 10060 ) )
                              ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
                              ->set_default_value_from_effect_type( A_HASTE_ALL )
                              ->set_cooldown( 0_ms );
