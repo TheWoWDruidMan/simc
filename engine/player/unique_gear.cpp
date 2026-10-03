@@ -3698,11 +3698,46 @@ void item::dragonspine_trophy( special_effect_t& effect )
  * stacks never went away: a level-35 Affliction warlock sat at 1, then 2, then 3 stacks all fight. In game it
  * is up to 20 stacks for 20 seconds every two minutes.
  *
- * What counts is the use spell's own proc flags (special attacks, spells, heals). A Devourer's Void Ray tick is
- * a spell hit of its own here, so one Void Ray fills both trinkets - as a level-30 player reports from
- * the game. The tooltip's "abilities with no mana cost will not trigger" is not the live rule: the modern proc
- * flags include Yellow Melee, and 30s warriors run the Pendant.
+ * 3 Oct 2026: ONE STACK PER CAST, NOT PER HIT. Read off two of the author's raid logs (27/28 Sep, 2,000+ stack events,
+ * five players): a Frost mage, a Disc priest, a Fury warrior and an Evoker each gained exactly one stack per
+ * SPELL_CAST_SUCCESS - Whirlwind's many hits one stack, Ice Barrier/Blink/Obsidian Scales/Charge one each, no-mana
+ * abilities included - while item uses (potions, Healthstone, the other trinket) gave none. The per-hit rule below
+ * this gave Shadow no stack from most casts and a multi-hit spell several; a 30 Shadow peaked at ~9.
+ * Two exceptions, both from the game:
+ *   - Devourer's Void Ray: one stack per beam TICK (0 to 20 in 2.3 seconds in the log), on top of its cast.
+ *   - Shadow's Void Volley (1242173): none. Its cast hits nobody itself (a dummy; the bolts are separate triggered
+ *     spells) - a level-30 Shadow player (3 Oct) got one stack from three Volleys.
+ * Channel ticks otherwise give nothing (Ray of Frost, Penance: cast only).
  */
+namespace
+{
+/* A cast that gives a stack: a spell or ability (spell id set - not variable/wait/auto-attack/potion lines), not an
+ * item use, not Void Volley. Comes through player_t::callbacks_on_cast, which every foreground action reaches - the
+ * proc system missed abilities that switch procs off (Assassination's Mutilate: 3 stacks a window instead of 14). */
+bool stack_per_cast_counts( const action_t* a )
+{
+  if ( !a || a->item || a->data().id() == 0 )
+    return false;
+  if ( a->data().id() == 1242173 )  // Void Volley
+    return false;
+  return true;
+}
+
+// Devourer's Void Ray ticks: background spell hits, so they come through the proc system.
+struct void_ray_tick_stack_cb_t : public dbc_proc_callback_t
+{
+  void_ray_tick_stack_cb_t( player_t* p, const special_effect_t& e ) : dbc_proc_callback_t( p, e ) { }
+
+  void trigger( const proc_data_t& data, player_t* target, action_state_t* state,
+                proc_trigger_type_e type ) override
+  {
+    if ( !state || !state->action || state->action->name_str.rfind( "void_ray_tick", 0 ) != 0 )
+      return;
+    dbc_proc_callback_t::trigger( data, target, state, type );
+  }
+};
+}  // namespace
+
 void item::stack_per_cast_use( special_effect_t& effect )
 {
   player_t* p = effect.player;
@@ -3721,24 +3756,34 @@ void item::stack_per_cast_use( special_effect_t& effect )
           stacks->expire();
       } );
 
-  auto driver = new special_effect_t( p );
-  driver->name_str     = util::tokenize_fn( stack_spell->name_cstr() ) + "_driver";
-  driver->type         = SPECIAL_EFFECT_EQUIP;
-  driver->source       = SPECIAL_EFFECT_SOURCE_ITEM;
-  // No item on the driver: with one, the callback reads the trinket's 2-minute USE cooldown as an internal
-  // cooldown and stacks once per window (measured: max 1 stack). The stack buff carries the item's scaling.
-  driver->spell_id     = use->id();
-  driver->cooldown_    = 0_ms;
-  driver->proc_chance_ = 1.0;
-  // Hostile spells and special attacks only. With the spell's helpful flags a Devourer looped forever at one instant
-  // (the stack gain re-fed a helpful event); a damage sim loses nothing by leaving heals out.
-  driver->proc_flags_  = PF_MELEE_ABILITY | PF_RANGED_ABILITY | PF_NONE_HARMFUL | PF_MAGIC_SPELL;
-  driver->proc_flags2_ = PF2_ALL_HIT;
-  driver->custom_buff  = stacks;
-  p->special_effects.push_back( driver );
+  p->callbacks_on_cast.emplace_back( [ window, stacks ]( action_t* a ) {
+    if ( !window->check() || !stack_per_cast_counts( a ) )
+      return;
+    if ( a->sim->log )
+      a->sim->print_log( "{} {} stack from {}", *a->player, stacks->name_str, a->name_str );
+    stacks->trigger();
+  } );
 
-  auto cb = new dbc_proc_callback_t( p, *driver );
-  cb->activate_with_buff( window );
+  if ( p->type == DEMON_HUNTER )
+  {
+    // No item on the driver: with one, the callback reads the trinket's 2-minute USE cooldown as an internal
+    // cooldown and stacks once per window (measured: max 1 stack). The stack buff carries the item's scaling.
+    auto driver = new special_effect_t( p );
+    driver->name_str     = util::tokenize_fn( stack_spell->name_cstr() ) + "_tick_driver";
+    driver->type         = SPECIAL_EFFECT_EQUIP;
+    driver->source       = SPECIAL_EFFECT_SOURCE_ITEM;
+    driver->spell_id     = use->id();
+    driver->cooldown_    = 0_ms;
+    driver->proc_chance_ = 1.0;
+    // Hostile only: with the helpful flags a Devourer looped forever at one instant (the stack gain re-fed a
+    // helpful event).
+    driver->proc_flags_  = PF_MAGIC_SPELL | PF_NONE_HARMFUL;
+    driver->proc_flags2_ = PF2_ALL_HIT;
+    driver->custom_buff  = stacks;
+    p->special_effects.push_back( driver );
+    auto cb = new void_ray_tick_stack_cb_t( p, *driver );
+    cb->activate_with_buff( window );
+  }
 
   effect.custom_buff = window;
 }

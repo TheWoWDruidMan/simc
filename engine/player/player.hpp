@@ -433,6 +433,9 @@ struct player_t : public actor_t
   std::vector<std::function<void( player_t*, bool )>> callbacks_on_combat_state;
   std::vector<std::function<void( bool )>> callbacks_on_movement;  // called in movement_buff_t
   std::vector<std::function<void( player_t* )>> callbacks_on_init_finished;
+  // BracketSim (3 Oct 2026): every foreground action the player executes, whether or not the action lets procs fire
+  // (action_t::callbacks). For effects the game triggers on any spell cast - Pendant of the Violet Eye.
+  std::vector<std::function<void( action_t* )>> callbacks_on_cast;
 
   // Action Priority List
   auto_dispose< std::vector<action_t*> > action_list;

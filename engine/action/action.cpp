@@ -1990,6 +1990,12 @@ void action_t::execute()
     }
   }
 
+  if ( !background && !player->callbacks_on_cast.empty() )
+  {
+    for ( auto& cb : player->callbacks_on_cast )
+      cb( this );
+  }
+
   // Restore the default target after execution. This is required so that
   // target caches do not get into an inconsistent state, if the target of this
   // action (defined by a number) spawns/despawns dynamically during an
