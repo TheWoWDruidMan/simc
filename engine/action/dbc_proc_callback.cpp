@@ -158,6 +158,14 @@ void dbc_proc_callback_t::deactivate_with_buff( buff_t* buff, bool init )
 void dbc_proc_callback_t::trigger( const proc_data_t& source_data, player_t* target, action_state_t* state,
                                    proc_trigger_type_e type )
 {
+  // BracketSim, 4 Oct 2026: a proc on damage TAKEN that harms (Brand of Ceaseless Ire, All-Devouring Nucleus) is
+  // aimed at whoever hit you. The incoming path hands in the victim - the listener itself - so the "no harming your
+  // own side" check below threw every such proc away: on a tank hit by the boss they never fired, upstream too.
+  if ( ( type == proc_trigger_type_e::TRIGGER_ACTION_TAKEN || type == proc_trigger_type_e::TRIGGER_ACTION_PROC_TAKEN ) &&
+       proc_action && proc_action->harmful && target == listener && state && state->action && state->action->player &&
+       state->action->player->is_enemy() != listener->is_enemy() )
+    target = state->action->player;
+
   auto cd = get_cooldown( target );
   if ( cd && cd->down() )
     return;
@@ -224,7 +232,7 @@ void dbc_proc_callback_t::trigger( const proc_data_t& source_data, player_t* tar
     // BracketSim, 29 September 2026: a Devourer's "only procs from class abilities" effects. Every Devourer damage
     // spell carries Allow Class Ability Procs (416) - Consume, Devour and both Void Ray ticks - so the data cannot tell
     // them apart, but the live game does: Solace of the Fallen "stacks only off void ray (non meta void ray
-    // specifically)" (a level-30 player) and does not proc for a Devourer otherwise (the author). Until a log
+    // specifically)" (Fate, level-30 BiS compendium) and does not proc for a Devourer otherwise (the author). Until a log
     // says more, such an effect procs for a Devourer only from the non-Metamorphosis Void Ray tick.
     if ( proc_data.can_only_proc_from_class_abilities && listener->specialization() == DEMON_HUNTER_DEVOURER &&
          !( state && state->action && state->action->name_str == "void_ray_tick" ) )
