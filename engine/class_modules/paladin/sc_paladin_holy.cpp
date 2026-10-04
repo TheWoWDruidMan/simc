@@ -303,6 +303,8 @@ struct holy_shock_damage_t : public paladin_spell_t
 
     // effect 1 increases crit chance flattly
     cc += crit_chance_boost;
+    // BracketSim legacy (4 Oct 2026): Focused Light (conduit 193) - Holy Shock critical effect chance +X%.
+    cc += p()->legacy_conduits.percent( 193 );
 
     return cc;
   }
@@ -330,6 +332,8 @@ struct holy_shock_heal_t : public paladin_heal_t
 
     // effect 1 increases crit chance flattly
     cc += crit_chance_boost;
+    // BracketSim legacy (4 Oct 2026): Focused Light (conduit 193) - Holy Shock critical effect chance +X%.
+    cc += p()->legacy_conduits.percent( 193 );
 
     return cc;
   }

@@ -1353,6 +1353,7 @@ public:
 
     // Legacy Azerite (Battle for Azeroth)
     action_t* legacy_lightning_conduit;
+    action_t* legacy_strength_of_earth = nullptr;
     action_t* legacy_tectonic_thunder;
     // BracketSim legacy compatibility: the conduit Shake the Foundations (103).
     action_t* legacy_shake_the_foundations;
@@ -1500,6 +1501,7 @@ public:
     buff_t* lava_shock;
     buff_t* synapse_shock;
     buff_t* legacy_ancestral_resonance;
+    buff_t* legacy_strength_of_earth = nullptr;
     buff_t* legacy_natural_harmony_fire;    // crit
     buff_t* legacy_natural_harmony_frost;   // mastery
     buff_t* legacy_natural_harmony_nature;  // haste
@@ -3258,6 +3260,13 @@ public:
     if ( !special )
     {
       p()->buff.flurry->decrement();
+    }
+
+    // Legacy Azerite: Strength of Earth - the next melee ability (not an auto attack or a background hit).
+    if ( !background && p()->action.legacy_strength_of_earth && p()->buff.legacy_strength_of_earth->check() )
+    {
+      p()->action.legacy_strength_of_earth->execute_on_target( target );
+      p()->buff.legacy_strength_of_earth->decrement();
     }
   }
 
@@ -5537,6 +5546,22 @@ struct legacy_lightning_conduit_zap_t : public shaman_spell_t
     background  = true;
     may_crit    = true;
     base_dd_min = base_dd_max = player->legacy_azerite.lightning_conduit.value();
+  }
+};
+
+// Legacy Azerite: Strength of Earth ========================================
+// BracketSim legacy (4 Oct 2026): "Flame Shock causes your next melee ability to deal an additional X Nature damage."
+// Ported from SimulationCraft's BfA shaman (strength_of_earth_t, 273466), whose trigger was Rockbiter; the game text
+// now names Flame Shock, so Flame Shock grants the buff.
+
+struct legacy_strength_of_earth_t : public shaman_spell_t
+{
+  legacy_strength_of_earth_t( shaman_t* player ) :
+    shaman_spell_t( "legacy_strength_of_earth", player, player->find_spell( 273466 ) )
+  {
+    background  = true;
+    may_crit    = true;
+    base_dd_min = base_dd_max = player->legacy_azerite.strength_of_earth.value();
   }
 };
 
@@ -9330,6 +9355,8 @@ public:
   void execute() override
   {
     shaman_spell_t::execute();
+    if ( p()->legacy_azerite.strength_of_earth.ok() )
+      p()->buff.legacy_strength_of_earth->trigger();
     if ( is_variant( spell_variant::NORMAL ) )
     {
       if ( p()->talent.routine_communication.ok() && p()->rng_obj.routine_communication->trigger() )
@@ -11678,6 +11705,9 @@ void shaman_t::create_actions()
   if ( legacy_azerite.lightning_conduit.ok() )
     action.legacy_lightning_conduit = new legacy_lightning_conduit_zap_t( this );
 
+  if ( legacy_azerite.strength_of_earth.ok() )
+    action.legacy_strength_of_earth = new legacy_strength_of_earth_t( this );
+
   if ( legacy_azerite.tectonic_thunder.ok() )
     action.legacy_tectonic_thunder = new legacy_tectonic_thunder_damage_t( this );
 
@@ -13799,6 +13829,7 @@ void shaman_t::create_buffs()
   buff.legacy_natural_harmony_nature = make_buff<stat_buff_t>( this, "legacy_natural_harmony_nature", find_spell( 279033 ) )
                                            ->add_stat( STAT_HASTE_RATING, legacy_azerite.natural_harmony.value() );
   // Ancestral Resonance procs on RPPM, at a much higher rate under Bloodlust.
+  buff.legacy_strength_of_earth = make_buff( this, "legacy_strength_of_earth", find_spell( 273465 ) )->set_max_stack( 1 );
   buff.legacy_ancestral_resonance = make_buff<stat_buff_t>( this, "legacy_ancestral_resonance", find_spell( 277943 ) )
                                         ->add_stat( STAT_MASTERY_RATING, legacy_azerite.ancestral_resonance.value( 1 ) )
                                         ->add_invalidate( CACHE_MASTERY )
