@@ -59,6 +59,10 @@ actions.annihilator_melee+=/consume
 
 actions.annihilator_ranged=pick_up_fragment,mode=nearest,type=all,use_off_gcd=1,line_cd=0.6,if=!buff.metamorphosis.up&!buff.void_metamorphosis_stack.at_max_stacks&buff.void_metamorphosis_stack.stack>=buff.void_metamorphosis_stack.max_stack-1-(active_enemies>1)
 actions.annihilator_ranged+=/pick_up_fragment,use_off_gcd=1,if=buff.metamorphosis.up&cooldown.reap.remains&soul_fragments+buff.collapsing_star_stacking.stack>=30&fury<void_metamorphosis_base_drain_ps&buff.collapsing_star_stacking.stack<30
+# BracketSim, level 30 only: Pendant/Crystal + one Void Ray as Meta comes up; Void Ray again only as Meta runs out.
+actions.annihilator_ranged+=/use_item,slot=trinket1,if=level<35&!buff.metamorphosis.up&buff.void_metamorphosis_stack.at_max_stacks&cooldown.void_ray.ready&(trinket.1.is.pendant_of_the_violet_eye|trinket.1.is.meteorite_crystal)
+actions.annihilator_ranged+=/use_item,slot=trinket2,if=level<35&!buff.metamorphosis.up&buff.void_metamorphosis_stack.at_max_stacks&cooldown.void_ray.ready&(trinket.2.is.pendant_of_the_violet_eye|trinket.2.is.meteorite_crystal)
+actions.annihilator_ranged+=/void_ray,if=level<35&!buff.metamorphosis.up&buff.void_metamorphosis_stack.at_max_stacks&bracketsim_cast_stack_window_remains>0
 actions.annihilator_ranged+=/metamorphosis
 actions.annihilator_ranged+=/devour,if=buff.soulburst.up&active_enemies=1
 actions.annihilator_ranged+=/consume,if=buff.soulburst.up
@@ -69,10 +73,10 @@ actions.annihilator_ranged+=/collapsing_star,if=active_enemies=1
 actions.annihilator_ranged+=/call_action_list,name=reaps,if=active_enemies=1&action.reap.souls_consumed>=4
 actions.annihilator_ranged+=/call_action_list,name=reaps,if=fight_remains<=6&action.reap.souls_consumed>=1
 actions.annihilator_ranged+=/call_action_list,name=reaps,if=active_enemies>1&buff.eradicate.up&action.reap.souls_consumed>=4+6*buff.moment_of_craving.up
-actions.annihilator_ranged+=/void_ray,if=!buff.eradicate.up|!buff.moment_of_craving.up|!set_bonus.midnight_season_2_4pc
+actions.annihilator_ranged+=/void_ray,if=level<35&buff.metamorphosis.up&fury<void_metamorphosis_base_drain_ps*2|level>=35&(!buff.eradicate.up|!buff.moment_of_craving.up|!set_bonus.midnight_season_2_4pc)
 actions.annihilator_ranged+=/call_action_list,name=reaps,if=(!buff.eradicate.up|active_enemies=1)&(buff.voidfall_spending.stack>=3&prev_gcd.1.void_ray|buff.voidfall_spending.react>=3)
 actions.annihilator_ranged+=/call_action_list,name=reaps,if=buff.metamorphosis.up&talent.collapsing_star&buff.collapsing_star_stacking.stack+action.reap.souls_consumed>=30&variable.wont_overcap_cstar&void_metamorphosis_base_drain_ps>35&action.reap.souls_consumed>=4&variable.wont_drop_meta
-actions.annihilator_ranged+=/soul_immolation,if=active_dot.soul_immolation=0&(!buff.metamorphosis.up|fury<void_metamorphosis_base_drain_ps)
+actions.annihilator_ranged+=/soul_immolation,if=active_dot.soul_immolation=0&(level<35&buff.metamorphosis.up&fury<void_metamorphosis_base_drain_ps|level>=35&(!buff.metamorphosis.up|fury<void_metamorphosis_base_drain_ps))
 actions.annihilator_ranged+=/devour
 actions.annihilator_ranged+=/consume
 

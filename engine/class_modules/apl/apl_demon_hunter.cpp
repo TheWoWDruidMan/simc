@@ -127,6 +127,13 @@ void devourer( player_t* p )
 
   annihilator_ranged->add_action( "pick_up_fragment,mode=nearest,type=all,use_off_gcd=1,line_cd=0.6,if=!buff.metamorphosis.up&!buff.void_metamorphosis_stack.at_max_stacks&buff.void_metamorphosis_stack.stack>=buff.void_metamorphosis_stack.max_stack-1-(active_enemies>1)" );
   annihilator_ranged->add_action( "pick_up_fragment,use_off_gcd=1,if=buff.metamorphosis.up&cooldown.reap.remains&soul_fragments+buff.collapsing_star_stacking.stack>=30&fury<void_metamorphosis_base_drain_ps&buff.collapsing_star_stacking.stack<30" );
+  // BracketSim, level 30 only (3 Oct 2026, a player's in-game plan, measured): press the Pendant / Meteorite Crystal and
+  // one Void Ray as Meta comes up (its ticks outside Meta stack the trinket to 20), then no Void Ray until Meta is
+  // running out, and Soul Immolation only as end-of-Meta filler. +5.4% at 30 with the trinket, +1.0% without; it
+  // loses 3-13% at 35-70, where Void Ray mid-rotation is worth casting, so 35+ keeps the list as it was.
+  annihilator_ranged->add_action( "use_item,slot=trinket1,if=level<35&!buff.metamorphosis.up&buff.void_metamorphosis_stack.at_max_stacks&cooldown.void_ray.ready&(trinket.1.is.pendant_of_the_violet_eye|trinket.1.is.meteorite_crystal)" );
+  annihilator_ranged->add_action( "use_item,slot=trinket2,if=level<35&!buff.metamorphosis.up&buff.void_metamorphosis_stack.at_max_stacks&cooldown.void_ray.ready&(trinket.2.is.pendant_of_the_violet_eye|trinket.2.is.meteorite_crystal)" );
+  annihilator_ranged->add_action( "void_ray,if=level<35&!buff.metamorphosis.up&buff.void_metamorphosis_stack.at_max_stacks&bracketsim_cast_stack_window_remains>0" );
   annihilator_ranged->add_action( "metamorphosis" );
   annihilator_ranged->add_action( "devour,if=buff.soulburst.up&active_enemies=1" );
   annihilator_ranged->add_action( "consume,if=buff.soulburst.up" );
@@ -137,10 +144,10 @@ void devourer( player_t* p )
   annihilator_ranged->add_action( "call_action_list,name=reaps,if=active_enemies=1&action.reap.souls_consumed>=4" );
   annihilator_ranged->add_action( "call_action_list,name=reaps,if=fight_remains<=6&action.reap.souls_consumed>=1" );
   annihilator_ranged->add_action( "call_action_list,name=reaps,if=active_enemies>1&buff.eradicate.up&action.reap.souls_consumed>=4+6*buff.moment_of_craving.up" );
-  annihilator_ranged->add_action( "void_ray,if=!buff.eradicate.up|!buff.moment_of_craving.up|!set_bonus.midnight_season_2_4pc" );
+  annihilator_ranged->add_action( "void_ray,if=level<35&buff.metamorphosis.up&fury<void_metamorphosis_base_drain_ps*2|level>=35&(!buff.eradicate.up|!buff.moment_of_craving.up|!set_bonus.midnight_season_2_4pc)" );
   annihilator_ranged->add_action( "call_action_list,name=reaps,if=(!buff.eradicate.up|active_enemies=1)&(buff.voidfall_spending.stack>=3&prev_gcd.1.void_ray|buff.voidfall_spending.react>=3)" );
   annihilator_ranged->add_action( "call_action_list,name=reaps,if=buff.metamorphosis.up&talent.collapsing_star&buff.collapsing_star_stacking.stack+action.reap.souls_consumed>=30&variable.wont_overcap_cstar&void_metamorphosis_base_drain_ps>35&action.reap.souls_consumed>=4&variable.wont_drop_meta" );
-  annihilator_ranged->add_action( "soul_immolation,if=active_dot.soul_immolation=0&(!buff.metamorphosis.up|fury<void_metamorphosis_base_drain_ps)" );
+  annihilator_ranged->add_action( "soul_immolation,if=active_dot.soul_immolation=0&(level<35&buff.metamorphosis.up&fury<void_metamorphosis_base_drain_ps|level>=35&(!buff.metamorphosis.up|fury<void_metamorphosis_base_drain_ps))" );
   annihilator_ranged->add_action( "devour" );
   annihilator_ranged->add_action( "consume" );
 

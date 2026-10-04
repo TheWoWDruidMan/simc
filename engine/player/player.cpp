@@ -1799,6 +1799,66 @@ void player_t::init_initial_stats()
       }
     }
 
+    /*
+     * BracketSim: "+N attack power / spell power versus <creature type>" on gear and enchants (3 Oct 2026, the author:
+     * "give users the option to pick the target type"). Scourgebane, Undead/Demon Slayer, Mark and Seal of the
+     * Champion/Dawn and the Felbane weapons carry these auras (A_MOD_MELEE/RANGED_ATTACK_POWER_VERSUS,
+     * A_MOD_FLAT_SPELL_DAMAGE_VERSUS); the engine never read them, so they simmed as nothing on any target. Every
+     * target in a fight shares sim->target_race, so the bonus is a gear stat when that race is in the aura's
+     * creature-type mask. Melee and ranged copies of one bonus count once. Values scale to the item, as the
+     * enchanter-applied rule does.
+     */
+    {
+      race_e target_race = RACE_HUMANOID;
+      if ( !sim->target_race.empty() )
+      {
+        race_e r = util::parse_race_type( sim->target_race );
+        if ( r != RACE_NONE && r != RACE_UNKNOWN )
+          target_race = r;
+      }
+      const unsigned target_bit = 1u << ( target_race - 1 );
+      auto versus = [ & ]( unsigned spell_id, const item_t& item, std::string_view from ) {
+        const spell_data_t* s = find_spell( spell_id );
+        if ( !s || !s->ok() )
+          return;
+        double ap = 0, sp = 0;
+        for ( const spelleffect_data_t& e : s->effects() )
+        {
+          if ( e.type() != E_APPLY_AURA || !( static_cast<unsigned>( e.misc_value1() ) & target_bit ) )
+            continue;
+          double v = e.average( item );
+          if ( v == 0 )
+            v = e.base_value();
+          if ( e.subtype() == A_MOD_MELEE_ATTACK_POWER_VERSUS || e.subtype() == A_MOD_RANGED_ATTACK_POWER_VERSUS )
+            ap = std::max( ap, v );
+          else if ( e.subtype() == A_MOD_FLAT_SPELL_DAMAGE_VERSUS )
+            sp = std::max( sp, v );
+        }
+        if ( ap > 0 )
+          total_gear.add_stat( STAT_ATTACK_POWER, ap );
+        if ( sp > 0 )
+          total_gear.add_stat( STAT_SPELL_POWER, sp );
+        if ( ap > 0 || sp > 0 )
+          sim->print_debug( "{} {} ({}) versus {}: +{} attack power, +{} spell power", *this, s->name_cstr(), from,
+                            util::race_type_string( target_race ), ap, sp );
+      };
+      for ( const auto& item : items )
+      {
+        if ( !item.parsed.data.id )
+          continue;
+        for ( const item_effect_t& effect : item.parsed.data.effects )
+          if ( effect.spell_id && effect.type == ITEM_SPELLTRIGGER_ON_EQUIP )
+            versus( effect.spell_id, item, item.name_str );
+        if ( item.parsed.enchant_id )
+        {
+          const auto& ench = dbc->item_enchantment( item.parsed.enchant_id );
+          for ( size_t i = 0; i < 3; i++ )
+            if ( ench.ench_type[ i ] == ITEM_ENCHANTMENT_EQUIP_SPELL && ench.ench_prop[ i ] )
+              versus( ench.ench_prop[ i ], item, "enchant" );
+        }
+      }
+    }
+
     sim->print_debug( "{} total gear stats: {}", *this, total_gear );
 
     initial.stats += enchant;

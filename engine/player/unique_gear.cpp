@@ -3731,7 +3731,8 @@ struct void_ray_tick_stack_cb_t : public dbc_proc_callback_t
   void trigger( const proc_data_t& data, player_t* target, action_state_t* state,
                 proc_trigger_type_e type ) override
   {
-    if ( !state || !state->action || state->action->name_str.rfind( "void_ray_tick", 0 ) != 0 )
+    // Only the ray cast OUTSIDE Metamorphosis stacks (void_ray_tick); in-game, Meta's ticks (void_ray_tick_meta) do not.
+    if ( !state || !state->action || state->action->name_str != "void_ray_tick" )
       return;
     dbc_proc_callback_t::trigger( data, target, state, type );
   }
