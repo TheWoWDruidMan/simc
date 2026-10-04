@@ -6870,7 +6870,7 @@ void unique_gear::DISABLED_EFFECT( special_effect_t& effect )
 // BracketSim legacy compatibility: procs whose real trigger this sim cannot
 // represent, and which therefore fire CONSTANTLY if left alone.
 //
-// the author, 10 September 2026: "yoghurtboy level 30 the dropimizer said a trinket
+// the author, 10 September 2026: "a test character level 30 the dropimizer said a trinket
 // from magtheridon is better which is NOT true."
 //
 // Eye of Magtheridon, item 28789, ItemEffect 34749 "Recurring Power". The
