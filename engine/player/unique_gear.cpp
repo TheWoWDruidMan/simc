@@ -100,6 +100,7 @@ namespace item
   void dislodged_foreign_object( special_effect_t& );
   void stack_per_cast_use( special_effect_t& );
   void dragonspine_trophy( special_effect_t& );
+  void houndmasters_weapons( special_effect_t& );
   void souldrinker( special_effect_t& );
   void gurthalak( special_effect_t& );
   void dragonwrath( special_effect_t& );
@@ -3681,6 +3682,30 @@ void item::black_blood_of_yshaarj( special_effect_t& effect )
  * 1.0 PPM on melee and ranged hits, weapon specials included, behind the 20 second cooldown - that is the rate here,
  * old-style PPM (per hit, scaled by the hitting weapon's speed) as for the other legacy chance-on-hit effects.
  */
+/*
+ * HOUNDMASTER'S WEAPONS (470629: Magma-Shot Boomstick 231454, Houndmaster's Bow 231393) - BracketSim, 4 Oct 2026.
+ *
+ * "Your ranged attacks have a chance to deal an additional N Physical damage to Beasts." Registered as a plain
+ * 470630Trigger it fired on every target, a humanoid dummy included (56 DPS at 30 that no fight against a non-beast
+ * gives). The condition is the target's creature type, as upstream does for Demonsbane: pick Beast in Target Type.
+ */
+void item::houndmasters_weapons( special_effect_t& effect )
+{
+  struct beasts_only_cb_t : public dbc_proc_callback_t
+  {
+    beasts_only_cb_t( const special_effect_t& e ) : dbc_proc_callback_t( e.player, e ) {}
+    void trigger( const proc_data_t& data, player_t* target, action_state_t* state, proc_trigger_type_e type ) override
+    {
+      player_t* t = state && state->target ? state->target : target;
+      if ( !t || t->race != RACE_BEAST )
+        return;
+      dbc_proc_callback_t::trigger( data, target, state, type );
+    }
+  };
+  effect.execute_action = create_proc_action<generic_proc_t>( "beast_slaying", effect, "beast_slaying", 470630 );
+  new beasts_only_cb_t( effect );
+}
+
 void item::dragonspine_trophy( special_effect_t& effect )
 {
   effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY | PF_RANGED | PF_RANGED_ABILITY;
@@ -7052,7 +7077,7 @@ void unique_gear::register_special_effects()
   register_special_effect( 469933,  item::molten_ironfoe ); /* Molten Ironfoe - Molten Strike */
   register_special_effect( 259006,  "259014Trigger"  ); /* Venomstrike - Venom Shot */
   register_special_effect( 29633,   "29644Trigger"   ); /* Galgann's Fireblaster - Fire Blast */
-  register_special_effect( 470629,  "470630Trigger"  ); /* Magma-Shot Boomstick */
+  register_special_effect( 470629,  item::houndmasters_weapons ); /* Magma-Shot Boomstick, Houndmaster's Bow - beasts only */
   register_special_effect( 13533,  item::jackhammer                      );
   register_special_effect( 22640,  item::eskhandars_right_claw           );
   register_special_effect( 21992,  item::thunderfury                     );

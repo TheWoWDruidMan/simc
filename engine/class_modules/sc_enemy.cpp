@@ -1227,8 +1227,11 @@ struct tank_dummy_enemy_t : public enemy_t
       }
     }
 
-    // override race
-    race = RACE_HUMANOID;
+    // override race - unless target_race chose one. BracketSim, 4 Oct 2026: this runs AFTER enemy_t::init_race applies
+    // target_race, so the choice was always thrown away and every creature-type effect (Adventurer's Journal,
+    // Magma-Shot Boomstick, Demonsbane) only ever saw a humanoid.
+    if ( sim->target_race.empty() )
+      race = RACE_HUMANOID;
 
     // Don't change the value if it's specified by the user - handled in enemy_t::init_base_stats()
     if ( custom_armor_coeff <= 0 )
