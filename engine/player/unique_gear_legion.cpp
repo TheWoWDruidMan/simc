@@ -3162,7 +3162,13 @@ void item::pharameres_forbidden_grimoire( special_effect_t& effect )
 
     bool ready() override
     {
-      if ( player -> get_player_distance( *target ) < 14 )
+      // BracketSim (4 Oct 2026): "at least 10 yds away" (the tooltip). Every actor stands at the target's spot unless
+      // distance targeting is on, and class distances are 0-10, so this never fired for anyone (upstream too). A ranged
+      // or caster spec stands well outside 10 yards in game, so for them it is always far enough; melee stays out.
+      const auto role = player -> primary_role();
+      const bool ranged = role == ROLE_SPELL || role == ROLE_HEAL ||
+                          ( player -> type == HUNTER && player -> specialization() != HUNTER_SURVIVAL );
+      if ( !ranged && player -> get_player_distance( *target ) < 10 )
       {
         return false;
       }
