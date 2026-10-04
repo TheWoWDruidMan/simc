@@ -465,9 +465,24 @@ void effects_t::covenant_ability_cast( player_t* p, covenant_e cov, cooldown_t* 
     case COVENANT_NIGHT_FAE:
       if ( has( FIELD_OF_BLOSSOMS ) )
         field_of_blossoms->trigger();
-      // Grove Invigoration: "Activating your Night Fae class ability grants you 8 stacks of Redirected Anima."
+      // Grove Invigoration: "Activating your Night Fae class ability grants you (8 * N) stacks of Redirected Anima" -
+      // N is per class (Wowhead spell 342814 with each class ticked, 4 Oct 2026, a player report: a DK simmed an
+      // average of 17 stacks where the game gives 2 per cast). Every class used to get 8.
       if ( has( GROVE_INVIGORATION ) )
-        grove_invigoration->trigger( 8 );
+      {
+        int stacks = 8;
+        switch ( p->type )
+        {
+          case DEATH_KNIGHT: stacks = 2; break;
+          case MONK: stacks = 4; break;
+          case MAGE: case PALADIN: stacks = 6; break;
+          case WARLOCK: stacks = 8; break;
+          case PRIEST: case ROGUE: case WARRIOR: case DEMON_HUNTER: stacks = 12; break;
+          case DRUID: case HUNTER: case SHAMAN: case EVOKER: stacks = 16; break;
+          default: break;
+        }
+        grove_invigoration->trigger( stacks );
+      }
       break;
 
     default:
