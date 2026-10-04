@@ -1857,6 +1857,21 @@ void player_t::init_initial_stats()
               versus( ench.ench_prop[ i ], item, "enchant" );
         }
       }
+      // The Twin Blades of Azzinoth (2): "Increases attack power by 30 when fighting Demons" (the author's in-game
+      // tooltip, 18 Sep 2026). The set has no spell in this client (see init_special_effects for its haste proc),
+      // so it is read here by set id 699. Left out until the target type could be chosen.
+      if ( target_race == RACE_DEMON )
+      {
+        std::vector<unsigned> glaives;
+        for ( const auto& item : items )
+          if ( item.parsed.data.id && item.parsed.data.id_set == 699 && range::find( glaives, item.parsed.data.id ) == glaives.end() )
+            glaives.push_back( item.parsed.data.id );
+        if ( glaives.size() >= 2 )
+        {
+          total_gear.add_stat( STAT_ATTACK_POWER, 30 );
+          sim->print_debug( "{} Twin Blades of Azzinoth (2) versus demon: +30 attack power", *this );
+        }
+      }
     }
 
     sim->print_debug( "{} total gear stats: {}", *this, total_gear );
