@@ -520,6 +520,11 @@ public:
       state->snapshot_mult = cast_state( d->state )->snapshot_mult;
       damage->snapshot_state( state, damage->amount_type( state ) );
       
+      // BracketSim legacy (4 Oct 2026): Swift Penitence (conduit 81) - the first bolt (tick zero) deals the rank
+      // value more damage, as upstream shadowlands applied it (penance_damage_t first_tick).
+      if ( d->current_tick == 0 && p().legacy_conduits.has( 81 ) )
+        state->da_multiplier *= 1.0 + p().legacy_conduits.percent( 81 );
+
       // For some reason its the 2nd bolt? Dont ask me. It says first on the tooltip :)
       if ( d->current_tick == 2 && p().talents.oracle.prompt_prognosis.enabled() )
       {

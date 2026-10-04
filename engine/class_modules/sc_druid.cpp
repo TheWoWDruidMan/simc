@@ -1547,6 +1547,8 @@ struct druid_t final : public parse_player_effects_t
   double legacy_endless_thirst_crit() const;
   double composite_melee_crit_chance() const override;
   double composite_spell_crit_chance() const override;
+  double composite_player_multiplier( school_e ) const override;
+  bool legacy_conflux_active = false;  // Conflux of Elements: a Convoke channel is running
   std::unique_ptr<expr_t> create_action_expression(action_t& a, std::string_view name_str) override;
   std::unique_ptr<expr_t> create_expression( std::string_view name ) override;
   action_t* create_action( std::string_view name, std::string_view options ) override;
@@ -10502,6 +10504,23 @@ struct convoke_the_spirits_t final : public trigger_control_of_the_dream_t<druid
     }
 
     cast_list.insert( cast_list.end(), max_ticks - cast_list.size(), CAST_SPEC );
+
+    // Conflux of Elements: on for the channel. The multiplier is cached, so it must be invalidated both ways.
+    if ( p()->legacy_conduits.has( 279 ) )
+    {
+      p()->legacy_conflux_active = true;
+      p()->invalidate_cache( CACHE_PLAYER_DAMAGE_MULTIPLIER );
+    }
+  }
+
+  void last_tick( dot_t* d ) override
+  {
+    base_t::last_tick( d );
+    if ( p()->legacy_conflux_active )
+    {
+      p()->legacy_conflux_active = false;
+      p()->invalidate_cache( CACHE_PLAYER_DAMAGE_MULTIPLIER );
+    }
   }
 
   void tick( dot_t* d ) override
@@ -14319,6 +14338,7 @@ void druid_t::reset()
   // Reset druid_t variables to their original state.
   form = CASTER_FORM;
   base_gcd = 1.5_s;
+  legacy_conflux_active = false;
   legacy_previous_streaking_star = 0;
 
   // Restore main hand attack / weapon to normal state
@@ -14620,6 +14640,20 @@ double druid_t::composite_melee_crit_chance() const
 double druid_t::composite_spell_crit_chance() const
 {
   return parse_player_effects_t::composite_spell_crit_chance() + legacy_endless_thirst_crit();
+}
+
+// BracketSim legacy (4 Oct 2026): Conflux of Elements (conduit 279) - "While channeling Convoke the Spirits, your damage
+// and healing are increased by X%". Midnight has no Convoke buff, so the channel itself is the test.
+double druid_t::composite_player_multiplier( school_e s ) const
+{
+  double m = parse_player_effects_t::composite_player_multiplier( s );
+  // Set by Convoke's execute and cleared by its last tick (a cancelled channel included), which also invalidate the cache.
+  if ( legacy_conduits.has( 279 ) )
+  {
+    if ( legacy_conflux_active )
+      m *= 1.0 + legacy_conduits.percent( 279 );
+  }
+  return m;
 }
 
 double druid_t::composite_armor() const

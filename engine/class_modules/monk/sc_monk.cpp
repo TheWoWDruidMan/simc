@@ -5816,6 +5816,8 @@ struct legacy_fallen_order_adept_t : public monk_spell_t
     attack_power_mod.direct = 2.286;
     spell_power_mod.direct  = 0.0;
     school = SCHOOL_SHADOW;
+    // BracketSim legacy (4 Oct 2026): Imbued Reflections (conduit 62) - the Fallen Order monks deal the rank value more.
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 62 );
   }
 };
 
@@ -7023,9 +7025,15 @@ void monk_t::create_buffs()
   // BracketSim legacy compatibility: Weapons of Order. Only effect 1, the
   // Mastery gain, is applied: effects 2 to 5 are unused template rows that the
   // ability never granted in game.
+  // BracketSim legacy (4 Oct 2026): Strike with Clarity (conduit 59) - Weapons of Order lasts 5 sec longer and adds the
+  // rank value to its Mastery (upstream shadowlands: monk_t::composite_mastery, + conduit value while it is up).
   buff.legacy_weapons_of_order =
       make_buff( this, "weapons_of_order", legacy_covenant.weapons_of_order )
-          ->set_default_value_from_effect( 1, 0.01 )
+          // Mastery POINTS, as upstream shadowlands added them (player_t::composite_mastery adds the value as points;
+          // the old * 0.01 made it 0.1 points, about nothing).
+          ->set_default_value( legacy_covenant.weapons_of_order->effectN( 1 ).base_value()
+                               + legacy_conduits.value( 59 ) )
+          ->set_duration( legacy_covenant.weapons_of_order->duration() + ( legacy_conduits.has( 59 ) ? 5_s : 0_s ) )
           ->set_pct_buff_type( STAT_PCT_BUFF_MASTERY )
           ->set_chance( legacy_covenant.weapons_of_order->ok() ? 1.0 : 0.0 );
 

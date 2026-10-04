@@ -13680,6 +13680,8 @@ struct legacy_abomination_limb_damage_t final : public death_knight_spell_t
     background = true;
     aoe = -1;
     reduced_aoe_targets = p->legacy_covenant.abomination_limb->effectN( 5 ).base_value();
+    // BracketSim legacy (4 Oct 2026): Brutal Grasp (conduit 127) - "Abomination Limb deals X% increased damage".
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 127 );
   }
 
   void execute() override

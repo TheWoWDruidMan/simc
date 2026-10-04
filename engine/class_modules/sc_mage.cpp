@@ -323,6 +323,10 @@ public:
     buff_t* blaster_master;
     buff_t* brain_storm;
     buff_t* enhanced_pyrotechnics;
+    // BracketSim legacy (4 Oct 2026): Shadowlands conduits Flame Accretion (53), Infernal Cascade (30), Siphoned Malice (43).
+    buff_t* legacy_flame_accretion;
+    buff_t* legacy_infernal_cascade;
+    buff_t* legacy_siphoned_malice;
     buff_t* firemind;
     buff_t* flames_of_alacrity;
     buff_t* frigid_grasp;
@@ -3064,7 +3068,11 @@ struct legacy_mirrors_of_torment_t final : public arcane_mage_spell_t
     {
       if ( period * i > data().duration() )
         break;
-      make_event( *sim, period * i, [ this, t = target ] { backlash->execute_on_target( t ); } );
+      make_event( *sim, period * i, [ this, t = target ] {
+        backlash->execute_on_target( t );
+        // BracketSim legacy (4 Oct 2026): Siphoned Malice (conduit 43) - each Mirror consumed stacks spell damage.
+        p()->buffs.legacy_siphoned_malice->trigger();
+      } );
     }
   }
 };
@@ -4519,6 +4527,14 @@ struct fireball_t final : public filler_spell_t<fire_mage_spell_t>
         p()->buffs.enhanced_pyrotechnics->expire();
       else
         p()->buffs.enhanced_pyrotechnics->trigger();
+
+      // Flame Accretion (conduit 53): Mastery per Fireball that fails to crit, lost on a crit - upstream shadowlands
+      // tied it to the stacking Fireball buff (157644, Enhanced Pyrotechnics today), which here only stacks with an
+      // azerite trait, so it follows the same rule on its own.
+      if ( s->result == RESULT_CRIT )
+        p()->buffs.legacy_flame_accretion->expire();
+      else
+        p()->buffs.legacy_flame_accretion->trigger();
     }
   }
 
@@ -5485,6 +5501,10 @@ struct fire_blast_t final : public fire_mage_spell_t
   void execute() override
   {
     fire_mage_spell_t::execute();
+
+    // BracketSim legacy (4 Oct 2026): Infernal Cascade (conduit 30) - Fire Blast during Combustion stacks Fire damage.
+    if ( p()->buffs.combustion->check() )
+      p()->buffs.legacy_infernal_cascade->trigger();
 
     // Fire Blast is now Fire only, so a spec check is no longer necessary
     if ( hit_any_target && p()->buffs.glorious_incandescence->check() )
@@ -7673,6 +7693,25 @@ void mage_t::create_buffs()
                                   ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
                                   ->set_chance( shadowlands_legacy.temporal_warp );
 
+  // BracketSim legacy (4 Oct 2026): Shadowlands conduits, values from legacy_conduits.hpp, mechanics as upstream
+  // shadowlands built them (336832 and 337090 are not in current data, so duration and stacks are stated).
+  buffs.legacy_flame_accretion  = make_buff( this, "flame_accretion", find_spell( 157644 ) )
+                                    ->set_default_value( legacy_conduits.value( 53 ) )
+                                    ->set_chance( legacy_conduits.has( 53 ) ? 1.0 : 0.0 )
+                                    ->set_pct_buff_type( STAT_PCT_BUFF_MASTERY );
+  buffs.legacy_infernal_cascade = make_buff( this, "infernal_cascade" )
+                                    ->set_duration( 5_s )
+                                    ->set_max_stack( 2 )
+                                    ->set_default_value( legacy_conduits.percent( 30 ) )
+                                    ->set_chance( legacy_conduits.has( 30 ) ? 1.0 : 0.0 )
+                                    ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER );
+  buffs.legacy_siphoned_malice  = make_buff( this, "siphoned_malice" )
+                                    ->set_duration( 10_s )
+                                    ->set_max_stack( 3 )
+                                    ->set_default_value( legacy_conduits.percent( 43 ) )
+                                    ->set_chance( legacy_conduits.has( 43 ) ? 1.0 : 0.0 )
+                                    ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER );
+
   buffs.legacy_fevered_incantation      = make_buff( this, "legacy_fevered_incantation", find_spell( 333049 ) )
                                             ->set_default_value_from_effect( 1 )
                                             ->set_chance( shadowlands_legacy.fevered_incantation );
@@ -8042,6 +8081,11 @@ double mage_t::composite_player_multiplier( school_e school ) const
 
   if ( buffs.fired_up->has_common_school( school ) )
     m *= 1.0 + buffs.fired_up->check_stack_value();
+
+  // BracketSim legacy (4 Oct 2026): Infernal Cascade is Fire damage; Siphoned Malice is all spell damage.
+  if ( dbc::is_school( school, SCHOOL_FIRE ) )
+    m *= 1.0 + buffs.legacy_infernal_cascade->check_stack_value();
+  m *= 1.0 + buffs.legacy_siphoned_malice->check_stack_value();
 
   // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
   if ( buffs.legacy_fevered_incantation->has_common_school( school ) )

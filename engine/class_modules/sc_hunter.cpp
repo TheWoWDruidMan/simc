@@ -1905,6 +1905,17 @@ struct hunter_pet_t: public pet_t
     return ap;
   }
 
+  // BracketSim legacy (4 Oct 2026): Enfeebled Mark (conduit 137) - "Your attacks and abilities deal X% increased damage
+  // to enemies inside Resonating Arrow" - the pet's attacks too, as upstream shadowlands applied it to pets.
+  double composite_player_target_multiplier( player_t* target, school_e school ) const override
+  {
+    double m = pet_t::composite_player_target_multiplier( target, school );
+    auto o = static_cast<hunter_t*>( owner );
+    if ( o->legacy_conduits.has( 137 ) && o->buffs.legacy_resonating_arrow && o->buffs.legacy_resonating_arrow->check() )
+      m *= 1.0 + o->legacy_conduits.percent( 137 );
+    return m;
+  }
+
   // BracketSim legacy (27 Sep 2026): Resonating Arrow's crit for the hunter's pets too (308498 effect 2).
   double composite_player_target_crit_chance( player_t* target ) const override
   {
@@ -6820,6 +6831,8 @@ struct raptor_strike_base_t : public melee_focus_spender_t
 
   raptor_strike_base_t( util::string_view n, hunter_t* p, spell_data_ptr_t s ) : melee_focus_spender_t( n, p, s )
   {
+    // BracketSim legacy (4 Oct 2026): Stinging Strike (conduit 226) - "Raptor Strike's damage is increased by X%".
+    base_multiplier *= 1.0 + p->legacy_conduits.percent( 226 );
     if ( p->talents.sanctified_armaments.ok() )
       sanctified_armaments = p->get_background_action<sanctified_armaments_t>( "sanctified_armaments" );
   }
@@ -7712,6 +7725,12 @@ struct legacy_death_chakram_t : public hunter_ranged_attack_t
       energize_type = action_energize::PER_HIT;
       energize_resource = RESOURCE_FOCUS;
       energize_amount = p->legacy_covenant.death_chakram->effectN( 4 ).base_value();
+      // BracketSim legacy (4 Oct 2026): Necrotic Barrage (conduit 143) - "+2 Focus and X% more damage".
+      if ( p->legacy_conduits.has( 143 ) )
+      {
+        energize_amount += 2;
+        base_multiplier *= 1.0 + p->legacy_conduits.percent( 143 );
+      }
     }
     double action_multiplier() const override
     {
@@ -7806,6 +7825,8 @@ struct legacy_wild_spirits_t : public hunter_spell_t
   {
     damage_t( util::string_view n, hunter_t* p ) : hunter_spell_t( n, p, p->find_spell( 328837 ) )
     {
+      // BracketSim legacy (4 Oct 2026): Spirit Attunement (conduit 140) - X% more Wild Spirits damage.
+      base_multiplier *= 1.0 + p->legacy_conduits.percent( 140 );
       dual = true;
       background = true;
       aoe = -1;
@@ -7827,6 +7848,7 @@ struct legacy_wild_spirits_t : public hunter_spell_t
       proc = true;
       callbacks = false;
       legacy_triggers_wild_spirits = false;
+      base_multiplier *= 1.0 + p->legacy_conduits.percent( 140 );  // Spirit Attunement (conduit 140)
       // Upstream: 2020-12-07 hotfix, +25% for Marksmanship, not in the spell data.
       if ( p->specialization() == HUNTER_MARKSMANSHIP )
         base_multiplier *= 1.25;
@@ -9268,8 +9290,10 @@ void hunter_t::create_buffs()
     make_buff( this, "resonating_arrow", find_spell( 308498 ) )
       ->set_default_value( find_spell( 308498 )->effectN( 1 ).percent() );
 
+  // Spirit Attunement (conduit 140): "Wild Spirits lasts 3 sec longer".
   buffs.legacy_wild_spirits =
     make_buff( this, "wild_spirits", find_spell( 328837 ) )
+      ->set_duration( find_spell( 328837 )->duration() + ( legacy_conduits.has( 140 ) ? 3_s : 0_s ) )
       ->set_default_value( find_spell( 328275 )->effectN( 2 ).percent() );
 
   buffs.legacy_secrets_of_the_unblinking_vigil =
@@ -9343,9 +9367,10 @@ void hunter_t::create_buffs()
     make_buff( this, "death_bringer", talents.death_bringer_buff )
       ->set_chance( talents.deathblow.ok() );
 
+  // BracketSim legacy (4 Oct 2026): Powerful Precision (conduit 199) adds to Precise Shots' damage bonus.
   buffs.precise_shots = 
     make_buff( this, "precise_shots", talents.precise_shots_buff )
-      ->set_default_value_from_effect( 1 );
+      ->set_default_value( talents.precise_shots_buff->effectN( 1 ).percent() + legacy_conduits.percent( 199 ) );
 
   buffs.trick_shots =
     make_buff( this, "trick_shots", talents.trick_shots_buff )
@@ -9364,8 +9389,10 @@ void hunter_t::create_buffs()
             cooldowns.aimed_shot->reset( true );
         } );
 
+  // BracketSim legacy (4 Oct 2026): Sharpshooter's Focus (conduit 188) - "Trueshot lasts X% longer".
   buffs.trueshot =
     make_buff( this, "trueshot", talents.trueshot )
+      ->set_duration( talents.trueshot->duration() * ( 1.0 + legacy_conduits.percent( 188 ) ) )
       ->set_cooldown( 0_s )
       ->set_refresh_behavior( buff_refresh_behavior::EXTEND )
       ->add_invalidate( cache_e::CACHE_CRIT_CHANCE )
@@ -10194,6 +10221,10 @@ double hunter_t::composite_player_target_crit_chance( player_t* target ) const
 double hunter_t::composite_player_target_multiplier( player_t* target, school_e school ) const
 {
   double d = player_t::composite_player_target_multiplier( target, school );
+
+  // BracketSim legacy (4 Oct 2026): Enfeebled Mark (conduit 137) while Resonating Arrow is up.
+  if ( legacy_conduits.has( 137 ) && buffs.legacy_resonating_arrow && buffs.legacy_resonating_arrow->check() )
+    d *= 1.0 + legacy_conduits.percent( 137 );
 
   // BracketSim legacy: Wild Mark (328275 effect 2), 5% more damage from the hunter while Wild Spirits is up.
   if ( buffs.legacy_wild_spirits )
