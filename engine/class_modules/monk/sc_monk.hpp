@@ -556,6 +556,10 @@ public:
     propagate_const<buff_t *> blackout_combo;
     propagate_const<buff_t *> celestial_flames;
     propagate_const<buff_t *> charred_passions;
+    // BracketSim legacy compatibility: Jade Ignition (7071) - Chi Energy 337571 from Fists of Fury, spent by Chi Explosion.
+    propagate_const<buff_t *> legacy_chi_energy;
+    // BracketSim legacy compatibility: Last Emperor's Capacitor (7069), The Emperor's Capacitor 337291.
+    propagate_const<buff_t *> legacy_the_emperors_capacitor;
     propagate_const<buff_t *> counterstrike;
     propagate_const<buff_t *> elixir_of_determination;
     propagate_const<buff_t *> elusive_brawler;
@@ -702,6 +706,10 @@ public:
     bool xuens_battlegear = false;
     bool keefers_skyreach = false;
     bool stormstouts_last_keg = false;
+    bool charred_passions = false;   // 7076
+    bool jade_ignition = false;      // 7071
+    bool shaohaos_might = false;     // 7079
+    bool last_emperors_capacitor = false;  // 7069
     // These three ride a covenant ability, so they only do anything when the
     // matching covenant is chosen as well.
     bool bountiful_brew = false;

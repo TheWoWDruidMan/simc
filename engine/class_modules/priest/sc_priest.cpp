@@ -382,6 +382,9 @@ public:
         priest().trigger_inescapable_torment( s->target );
       }
 
+      // BracketSim legacy compatibility: Shadowflame Prism (6982).
+      priest().trigger_legacy_shadowflame_prism( s->target );
+
       if ( priest().talents.shadow.mind_devourer.enabled() &&
            rng().roll( priest().talents.shadow.mind_devourer->effectN( 1 ).percent() ) )
       {
@@ -1761,6 +1764,10 @@ public:
       child_painbreaker_psalm->set_target( s->target );
       child_painbreaker_psalm->execute();
     }
+
+    // BracketSim legacy compatibility: Shadowflame Prism (6982), once per Shadow Word: Death cast.
+    if ( cast_state( s )->chain_number == 0 )
+      priest().trigger_legacy_shadowflame_prism( s->target );
 
     if ( priest().talents.shared.inescapable_torment.enabled() )
     {
@@ -3813,6 +3820,8 @@ void priest_t::init_spells()
   shadowlands_legacy.pallid_command             = legacy_unity( 7729, "necrolord" );
   shadowlands_legacy.talbadars_stratagem        = legacy( 7162 );
   shadowlands_legacy.the_penitent_one           = legacy( 6976 );
+  shadowlands_legacy.shadowflame_prism          = legacy( 6982 );
+  shadowlands_legacy.divine_image               = legacy( 6973 );
   // Read unconditionally: the flag above is what gates the behaviour, and a
   // spell pointer that is only valid on some characters is a trap.
   shadowlands_legacy.the_penitent_one_spell     = find_spell( 336011 );

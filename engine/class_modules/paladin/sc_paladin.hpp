@@ -195,6 +195,8 @@ public:
     // BracketSim legacy compatibility: Virtuous Command (conduit 182), the
     // 5 second window Judgment opens.
     buff_t* legacy_virtuous_command;
+    // BracketSim legacy compatibility: Bulwark of Righteous Fury (7062).
+    buff_t* legacy_bulwark_of_righteous_fury;
     buff_t* legacy_blessing_of_summer;
     buff_t* legacy_blessing_of_autumn;
     buff_t* legacy_equinox;
@@ -895,6 +897,7 @@ public:
   {
     bool legacy_shadowlands_enabled = true;
     bool holy_avengers_engraved_sigil = false;
+    bool bulwark_of_righteous_fury = false;
     // These two ride a covenant ability, so they only do anything when the
     // matching covenant is chosen as well.
     bool duty_bound_gavel = false;

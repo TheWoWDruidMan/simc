@@ -215,6 +215,11 @@ struct avengers_shield_base_t : public paladin_spell_t
   void impact( action_state_t* s ) override
   {
     paladin_spell_t::impact( s );
+
+    // BracketSim legacy compatibility: Bulwark of Righteous Fury (7062), a stack per target hit.
+    if ( p()->shadowlands_legacy.bulwark_of_righteous_fury && result_is_hit( s->result ) )
+      p()->buffs.legacy_bulwark_of_righteous_fury->trigger();
+
     if ( p()->talents.tyrs_enforcer->ok() )
     {
       tyrs_enforcer->execute_on_target( s->target );
@@ -1027,6 +1032,10 @@ action_t* paladin_t::create_action_protection( util::string_view name, util::str
 void paladin_t::create_buffs_protection()
 {
   // Legacy Azerite
+  buffs.legacy_bulwark_of_righteous_fury =
+      make_buff( this, "legacy_bulwark_of_righteous_fury", find_spell( 337848 ) )
+          ->set_default_value( find_spell( 337848 )->effectN( 1 ).percent() > 0 ? find_spell( 337848 )->effectN( 1 ).percent() : 0.30 )
+          ->set_chance( shadowlands_legacy.bulwark_of_righteous_fury ? 1.0 : 0.0 );
   buffs.legacy_inner_light = make_buff( this, "inner_light", find_spell( 275481 ) )
                                  ->set_default_value( legacy_azerite.inner_light.value( 1 ) )
                                  ->add_invalidate( CACHE_BONUS_ARMOR );

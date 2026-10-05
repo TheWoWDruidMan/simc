@@ -695,6 +695,9 @@ struct druid_t final : public parse_player_effects_t
     // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
     action_t* legacy_streaking_stars;
     action_t* legacy_lunar_shrapnel;
+    // BracketSim legacy compatibility: Lycara's Fleeting Glimpse (7110).
+    action_t* legacy_lycaras_cat = nullptr;
+    action_t* legacy_lycaras_moonkin = nullptr;
   } active;
 
   // Pets
@@ -995,6 +998,7 @@ struct druid_t final : public parse_player_effects_t
     bool legacy_of_the_sleeper = false;
     bool luffa_infused_embrace = false;
     bool lycaras_fleeting_glimpse = false;
+    bool cat_eye_curio = false;
     bool oath_of_the_elder_druid = false;
     bool oneths_clear_vision = false;
     bool primordial_arcanic_pulsar = false;
@@ -2975,6 +2979,9 @@ struct cat_attack_t : public druid_attack_t<melee_attack_t>
 
         parse_effects( p->buff.clearcasting_cat, CONSUME_BUFF, PARSE_CALLBACK_POST_SNAPSHOT, [ this, p = p ]( auto ) {
           clearcasting_gain->add( RESOURCE_ENERGY, base_cost() * ( 1.0 + p->buff.incarnation_cat->check_value() ) );
+          // BracketSim legacy compatibility: Cat-Eye Curio (7089) refunds 30% of the Clearcast ability's Energy cost.
+          if ( p->shadowlands_legacy.cat_eye_curio )
+            p->resource_gain( RESOURCE_ENERGY, base_cost() * p->find_spell( 339144 )->effectN( 1 ).percent(), clearcasting_gain );
         } );
       }
 
@@ -11258,6 +11265,7 @@ void druid_t::init_spells()
   shadowlands_legacy.luffa_infused_embrace    = legacy( 7092 );
   shadowlands_legacy.lycaras_fleeting_glimpse = legacy( 7110 );
   shadowlands_legacy.oath_of_the_elder_druid  = legacy( 7084 );
+  shadowlands_legacy.cat_eye_curio            = legacy( 7089 );
   shadowlands_legacy.oneths_clear_vision      = legacy( 7087 );
   shadowlands_legacy.primordial_arcanic_pulsar = legacy( 7088 );
   shadowlands_legacy.the_natural_orders_will  = legacy( 7093 );
@@ -11871,6 +11879,11 @@ void druid_t::init_base_stats()
   }
 
   player_t::init_base_stats();
+
+  // BracketSim legacy compatibility: Cat-Eye Curio (7089), +60 maximum Energy.
+  if ( shadowlands_legacy.cat_eye_curio )
+    resources.base[ RESOURCE_ENERGY ] += find_spell( 339144 )->effectN( 2 ).base_value() > 0
+                                           ? find_spell( 339144 )->effectN( 2 ).base_value() : 60.0;
 
   // only intially activate required resources. others will be dynamically activated depending on apl
   resources.active_resource[ RESOURCE_ASTRAL_POWER ] = specialization() == DRUID_BALANCE;
@@ -13289,6 +13302,23 @@ void druid_t::create_actions()
 
   player_t::create_actions();
 
+  // BracketSim legacy compatibility: Lycara's Fleeting Glimpse (7110) - free, like Convoke's casts.
+  if ( shadowlands_legacy.lycaras_fleeting_glimpse )
+  {
+    // Cat Form's Primal Wrath is not built yet: a Primal Wrath made outside the talent crashes the engine during
+    // initialisation (5 Oct 2026, not yet traced). Balance's Starfall half works.
+    if ( specialization() == DRUID_BALANCE )
+    {
+      auto a = get_secondary_action<starfall_t>( "starfall_lycaras", find_spell( 191034 ), flag_e::CONVOKE );
+      a->name_str_reporting = "starfall";
+      a->background = true;
+      a->proc = true;
+      a->gain = get_gain( "lycaras_fleeting_glimpse" );
+      active.legacy_lycaras_moonkin = a;
+    }
+  }
+
+
   // stat parent/child hookups
   auto find_parent = [ this ]( action_t* action, std::string_view n ) {
     if ( action && !action->stats->parent )
@@ -14523,6 +14553,21 @@ void druid_t::combat_begin()
 
   buff.blooming_infusion_damage_counter->expire();
   buff.blooming_infusion_heal_counter->expire();
+
+  // BracketSim legacy compatibility: Lycara's Fleeting Glimpse (7110), every 45 sec in combat.
+  if ( active.legacy_lycaras_cat || active.legacy_lycaras_moonkin )
+  {
+    timespan_t period = timespan_t::from_seconds( find_spell( 340059 )->effectN( 1 ).base_value() > 0
+                                                      ? find_spell( 340059 )->effectN( 1 ).base_value() : 45.0 );
+    make_repeating_event( *sim, period, [ this ] {
+      if ( !target || target->is_sleeping() )
+        return;
+      if ( buff.cat_form->check() && active.legacy_lycaras_cat )
+        active.legacy_lycaras_cat->execute_on_target( target );
+      else if ( buff.moonkin_form->check() && active.legacy_lycaras_moonkin )
+        active.legacy_lycaras_moonkin->execute_on_target( target );
+    } );
+  }
 }
 
 // druid_t::recalculate_resource_max ========================================

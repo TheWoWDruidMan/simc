@@ -131,6 +131,8 @@ struct warrior_td_t : public actor_target_data_t
   buff_t* debuffs_colossus_smash;
   // BracketSim legacy compatibility: Exploiter (Shadowlands runeforge).
   buff_t* debuffs_legacy_exploiter;
+  // BracketSim legacy compatibility: Deathmaker (6964) applies Siegebreaker's debuff, which Midnight no longer has.
+  buff_t* debuffs_legacy_siegebreaker;
   buff_t* debuffs_fatal_mark;
   buff_t* debuffs_demoralizing_shout;
   buff_t* debuffs_honed_reflexes;
@@ -405,6 +407,7 @@ public:
     bool sinful_surge = false;
     bool natures_fury = false;
     bool unhinged = false;
+    bool deathmaker = false;
     bool will_of_the_berserker = false;
     // Glory banks the rage spent while the banner is up.
     double glory_rage = 0.0;
@@ -6550,6 +6553,15 @@ struct rampage_parent_t : public warrior_attack_t
       p()->resource_gain(RESOURCE_RAGE, last_resource_cost * rage_from_frothing_berserker, p()->gain.frothing_berserker);
     }
 
+
+    // BracketSim legacy compatibility: Deathmaker (6964), 30% per Rampage (effect 1: 6000 ms).
+    if ( p()->shadowlands_legacy.deathmaker && result_is_hit( execute_state->result ) &&
+         rng().roll( p()->find_spell( 335567 )->proc_chance() > 0 ? p()->find_spell( 335567 )->proc_chance() : 0.30 ) )
+    {
+      timespan_t d = timespan_t::from_millis( p()->find_spell( 335567 )->effectN( 1 ).base_value() );
+      td( execute_state->target )->debuffs_legacy_siegebreaker->trigger( d > 0_ms ? d : 6_s );
+    }
+
     p()->enrage();
 
     // BracketSim legacy compatibility: the conduit Hack and Slash (52) resets
@@ -8451,6 +8463,7 @@ void warrior_t::init_spells()
   shadowlands_legacy.sinful_surge              = legacy_unity( 7470, "venthyr" );
   shadowlands_legacy.natures_fury              = legacy_unity( 7471, "night_fae" );
   shadowlands_legacy.unhinged                  = legacy( 6970 );
+  shadowlands_legacy.deathmaker                = legacy( 6964 );
   shadowlands_legacy.will_of_the_berserker     = legacy( 6966 );
 
   // BracketSim legacy compatibility: Shadowlands covenant abilities.
@@ -9396,6 +9409,13 @@ warrior_td_t::warrior_td_t( player_t& target, warrior_t& p ) : actor_target_data
   debuffs_legacy_exploiter = make_buff( *this, "legacy_exploiter", p.find_spell( 335452 ) )
                                  ->set_default_value( p.find_spell( 335451 )->effectN( 1 ).percent() )
                                  ->set_chance( p.shadowlands_legacy.exploiter ? 1.0 : 0.0 );
+
+  // Siegebreaker 280773 (Wowhead): taking 15% increased damage from the warrior. Deathmaker gives it for 6 sec.
+  debuffs_legacy_siegebreaker = make_buff( *this, "legacy_siegebreaker" )
+                                    ->set_default_value( 0.15 )
+                                    ->set_duration( 6_s )
+                                    ->set_refresh_behavior( buff_refresh_behavior::EXTEND )
+                                    ->set_chance( p.shadowlands_legacy.deathmaker ? 1.0 : 0.0 );
 
   debuffs_fatal_mark = make_buff( *this, "fatal_mark", p.spell.fatal_mark_debuff );
 
@@ -10673,6 +10693,14 @@ void warrior_t::trigger_legacy_signet( signet_ability first, signet_ability seco
 double warrior_t::composite_player_target_multiplier( player_t* target, school_e school ) const
 {
   double m = parse_player_effects_t::composite_player_target_multiplier( target, school );
+
+  // BracketSim legacy compatibility: Deathmaker's Siegebreaker effect - all of the warrior's damage to that target.
+  if ( shadowlands_legacy.deathmaker )
+  {
+    auto td = find_target_data( target );
+    if ( td && td->debuffs_legacy_siegebreaker->check() )
+      m *= 1.0 + td->debuffs_legacy_siegebreaker->check_value();
+  }
 
   // BracketSim legacy (27 Sep 2026): Exploiter no longer lives here - it made EVERY attack +50% for 30 s after each
   // Execute (60 Arms: the legendary read +46%). It is Mortal Strike's alone; see mortal_strike_t.

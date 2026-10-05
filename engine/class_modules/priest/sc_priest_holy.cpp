@@ -56,7 +56,7 @@ struct holy_word_sanctify_t final : public priest_heal_t
       priest().buffs.apotheosis->extend_duration( priest().talents.holy.eternal_sanctity->effectN( 1 ).time_value() );
     }
 
-    if ( priest().talents.holy.divine_image.enabled() )
+    if ( priest().talents.holy.divine_image.enabled() || priest().legacy_divine_image_roll() )
     {
       priest().buffs.divine_image->trigger();
       priest().procs.divine_image->occur();
@@ -93,7 +93,7 @@ struct holy_word_serenity_t final : public priest_heal_t
       priest().buffs.apotheosis->extend_duration( priest().talents.holy.eternal_sanctity->effectN( 1 ).time_value() );
     }
 
-    if ( priest().talents.holy.divine_image.enabled() )
+    if ( priest().talents.holy.divine_image.enabled() || priest().legacy_divine_image_roll() )
     {
       priest().buffs.divine_image->trigger();
       priest().procs.divine_image->occur();
@@ -416,7 +416,7 @@ struct holy_word_chastise_t final : public priest_spell_t
       priest().buffs.apotheosis->extend_duration( priest().talents.holy.eternal_sanctity->effectN( 1 ).time_value() );
     }
 
-    if ( priest().talents.holy.divine_image.enabled() )
+    if ( priest().talents.holy.divine_image.enabled() || priest().legacy_divine_image_roll() )
     {
       priest().buffs.divine_image->trigger();
       priest().procs.divine_image->occur();
@@ -646,7 +646,7 @@ action_t* priest_t::create_action_holy( util::string_view name, util::string_vie
 
 void priest_t::init_background_actions_holy()
 {
-  if ( talents.holy.divine_image.enabled() )
+  if ( talents.holy.divine_image.enabled() || shadowlands_legacy.divine_image )
   {
     background_actions.searing_light  = new actions::spells::searing_light_di_t( *this );
     background_actions.light_eruption = new actions::spells::light_eruption_t( *this );

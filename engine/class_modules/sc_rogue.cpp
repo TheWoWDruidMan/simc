@@ -176,6 +176,7 @@ public:
     buff_t* numbing_poison;
     buff_t* wound_poison;
     buff_t* banshees_blight; // BracketSim legacy: Edge of Night
+    buff_t* legacy_well_placed_steel; // BracketSim legacy: conduit 238
   } debuffs;
 
   rogue_td_t( player_t* target, rogue_t* source );
@@ -309,6 +310,8 @@ public:
     actions::rogue_attack_t* legacy_double_dose = nullptr;
     actions::rogue_attack_t* legacy_replicating_shadows = nullptr;
     actions::rogue_attack_t* legacy_nothing_personal = nullptr;
+    // BracketSim legacy compatibility: Akaari's Soul Fragment (runeforge 7124).
+    actions::rogue_attack_t* legacy_akaaris_shadowstrike = nullptr;
 
     residual_action::residual_periodic_action_t<spell_t>* doomblade = nullptr;
 
@@ -497,6 +500,8 @@ public:
     buff_t* legacy_dashing_scoundrel;
     // BracketSim legacy compatibility: Deeper Daggers (conduit 245).
     damage_buff_t* legacy_deeper_daggers;
+    // BracketSim legacy compatibility: Perforated Veins (conduit 248).
+    buff_t* legacy_perforated_veins;
   } buffs;
 
   // Cooldowns
@@ -4099,12 +4104,17 @@ struct backstab_t : public rogue_attack_t
       m *= 1.0 + data().effectN( 4 ).percent();
     }
 
+    // BracketSim legacy compatibility: Perforated Veins (conduit 248).
+    m *= 1.0 + p()->buffs.legacy_perforated_veins->check_stack_value();
+
     return m;
   }
 
   void execute() override
   {
     rogue_attack_t::execute();
+    if ( !is_secondary_action() )
+      p()->buffs.legacy_perforated_veins->expire();
 
     // Legacy Azerite: Perforate rewards hitting from behind.
     if ( p()->azerite.perforate.ok() && p()->position() == POSITION_BACK )
@@ -5156,6 +5166,19 @@ struct gloomblade_t : public rogue_attack_t
     }
   }
 
+  // BracketSim legacy compatibility: Perforated Veins (conduit 248).
+  double composite_da_multiplier( const action_state_t* state ) const override
+  {
+    return rogue_attack_t::composite_da_multiplier( state ) * ( 1.0 + p()->buffs.legacy_perforated_veins->check_stack_value() );
+  }
+
+  void execute() override
+  {
+    rogue_attack_t::execute();
+    if ( !is_secondary_action() )
+      p()->buffs.legacy_perforated_veins->expire();
+  }
+
   void impact( action_state_t* state ) override
   {
     rogue_attack_t::impact( state );
@@ -5967,6 +5990,42 @@ struct legacy_nothing_personal_t : public rogue_attack_t
   }
 };
 
+// BracketSim legacy compatibility: Akaari's Soul Fragment ==================
+// "After using Shadowstrike or Cheap Shot, your target suffers a Shadowstrike from the shadows 2 sec later, at 25%
+// effectiveness." Shadowlands SimC drove it from the 2 s debuff 341111's tick; one delayed echo per cast is the text.
+struct legacy_akaaris_shadowstrike_t : public rogue_attack_t
+{
+  legacy_akaaris_shadowstrike_t( util::string_view name, rogue_t* p ) :
+    rogue_attack_t( name, p, p->find_spell( 345121 ) )
+  {
+    background = true;
+    double pct = p->find_spell( 340090 )->effectN( 2 ).percent();
+    base_multiplier *= pct > 0 ? pct : 0.25;
+  }
+
+  void impact( action_state_t* state ) override
+  {
+    rogue_attack_t::impact( state );
+    // 9.2: the echo builds Perforated Veins like any Shadowstrike.
+    if ( p()->legacy_conduits.has( 248 ) && result_is_hit( state->result ) )
+      p()->buffs.legacy_perforated_veins->trigger();
+  }
+};
+
+static void legacy_trigger_akaari( rogue_t* p, const action_state_t* state )
+{
+  if ( !p->active.legacy_akaaris_shadowstrike || !state->action->result_is_hit( state->result ) )
+    return;
+  player_t* target = state->target;
+  timespan_t delay = p->find_spell( 341111 )->duration();
+  if ( delay <= 0_ms )
+    delay = 2_s;
+  make_event( *p->sim, delay, [ p, target ] {
+    if ( !target->is_sleeping() )
+      p->active.legacy_akaaris_shadowstrike->execute_on_target( target );
+  } );
+}
+
 // Legacy Azerite: Double Dose ==============================================
 
 struct legacy_double_dose_t : public rogue_attack_t
@@ -6338,6 +6397,14 @@ struct shadowstrike_t : public rogue_attack_t
     trigger_weaponmaster( state, p()->active.shadow_clone_attack.weaponmaster.shadowstrike );
     trigger_find_weakness( state );
     trigger_deathstalkers_mark_debuff( state );
+
+    // BracketSim legacy compatibility: Perforated Veins (conduit 248), Akaari's Soul Fragment (7124).
+    if ( !is_secondary_action() )
+    {
+      if ( p()->legacy_conduits.has( 248 ) && result_is_hit( state->result ) )
+        p()->buffs.legacy_perforated_veins->trigger();
+      legacy_trigger_akaari( p(), state );
+    }
   }
 
   void init() override
@@ -6885,6 +6952,14 @@ struct shiv_t : public rogue_attack_t
 
   bool procs_blade_flurry() const override
   { return true; }
+
+  // BracketSim legacy compatibility: Well-Placed Steel (conduit 238).
+  void impact( action_state_t* state ) override
+  {
+    rogue_attack_t::impact( state );
+    if ( p()->legacy_conduits.has( 238 ) && result_is_hit( state->result ) )
+      td( state->target )->debuffs.legacy_well_placed_steel->trigger();
+  }
 };
 
 // Vanish ===================================================================
@@ -7346,6 +7421,7 @@ struct cheap_shot_t : public rogue_attack_t
   {
     rogue_attack_t::impact( state );
     trigger_find_weakness( state );
+    legacy_trigger_akaari( p(), state ); // BracketSim legacy: Akaari's Soul Fragment (7124)
 
     if ( p()->talent.subtlety.umbral_edge->ok() )
     {
@@ -10441,6 +10517,10 @@ rogue_td_t::rogue_td_t( player_t* target, rogue_t* source ) :
   debuffs.numbing_poison        = new buffs::numbing_poison_t( *this );
 
   debuffs.amplifying_poison = make_buff( *this, "amplifying_poison", source->spec.amplifying_poison_debuff );
+  debuffs.legacy_well_placed_steel = make_buff( *this, "legacy_well_placed_steel" )
+                                         ->set_duration( 8_s )
+                                         ->set_default_value( source->legacy_conduits.percent( 238 ) )
+                                         ->set_chance( source->legacy_conduits.has( 238 ) ? 1.0 : 0.0 );
   debuffs.banshees_blight = source->legacy_banshees_blight.strike
     ? make_buff( *this, "banshees_blight", source->find_spell( 358090 ) )
     : make_buff( *this, "banshees_blight" )->set_quiet( true );
@@ -10670,6 +10750,13 @@ double rogue_t::composite_player_pet_damage_multiplier( const action_state_t* s,
 double rogue_t::composite_player_target_multiplier( player_t* target, school_e school ) const
 {
   double m = player_t::composite_player_target_multiplier( target, school );
+
+  // BracketSim legacy compatibility: Well-Placed Steel (conduit 238) - Nature damage against Shiv's target.
+  if ( legacy_conduits.has( 238 ) && dbc::is_school( school, SCHOOL_NATURE ) )
+  {
+    if ( auto tdata = find_target_data( target ); tdata && tdata->debuffs.legacy_well_placed_steel->check() )
+      m *= 1.0 + tdata->debuffs.legacy_well_placed_steel->check_value();
+  }
 
   return m;
 }
@@ -12013,6 +12100,10 @@ void rogue_t::init_spells()
     active.legacy_double_dose = get_background_action<actions::legacy_double_dose_t>( "legacy_double_dose" );
   }
 
+  if ( legendary.akaaris_soul_fragment )
+    active.legacy_akaaris_shadowstrike =
+      get_background_action<actions::legacy_akaaris_shadowstrike_t>( "legacy_akaaris_soul_fragment" );
+
   if ( azerite.nothing_personal.ok() )
   {
     active.legacy_nothing_personal =
@@ -12479,6 +12570,13 @@ void rogue_t::create_buffs()
           ->set_default_value( find_spell( 340081 )->effectN( 1 ).percent() )
           ->set_duration( find_spell( 32645 )->duration() )
           ->set_chance( legendary.dashing_scoundrel ? 1.0 : 0.0 );
+
+  // Perforated Veins (conduit 248): Wowhead 341572 - 12 sec, 6 stacks, the conduit's value per stack.
+  buffs.legacy_perforated_veins = make_buff( this, "legacy_perforated_veins" )
+                                      ->set_max_stack( 6 )
+                                      ->set_duration( 12_s )
+                                      ->set_default_value( legacy_conduits.percent( 248 ) )
+                                      ->set_chance( legacy_conduits.has( 248 ) ? 1.0 : 0.0 );
 
   // Assassination ==========================================================
 

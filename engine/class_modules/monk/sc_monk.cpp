@@ -421,6 +421,10 @@ void monk_action_t<Base>::consume_resource()
     if ( p()->talent.windwalker.dance_of_chiji->ok() )
       p()->buff.dance_of_chiji->trigger();
 
+    // BracketSim legacy compatibility: Last Emperor's Capacitor (7069), a stack per Chi spender.
+    if ( p()->shadowlands_legacy.last_emperors_capacitor && base_t::last_resource_cost > 0 )
+      p()->buff.legacy_the_emperors_capacitor->trigger();
+
     // Legacy Azerite: Dance of Chi-Ji procs off spending Chi, Windwalker only.
     if ( p()->specialization() == MONK_WINDWALKER && p()->legacy_azerite.dance_of_chiji.ok() )
       p()->buff.legacy_dance_of_chiji->trigger();
@@ -981,8 +985,22 @@ struct tiger_palm_t : public harmonic_surge_t<overwhelming_force_t<monk_melee_at
     return base_t::ready();
   }
 
+  // BracketSim legacy compatibility: Shaohao's Might (7079, 337570) - 40%: 300% damage, 2 sec more off the Brews.
+  bool legacy_shaohao = false;
+
+  double action_multiplier() const override
+  {
+    double m = base_t::action_multiplier();
+    if ( legacy_shaohao )
+      m *= p()->find_spell( 337570 )->effectN( 2 ).percent() > 0 ? p()->find_spell( 337570 )->effectN( 2 ).percent() : 3.0;
+    return m;
+  }
+
   void execute() override
   {
+    legacy_shaohao = p()->shadowlands_legacy.shaohaos_might &&
+                     rng().roll( p()->find_spell( 337570 )->effectN( 1 ).percent() > 0 ? p()->find_spell( 337570 )->effectN( 1 ).percent() : 0.40 );
+
     if ( p()->buff.blackout_combo->up() )
       p()->proc.blackout_combo_tiger_palm->occur();
 
@@ -1004,6 +1022,10 @@ struct tiger_palm_t : public harmonic_surge_t<overwhelming_force_t<monk_melee_at
         timespan_t::from_seconds( p()->baseline.monk.tiger_palm->effectN( 3 ).base_value() ) );
 
     p()->baseline.brewmaster.brews.adjust( p()->talent.brewmaster.face_palm->effectN( 3 ).time_value() );
+
+    if ( legacy_shaohao )
+      p()->baseline.brewmaster.brews.adjust( timespan_t::from_millis( p()->find_spell( 337570 )->effectN( 3 ).base_value() ) );
+    legacy_shaohao = false;
 
     if ( p()->buff.combat_wisdom->up() )
     {
@@ -1379,6 +1401,11 @@ struct charred_passions_t : base_action_t
     {
       background = dual = proc = true;
       base_multiplier          = player->talent.brewmaster.charred_passions->effectN( 1 ).percent();
+      // BracketSim legacy compatibility: the runeforge (338138) deals 100% as Fire - the stronger value wins when
+      // the talent is taken as well (they are the same effect, so they do not add).
+      if ( player->shadowlands_legacy.charred_passions )
+        base_multiplier = std::max( base_multiplier, player->find_spell( 338138 )->effectN( 1 ).percent() > 0
+                                                         ? player->find_spell( 338138 )->effectN( 1 ).percent() : 1.0 );
     }
 
     void init() override
@@ -1394,7 +1421,7 @@ struct charred_passions_t : base_action_t
   template <typename... Args>
   charred_passions_t( monk_t *player, Args &&...args ) : base_action_t( player, std::forward<Args>( args )... )
   {
-    if ( !player->talent.brewmaster.charred_passions->ok() )
+    if ( !player->talent.brewmaster.charred_passions->ok() && !player->shadowlands_legacy.charred_passions )
       return;
 
     chp_cooldown = player->get_cooldown( "charred_passions" );
@@ -1755,11 +1782,24 @@ struct spinning_crane_kick_t : public monk_melee_attack_t
 
   struct jade_ignition_t : monk_spell_t
   {
+    bool legacy;
     jade_ignition_t( monk_t *player )
-      : monk_spell_t( player, "chi_explosion", player->talent.windwalker.jade_ignition->effectN( 1 ).trigger() )
+      : monk_spell_t( player, "chi_explosion",
+                      player->talent.windwalker.jade_ignition->ok() ? player->talent.windwalker.jade_ignition->effectN( 1 ).trigger()
+                                                                   : player->find_spell( 337342 ) ),
+        legacy( !player->talent.windwalker.jade_ignition->ok() )
     {
       dual = background = true;
       aoe               = -1;
+    }
+
+    // BracketSim legacy compatibility: Jade Ignition (7071) - +5% per Chi Energy stack (337571).
+    double action_multiplier() const override
+    {
+      double m = monk_spell_t::action_multiplier();
+      if ( legacy )
+        m *= 1.0 + p()->buff.legacy_chi_energy->check_stack_value();
+      return m;
     }
   };
 
@@ -1820,7 +1860,7 @@ struct spinning_crane_kick_t : public monk_melee_attack_t
       dot_behavior = DOT_CLIP;
     }
 
-    if ( player->talent.windwalker.jade_ignition->ok() )
+    if ( player->talent.windwalker.jade_ignition->ok() || player->shadowlands_legacy.jade_ignition )
     {
       jade_ignition = new jade_ignition_t( player );
       add_child( jade_ignition );
@@ -1875,7 +1915,16 @@ struct spinning_crane_kick_t : public monk_melee_attack_t
     }
 
     if ( jade_ignition )
-      jade_ignition->execute();
+    {
+      // BracketSim legacy compatibility: the runeforge's Chi Explosion needs stored Chi Energy, and spends it.
+      if ( p()->talent.windwalker.jade_ignition->ok() )
+        jade_ignition->execute();
+      else if ( p()->buff.legacy_chi_energy->check() )
+      {
+        jade_ignition->execute();
+        p()->buff.legacy_chi_energy->expire();
+      }
+    }
   }
 
   // Legacy Azerite: Dance of Chi-Ji also cheapens the kick. Effect 3 is stored
@@ -1982,6 +2031,10 @@ struct fists_of_fury_t : monk_melee_attack_t
       monk_melee_attack_t::impact( state );
 
       p()->buff.momentum_boost_damage->trigger();
+
+      // BracketSim legacy compatibility: Jade Ignition (7071), a Chi Energy stack per Fists of Fury hit.
+      if ( p()->shadowlands_legacy.jade_ignition && result_is_hit( state->result ) )
+        p()->buff.legacy_chi_energy->trigger();
     }
   };
 
@@ -3481,6 +3534,23 @@ struct crackling_jade_lightning_t : public monk_spell_t
                                [ & ]( action_state_t * ) { p()->buff.balanced_stratagem_magic->consume( this ); } );
   }
 
+  // BracketSim legacy compatibility: Last Emperor's Capacitor (7069).
+  double action_multiplier() const override
+  {
+    double m = monk_spell_t::action_multiplier();
+    m *= 1.0 + p()->buff.legacy_the_emperors_capacitor->check_stack_value();
+    return m;
+  }
+
+  double cost() const override
+  {
+    double c = monk_spell_t::cost();
+    if ( p()->buff.legacy_the_emperors_capacitor->check() )
+      c *= std::max( 0.0, 1.0 + p()->buff.legacy_the_emperors_capacitor->check() *
+                                    p()->find_spell( 337291 )->effectN( 2 ).percent() );
+    return c;
+  }
+
   void execute() override
   {
     monk_spell_t::execute();
@@ -3498,6 +3568,9 @@ struct crackling_jade_lightning_t : public monk_spell_t
   void last_tick( dot_t *dot ) override
   {
     monk_spell_t::last_tick( dot );
+
+    // BracketSim legacy compatibility: Last Emperor's Capacitor is spent when the channel ends.
+    p()->buff.legacy_the_emperors_capacitor->expire();
 
     // delay expiration so it occurs after final tick of cjl aoe
     if ( aoe_dot )
@@ -6232,6 +6305,10 @@ void monk_t::init_spells()
   shadowlands_legacy.xuens_battlegear  = legacy( 7070 );
   shadowlands_legacy.keefers_skyreach  = legacy( 7068 );
   shadowlands_legacy.stormstouts_last_keg = legacy( 7077 );
+  shadowlands_legacy.charred_passions     = legacy( 7076 );
+  shadowlands_legacy.jade_ignition        = legacy( 7071 );
+  shadowlands_legacy.shaohaos_might       = legacy( 7079 );
+  shadowlands_legacy.last_emperors_capacitor = legacy( 7069 );
 
   // BracketSim legacy compatibility: Unity (bonus 8124), the 9.2 legendary
   // whose effect is whichever covenant legendary matches the covenant you are
@@ -7142,6 +7219,14 @@ void monk_t::create_buffs()
                                      action.legacy_fit_to_burst->execute();
                                  } );
   // Legacy Azerite: Sunrise Technique arms the extra hit after a Rising Sun Kick.
+  buff.legacy_the_emperors_capacitor = make_buff( this, "legacy_the_emperors_capacitor", find_spell( 337291 ) )
+                                          ->set_default_value( find_spell( 337291 )->effectN( 1 ).percent() > 0
+                                                                   ? find_spell( 337291 )->effectN( 1 ).percent() : 1.0 )
+                                          ->set_chance( shadowlands_legacy.last_emperors_capacitor ? 1.0 : 0.0 );
+  buff.legacy_chi_energy = make_buff( this, "legacy_chi_energy", find_spell( 337571 ) )
+                              ->set_default_value( find_spell( 337571 )->effectN( 1 ).percent() > 0
+                                                       ? find_spell( 337571 )->effectN( 1 ).percent() : 0.05 )
+                              ->set_chance( shadowlands_legacy.jade_ignition ? 1.0 : 0.0 );
   buff.legacy_sunrise_technique = make_buff( this, "legacy_sunrise_technique", find_spell( 273298 ) )
                                       ->set_chance( legacy_azerite.sunrise_technique.ok() ? 1.0 : 0.0 );
   // Legacy Azerite: Training of Niuzao grants Mastery scaled by the Stagger band.
@@ -7179,9 +7264,12 @@ void monk_t::create_buffs()
   buff.celestial_flames = make_buff_fallback( talent.brewmaster.celestial_flames->ok(), this, "celestial_flames",
                                               talent.brewmaster.celestial_flames->effectN( 1 ).trigger() );
 
-  buff.charred_passions = make_buff_fallback( talent.brewmaster.charred_passions->ok(), this, "charred_passions",
-                                              talent.brewmaster.charred_passions->effectN( 1 ).trigger() )
-                              ->set_trigger_spell( talent.brewmaster.charred_passions );
+  if ( !talent.brewmaster.charred_passions->ok() && shadowlands_legacy.charred_passions )
+    buff.charred_passions = make_buff( this, "charred_passions", find_spell( 338140 ) );  // BracketSim legacy: 7076
+  else
+    buff.charred_passions = make_buff_fallback( talent.brewmaster.charred_passions->ok(), this, "charred_passions",
+                                                talent.brewmaster.charred_passions->effectN( 1 ).trigger() )
+                                ->set_trigger_spell( talent.brewmaster.charred_passions );
 
   buff.counterstrike = make_buff_fallback( talent.brewmaster.counterstrike->ok(), this, "counterstrike",
                                            talent.brewmaster.counterstrike->effectN( 1 ).trigger() )

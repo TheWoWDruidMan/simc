@@ -365,6 +365,7 @@ namespace fiend
 namespace actions
 {
 struct inescapable_torment_t;
+struct legacy_shadowflame_prism_t;
 }  // namespace actions
 
 /**
@@ -373,6 +374,7 @@ struct inescapable_torment_t;
 struct base_fiend_pet_t : public priest_pet_t
 {
   propagate_const<actions::inescapable_torment_t*> inescapable_torment;
+  actions::legacy_shadowflame_prism_t* legacy_shadowflame_prism = nullptr;
 
   struct gains_t
   {
@@ -872,6 +874,43 @@ struct inescapable_torment_t final : public priest_pet_spell_t
     merge_pet_stats_to_owner_action( p().o(), p(), *this, "Mindbender" );
   }
 };
+// ==========================================================================
+// BracketSim legacy compatibility: Shadowflame Prism (6982) and its Shadowflame Rift (344748)
+// ==========================================================================
+struct legacy_shadowflame_rift_t final : public priest_pet_spell_t
+{
+  legacy_shadowflame_rift_t( base_fiend_pet_t& p )
+    : priest_pet_spell_t( "legacy_shadowflame_rift", p, p.o().find_spell( 344748 ) )
+  {
+    background                 = true;
+    affected_by_shadow_weaving = true;
+    // Hard-coded in the legendary's text: 0.442 of the coefficient on a Mindbender, 0.408 on a Shadowfiend.
+    spell_power_mod.direct *= p.fiend_type == base_fiend_pet_t::fiend_type::Mindbender ? 0.442 : 0.408;
+  }
+};
+
+struct legacy_shadowflame_prism_t final : public priest_pet_spell_t
+{
+  timespan_t duration;
+
+  legacy_shadowflame_prism_t( base_fiend_pet_t& p )
+    : priest_pet_spell_t( "legacy_shadowflame_prism", p, p.o().find_spell( 336143 ) ),
+      duration( timespan_t::from_seconds( data().effectN( 3 ).base_value() > 0 ? data().effectN( 3 ).base_value() : 1.0 ) )
+  {
+    background    = true;
+    impact_action = new legacy_shadowflame_rift_t( p );
+    add_child( impact_action );
+  }
+
+  void execute() override
+  {
+    priest_pet_spell_t::execute();
+
+    auto& current_pet = p();
+    if ( !current_pet.is_sleeping() && current_pet.expiration )
+      current_pet.expiration->reschedule( current_pet.expiration->remains() + duration );
+  }
+};
 }  // namespace actions
 
 void base_fiend_pet_t::init_action_list()
@@ -897,6 +936,9 @@ void base_fiend_pet_t::init_background_actions()
   priest_pet_t::init_background_actions();
 
   inescapable_torment = new fiend::actions::inescapable_torment_t( *this );
+
+  if ( o().shadowlands_legacy.shadowflame_prism )
+    legacy_shadowflame_prism = new fiend::actions::legacy_shadowflame_prism_t( *this );
 }
 
 action_t* base_fiend_pet_t::create_action( util::string_view name, util::string_view options_str )
@@ -1149,6 +1191,27 @@ namespace priestspace
 // Triggers all active "fiend" style pets to attack, can have all 3 out at once
 // TODO: refactor this
 // ==========================================================================
+// BracketSim legacy compatibility: Shadowflame Prism (6982), every active Shadowfiend or Mindbender.
+void priest_t::trigger_legacy_shadowflame_prism( player_t* target )
+{
+  if ( !shadowlands_legacy.shadowflame_prism )
+    return;
+
+  for ( auto spawner : { &pets.shadowfiend, &pets.mindbender } )
+  {
+    if ( spawner->n_active_pets() == 0 )
+      continue;
+    for ( auto a_pet : *spawner )
+    {
+      auto pet = debug_cast<fiend::base_fiend_pet_t*>( a_pet );
+      if ( pet->is_sleeping() || !pet->legacy_shadowflame_prism )
+        continue;
+      pet->legacy_shadowflame_prism->set_target( target );
+      pet->legacy_shadowflame_prism->execute();
+    }
+  }
+}
+
 void priest_t::trigger_inescapable_torment( player_t* target, bool echo, double mod )
 {
   if ( !talents.shared.inescapable_torment.enabled() )

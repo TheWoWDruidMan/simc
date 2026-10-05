@@ -347,6 +347,10 @@ public:
     // site is new here. The chance and the bolt count are read off 336011.
     bool the_penitent_one = false;
     const spell_data_t* the_penitent_one_spell = spell_data_t::not_found();
+    // Shadowflame Prism (6982): Mind Blast and Shadow Word: Death send the fiend through a rift.
+    bool shadowflame_prism = false;
+    // Divine Image (6973): 25% per Holy Word to summon the Naaru the Midnight talent models.
+    bool divine_image = false;
   } shadowlands_legacy;
 
   // BracketSim legacy compatibility: Shadowlands conduits, as id:rank pairs.
@@ -1173,6 +1177,14 @@ public:
   double generate_insanity( double num_amount, gain_t* g, action_t* action );
   double tick_damage_over_time( timespan_t duration, const dot_t* dot ) const;
   void trigger_inescapable_torment( player_t* target, bool echo = false, double mod = 1.0 );
+  void trigger_legacy_shadowflame_prism( player_t* target );
+  bool legacy_divine_image_roll()
+  {
+    if ( !shadowlands_legacy.divine_image )
+      return false;
+    double chance = find_spell( 336400 )->proc_chance();
+    return rng().roll( chance > 0 ? chance : 0.25 );
+  }
   void idol_of_yshaarj_check_and_expire();
   void trigger_idol_of_cthun( action_state_t* );
   void trigger_atonement( action_state_t*, double );

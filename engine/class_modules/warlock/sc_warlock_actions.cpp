@@ -618,6 +618,11 @@ using namespace helpers;
           m *= 1.0 + p()->talents.deaths_embrace->effectN( 1 ).percent() * ( 1 - t->health_percentage() / deaths_embrace_health );
       }
 
+      // BracketSim legacy compatibility: Odr, Shawl of the Ymirjar (7037).
+      if ( p()->shadowlands_legacy.odr_shawl_of_the_ymirjar && td( t )->debuffs.legacy_odr->check() &&
+           data().affected_by( td( t )->debuffs.legacy_odr->data().effectN( 1 ) ) )
+        m *= 1.0 + td( t )->debuffs.legacy_odr->data().effectN( 1 ).percent();
+
       // BracketSim legacy compatibility: Ashen Remains (conduit 211) raises
       // Incinerate and Chaos Bolt against a target that has Immolate on it.
       if ( affected_by.legacy_ashen_remains && td( t )->dots.immolate->is_ticking() )
@@ -1211,6 +1216,9 @@ using namespace helpers;
 
       if ( time_to_execute == 0_ms && p()->buffs.nightfall->check() )
         m *= 1.0 + p()->talents.nightfall_buff->effectN( 2 ).percent();
+
+      // BracketSim legacy compatibility: Malefic Wrath (7031), 35% per stack from Malefic Grasp.
+      m *= 1.0 + p()->buffs.legacy_malefic_wrath->check_stack_value();
 
       return m;
     }
@@ -2439,6 +2447,15 @@ using namespace helpers;
         affected_by.deaths_embrace = p->talents.deaths_embrace.ok();
       }
 
+      // BracketSim legacy compatibility: Focused Malignancy (conduit 202).
+      double composite_target_multiplier( player_t* t ) const override
+      {
+        double m = warlock_spell_t::composite_target_multiplier( t );
+        if ( p()->legacy_conduits.has( 202 ) && td( t )->dots.unstable_affliction->is_ticking() )
+          m *= 1.0 + p()->legacy_conduits.percent( 202 );
+        return m;
+      }
+
       void impact( action_state_t* s ) override
       {
         warlock_spell_t::impact( s );
@@ -2595,6 +2612,10 @@ using namespace helpers;
 
       warlock_spell_t::execute();
 
+      // BracketSim legacy compatibility: Malefic Wrath (7031) - Malefic Rapture's stack now comes from Malefic Grasp.
+      if ( p()->shadowlands_legacy.malefic_wrath )
+        p()->buffs.legacy_malefic_wrath->trigger();
+
       if ( soul_harvester() && p()->buffs.nightfall->check() )
       {
         if ( p()->hero.wicked_reaping.ok() )
@@ -2645,6 +2666,10 @@ using namespace helpers;
     double composite_target_multiplier( player_t* t ) const override
     {
       double m = warlock_spell_t::composite_target_multiplier( t );
+
+      // BracketSim legacy compatibility: Focused Malignancy (conduit 202) - more against a target with Unstable Affliction.
+      if ( p()->legacy_conduits.has( 202 ) && td( t )->dots.unstable_affliction->is_ticking() )
+        m *= 1.0 + p()->legacy_conduits.percent( 202 );
 
       // NOTE: 2026-08-21 Malefic Grasp is affected by Withering Bolt
       if ( p()->talents.withering_bolt.ok() )
@@ -2794,6 +2819,9 @@ using namespace helpers;
 
       if ( t->health_percentage() < p()->talents.drain_soul_dot->effectN( 3 ).base_value() )
         m *= 1.0 + p()->talents.drain_soul_dot->effectN( 2 ).percent();
+
+      // BracketSim legacy compatibility: Malefic Wrath (7031), 35% per stack from Malefic Grasp.
+      m *= 1.0 + p()->buffs.legacy_malefic_wrath->check_stack_value();
 
       if ( p()->talents.withering_bolt.ok() )
         m *= 1.0 + p()->talents.withering_bolt->effectN( 1 ).percent() * std::min( ( int )( p()->talents.withering_bolt->effectN( 2 ).base_value() ), td( t )->count_affliction_dots() );
@@ -3610,6 +3638,21 @@ using namespace helpers;
       assert( selected_imps <= selected_demons );
       assert( selected_imps <= active_imps );
       assert( selected_demons <= max_selected_demons );
+
+      // BracketSim legacy compatibility: Implosive Potential (7033) - haste per Imp exploded, 5% each when the
+      // explosion reaches 3 or more targets, else 1%.
+      if ( p()->shadowlands_legacy.implosive_potential && selected_imps > 0 )
+      {
+        p()->buffs.legacy_implosive_potential->expire();
+        p()->buffs.legacy_implosive_potential_small->expire();
+        const spell_data_t* ip = p()->find_spell( 337135 );
+        size_t need = ip->effectN( 1 ).base_value() > 0 ? as<size_t>( ip->effectN( 1 ).base_value() ) : 3;
+        int n = as<int>( std::min( selected_imps, 15u ) );
+        if ( target_list().size() >= need )
+          p()->buffs.legacy_implosive_potential->trigger( n );
+        else
+          p()->buffs.legacy_implosive_potential_small->trigger( n );
+      }
 
       if ( selected_imps > 0 )
       {
@@ -5278,6 +5321,10 @@ using namespace helpers;
       warlock_spell_t::impact( s );
 
       td( s->target )->debuffs.havoc->trigger();
+
+      // BracketSim legacy compatibility: Odr (7037) marks this Havoc target for as long as Havoc lasts.
+      if ( p()->shadowlands_legacy.odr_shawl_of_the_ymirjar && td( s->target )->debuffs.havoc->check() )
+        td( s->target )->debuffs.legacy_odr->trigger( td( s->target )->debuffs.havoc->remains() );
     }
   };
 

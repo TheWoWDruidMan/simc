@@ -83,6 +83,10 @@ warlock_td_t::warlock_td_t( player_t* target, warlock_t& p )
                                          ->set_max_stack( 40 )
                                          ->set_default_value( p.legacy_conduits.percent( 212 ) );
 
+  // Odr, Shawl of the Ymirjar (337164): the Havoc target takes 25% more from the listed single-target spells.
+  debuffs.legacy_odr = make_buff( *this, "legacy_odr_shawl_of_the_ymirjar", p.find_spell( 337164 ) )
+                           ->set_chance( p.shadowlands_legacy.odr_shawl_of_the_ymirjar ? 1.0 : 0.0 );
+
   // Use havoc_debuff where we need the data but don't have the active talent
   // Mayhem proc chance follows a Flat % RNG model, but has ICD
   debuffs.havoc = make_buff( *this, "havoc", p.talents.havoc_debuff )

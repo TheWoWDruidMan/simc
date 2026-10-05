@@ -75,6 +75,14 @@ struct mind_flay_base_t : public priest_spell_t
   {
     priest_spell_t::tick( d );
 
+    // BracketSim legacy compatibility: Dissonant Echoes (conduit 115) - outside Voidform a Mind Flay tick can let
+    // you cast Void Volley (Shadowlands: Void Bolt), at the conduit's chance.
+    if ( priest().legacy_conduits.has( 115 ) && !priest().buffs.voidform->check() &&
+         rng().roll( priest().legacy_conduits.percent( 115 ) ) )
+    {
+      priest().buffs.void_volley->trigger( 1 );
+    }
+
     // BracketSim legacy compatibility: Eternal Call to the Void rolls off every
     // Mind Flay tick, at the rate on the runeforge's own spell.
     if ( priest().rppm.legacy_eternal_call_to_the_void &&
@@ -331,6 +339,9 @@ struct void_bolt_t final : public priest_spell_t
     affected_by_shadow_weaving = true;
     track_cd_waste             = false;
     background                 = true;
+    // BracketSim legacy compatibility: Dissonant Echoes (conduit 115).
+    if ( p.legacy_conduits.has( 115 ) )
+      base_multiplier *= 1.15;
   }
 };
 
@@ -648,7 +659,7 @@ struct shadow_word_pain_t final : public priest_spell_t
           as<int>( priest().legacy_azerite.torment_of_torments.spell()->effectN( 1 ).base_value() ) );
     }
 
-    if ( priest().talents.holy.divine_image.enabled() )
+    if ( priest().talents.holy.divine_image.enabled() || priest().shadowlands_legacy.divine_image )
     {
       child_searing_light = priest().background_actions.searing_light;
     }
@@ -959,6 +970,10 @@ struct void_volley_damage_base_t : public priest_spell_t
       m *= 1 + priest().talents.shadow.insidious_ire->effectN( 1 ).percent();
     }
 
+    // BracketSim legacy compatibility: Dissonant Echoes (conduit 115), "Void Bolt deals 15% more damage".
+    if ( priest().legacy_conduits.has( 115 ) )
+      m *= 1.15;
+
     return m;
   }
 
@@ -977,6 +992,10 @@ struct void_volley_damage_base_t : public priest_spell_t
     {
       m *= 1 + priest().talents.shadow.insidious_ire->effectN( 1 ).percent();
     }
+
+    // BracketSim legacy compatibility: Dissonant Echoes (conduit 115), "Void Bolt deals 15% more damage".
+    if ( priest().legacy_conduits.has( 115 ) )
+      m *= 1.15;
 
     return m;
   }

@@ -467,6 +467,7 @@ public:
     // BracketSim legacy compatibility: Shadowlands runeforge legendaries that
     // ride a covenant ability.
     buff_t* legacy_pact_of_the_soulstalkers;
+    buff_t* legacy_strength_of_the_pack = nullptr;  // conduit 224
     buff_t* legacy_flayers_mark;
     // BracketSim legacy compatibility: Empowered Release (139) and Flame
     // Infusion (252).
@@ -1913,6 +1914,9 @@ struct hunter_pet_t: public pet_t
     auto o = static_cast<hunter_t*>( owner );
     if ( o->legacy_conduits.has( 137 ) && o->buffs.legacy_resonating_arrow && o->buffs.legacy_resonating_arrow->check() )
       m *= 1.0 + o->legacy_conduits.percent( 137 );
+    // BracketSim legacy compatibility: Strength of the Pack (conduit 224) - the pets' damage too.
+    if ( o->buffs.legacy_strength_of_the_pack )
+      m *= 1.0 + o->buffs.legacy_strength_of_the_pack->check_value();
     return m;
   }
 
@@ -5526,7 +5530,11 @@ struct barbed_shot_t : public barbed_shot_base_t
 
     // BracketSim legacy compatibility: Qa'pla, Eredun War Order.
     if ( p()->shadowlands_legacy.qapla_eredun_war_order )
+    {
       p()->cooldowns.kill_command->reset( true );
+      // BracketSim legacy compatibility: Strength of the Pack (conduit 224) - a Kill Command reset.
+      p()->buffs.legacy_strength_of_the_pack->trigger();
+    }
 
     for ( auto pet : pets::active<pets::hunter_main_pet_base_t>( p()->pets.main, p()->pets.animal_companion, p()->pets.natures_ally_pet.active_pet() ) )
     {
@@ -7110,7 +7118,12 @@ struct takedown_t : public hunter_spell_t
     hunter_spell_t::execute();
 
     // Takedown's Buff is applied before the damage event
-    p()->buffs.takedown->trigger();
+    // BracketSim legacy compatibility: Deadly Tandem (conduit 251) lengthened Coordinated Assault, whose successor
+    // Takedown is; the conduit's value is in milliseconds.
+    if ( p()->legacy_conduits.has( 251 ) )
+      p()->buffs.takedown->trigger( p()->buffs.takedown->buff_duration() + timespan_t::from_millis( p()->legacy_conduits.value( 251 ) ) );
+    else
+      p()->buffs.takedown->trigger();
 
     if ( p()->talents.lunar_calling.ok() )
       p()->trigger_eagles_mark( target, true, true );
@@ -9236,6 +9249,11 @@ void hunter_t::create_buffs()
       make_buff( this, "legacy_eagletalons_true_focus", find_spell( 336851 ) )
           ->set_default_value_from_effect( 1 )
           ->set_chance( shadowlands_legacy.eagletalons_true_focus ? 1.0 : 0.0 );
+  buffs.legacy_strength_of_the_pack = make_buff( this, "legacy_strength_of_the_pack", find_spell( 341223 ) )
+                                          ->set_duration( find_spell( 341223 )->duration() > 0_ms ? find_spell( 341223 )->duration() : 4_s )
+                                          ->set_default_value( legacy_conduits.percent( 224 ) )
+                                          ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
+                                          ->set_chance( legacy_conduits.has( 224 ) ? 1.0 : 0.0 );
   buffs.legacy_pact_of_the_soulstalkers =
       make_buff( this, "legacy_pact_of_the_soulstalkers", find_spell( 356263 ) )
           ->set_default_value_from_effect( 1 )
@@ -10205,6 +10223,10 @@ double hunter_t::composite_player_critical_damage_multiplier( const action_state
 double hunter_t::composite_player_multiplier( school_e school ) const
 {
   double m = player_t::composite_player_multiplier( school );
+
+  // BracketSim legacy compatibility: Strength of the Pack (conduit 224).
+  if ( buffs.legacy_strength_of_the_pack )
+    m *= 1.0 + buffs.legacy_strength_of_the_pack->check_value();
 
   return m;
 }

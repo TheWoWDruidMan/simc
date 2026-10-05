@@ -21,6 +21,8 @@ namespace warlock
     shadowlands_legacy.cinders_of_the_azjaqir               = legacy( 7038 );
     shadowlands_legacy.madness_of_the_azjaqir               = legacy( 7039 );
     shadowlands_legacy.malefic_wrath                        = legacy( 7031 );
+    shadowlands_legacy.odr_shawl_of_the_ymirjar             = legacy( 7037 );
+    shadowlands_legacy.implosive_potential                  = legacy( 7033 );
     shadowlands_legacy.perpetual_agony_of_azjaqir           = legacy( 7029 );
     shadowlands_legacy.wilfreds_sigil_of_superior_summoning = legacy( 7025 );
     shadowlands_legacy.balespiders_burning_core             = legacy( 7036 );
@@ -851,6 +853,22 @@ namespace warlock
         make_buff( this, "legacy_madness_of_the_azjaqir", find_spell( 337170 ) )
             ->set_default_value_from_effect( 1 )
             ->set_chance( shadowlands_legacy.madness_of_the_azjaqir ? 1.0 : 0.0 );
+    // Implosive Potential (337135: effect 1 = 3 targets, 2 = 5%, 3 = 1%, 4 = 15 Imps max; buff 337139, 12 sec).
+    {
+      const spell_data_t* ip = find_spell( 337135 );
+      auto pct = [ ip ]( int i, double d ) { return ip->effectN( i ).percent() > 0 ? ip->effectN( i ).percent() : d; };
+      int cap = ip->effectN( 4 ).base_value() > 0 ? as<int>( ip->effectN( 4 ).base_value() ) : 15;
+      buffs.legacy_implosive_potential = make_buff( this, "legacy_implosive_potential", find_spell( 337139 ) )
+          ->set_default_value( pct( 2, 0.05 ) )
+          ->set_max_stack( cap )
+          ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+          ->set_chance( shadowlands_legacy.implosive_potential ? 1.0 : 0.0 );
+      buffs.legacy_implosive_potential_small = make_buff( this, "legacy_implosive_potential_small", find_spell( 337139 ) )
+          ->set_default_value( pct( 3, 0.01 ) )
+          ->set_max_stack( cap )
+          ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+          ->set_chance( shadowlands_legacy.implosive_potential ? 1.0 : 0.0 );
+    }
     buffs.legacy_malefic_wrath =
         make_buff( this, "legacy_malefic_wrath", find_spell( 337125 ) )
             ->set_default_value_from_effect( 1 )

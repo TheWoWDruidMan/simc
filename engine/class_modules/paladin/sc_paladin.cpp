@@ -3311,6 +3311,9 @@ struct shield_of_the_righteous_t : public holy_power_consumer_t<paladin_melee_at
     if ( p()->legacy_conduits.has( 196 ) && td( t )->debuff.judgment->up() )
       ctm *= 1.0 + p()->legacy_conduits.percent( 196 );
 
+    // BracketSim legacy compatibility: Bulwark of Righteous Fury (7062).
+    ctm *= 1.0 + p()->buffs.legacy_bulwark_of_righteous_fury->check_stack_value();
+
     return ctm;
   }
 
@@ -3348,6 +3351,9 @@ struct shield_of_the_righteous_t : public holy_power_consumer_t<paladin_melee_at
     // bool hasDpUp = p()->buffs.divine_purpose->up();
 
     holy_power_consumer_t::execute();
+
+    // BracketSim legacy compatibility: Bulwark of Righteous Fury is spent by the Shield it empowered.
+    p()->buffs.legacy_bulwark_of_righteous_fury->expire();
 
     // Buff granted regardless of combat roll result
     // Duration and armor bonus recalculation handled in the buff
@@ -4777,6 +4783,7 @@ void paladin_t::init_spells()
   };
 
   shadowlands_legacy.holy_avengers_engraved_sigil = legacy( 7060 );
+  shadowlands_legacy.bulwark_of_righteous_fury    = legacy( 7062 );
   shadowlands_legacy.of_dusk_and_dawn             = legacy( 7055 );
   shadowlands_legacy.relentless_inquisitor        = legacy( 7066 );
   shadowlands_legacy.the_mad_paragon              = legacy( 7054 );

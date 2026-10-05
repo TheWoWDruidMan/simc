@@ -63,6 +63,8 @@ struct warlock_td_t : public actor_target_data_t
     // BracketSim legacy compatibility: the conduit Combusting Engine (212).
     // Synthetic - it has no spell of its own, in this build or in Shadowlands.
     propagate_const<buff_t*> legacy_combusting_engine;
+    // BracketSim legacy compatibility: Odr, Shawl of the Ymirjar (7037) marks the Havoc target.
+    propagate_const<buff_t*> legacy_odr;
     propagate_const<buff_t*> lake_of_fire;
     propagate_const<buff_t*> shadowburn;
     propagate_const<buff_t*> havoc;
@@ -939,6 +941,9 @@ public:
     // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
     propagate_const<buff_t*> legacy_madness_of_the_azjaqir;
     propagate_const<buff_t*> legacy_malefic_wrath;
+    // BracketSim legacy compatibility: Implosive Potential (7033), 1% (5% at 3+ targets) haste per Imp, 15 max.
+    propagate_const<buff_t*> legacy_implosive_potential;
+    propagate_const<buff_t*> legacy_implosive_potential_small;
     propagate_const<buff_t*> legacy_balespiders_burning_core;
     // Relic of Demonic Synergy grants the buff to whichever of the two did NOT
     // proc it, so there are two holders and they are tracked separately. The
@@ -1013,6 +1018,8 @@ public:
     bool cinders_of_the_azjaqir = false;
     bool madness_of_the_azjaqir = false;
     bool malefic_wrath = false;
+    bool odr_shawl_of_the_ymirjar = false;
+    bool implosive_potential = false;
     bool perpetual_agony_of_azjaqir = false;
     bool wilfreds_sigil_of_superior_summoning = false;
     bool balespiders_burning_core = false;

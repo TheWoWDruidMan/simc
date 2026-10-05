@@ -5474,7 +5474,7 @@ struct auto_attack_t : public shaman_attack_t
                                  swing_timer_variance );
     p()->melee_mh->school = SCHOOL_PHYSICAL;
 
-    if ( ( player->talent.deeply_rooted_elements.ok() || player->talent.ascendance.ok() ||
+    if ( ( player->talent.deeply_rooted_elements.ok() || player->talent.ascendance.ok() || player->shadowlands_legacy.deeply_rooted_elements ||
            player->sets->has_set_bonus( HERO_STORMBRINGER, TWW3, B2 ) ) &&
          player->specialization() == SHAMAN_ENHANCEMENT )
     {
@@ -5493,7 +5493,7 @@ struct auto_attack_t : public shaman_attack_t
                                    swing_timer_variance );
       p()->melee_oh->school = SCHOOL_PHYSICAL;
 
-      if ( player->talent.deeply_rooted_elements.ok() || player->talent.ascendance.ok() ||
+      if ( player->talent.deeply_rooted_elements.ok() || player->talent.ascendance.ok() || player->shadowlands_legacy.deeply_rooted_elements ||
            player->sets->has_set_bonus( HERO_STORMBRINGER, TWW3, B2 ) )
       {
         p()->ascendance_oh = new windlash_t( "Windlash Off-Hand", player->find_spell( 114093 ), player,
@@ -6034,6 +6034,14 @@ struct stormstrike_base_t : public shaman_attack_t
     {
       p()->buff.stormsurge->consume( this, 1 );
       p()->buff.stormblast->consume( this, 1 );
+    }
+
+    // BracketSim legacy compatibility: Deeply Rooted Elements (6987), 8% per Stormstrike.
+    if ( strike_type == strike_variant::NORMAL && !background && p()->shadowlands_legacy.deeply_rooted_elements &&
+         !p()->talent.deeply_rooted_elements.ok() && p()->action.dre_ascendance &&
+         rng().roll( p()->find_spell( 336738 )->effectN( 3 ).percent() > 0 ? p()->find_spell( 336738 )->effectN( 3 ).percent() : 0.08 ) )
+    {
+      p()->action.dre_ascendance->execute_on_target( execute_state->target );
     }
 
     // BracketSim legacy compatibility: Legacy of the Frost Witch is spent by
@@ -8010,6 +8018,14 @@ struct lava_burst_t : public shaman_spell_t
       p()->buff.master_of_the_elements->trigger();
     }
 
+    // BracketSim legacy compatibility: Deeply Rooted Elements (6987), 7% per Lava Burst.
+    if ( is_variant( spell_variant::NORMAL ) && !background && p()->shadowlands_legacy.deeply_rooted_elements &&
+         !p()->talent.deeply_rooted_elements.ok() && p()->action.dre_ascendance &&
+         rng().roll( p()->find_spell( 336738 )->effectN( 2 ).percent() > 0 ? p()->find_spell( 336738 )->effectN( 2 ).percent() : 0.07 ) )
+    {
+      p()->action.dre_ascendance->execute_on_target( execute_state->target );
+    }
+
     // Lava Surge buff does not get eaten, if the Lava Surge proc happened
     // during the Lava Burst cast
     if ( !ancestral_swiftness_consumed && is_variant( spell_variant::NORMAL ) && !p()->lava_surge_during_lvb &&
@@ -9510,6 +9526,10 @@ struct ascendance_t : public shaman_spell_t
       if ( is_variant( spell_variant::DEEPLY_ROOTED_ELEMENTS ) )
       {
         duration = p()->talent.deeply_rooted_elements->effectN( 1 ).time_value();
+        // BracketSim legacy compatibility: the Deeply Rooted Elements runeforge (6987) gives 6 sec.
+        if ( duration <= 0_ms && p()->shadowlands_legacy.deeply_rooted_elements )
+          duration = p()->find_spell( 336738 )->effectN( 1 ).time_value() > 0_ms
+                         ? p()->find_spell( 336738 )->effectN( 1 ).time_value() : 6_s;
       }
       else
       {
@@ -9568,12 +9588,13 @@ struct ascendance_t : public shaman_spell_t
 
     if ( p()->specialization() == SHAMAN_ENHANCEMENT )
     {
-      p()->action.ascendance_damage->execute_on_target( target );
-      if ( p()->talent.deeply_rooted_elements.ok() )
+      if ( p()->action.ascendance_damage )
+        p()->action.ascendance_damage->execute_on_target( target );
+      if ( p()->talent.deeply_rooted_elements.ok() && p()->action.doom_winds_dre )
       {
         p()->action.doom_winds_dre->execute_on_target( target );
       }
-      else
+      else if ( p()->action.doom_winds_asc )
       {
         p()->action.doom_winds_asc->execute_on_target( target );
       }
@@ -11667,7 +11688,10 @@ void shaman_t::create_actions()
     action.lightning_rod = new lightning_rod_damage_t( this );
   }
 
-  if ( talent.deeply_rooted_elements.ok() )
+  // BracketSim legacy compatibility: the Deeply Rooted Elements runeforge (6987) uses the same proc'd Ascendance.
+  if ( talent.deeply_rooted_elements.ok() ||
+       ( shadowlands_legacy.deeply_rooted_elements &&
+         ( specialization() == SHAMAN_ELEMENTAL || specialization() == SHAMAN_ENHANCEMENT ) ) )
   {
     action.dre_ascendance = new ascendance_dre_t( this,
       variant_flag( spell_variant::DEEPLY_ROOTED_ELEMENTS ) );
@@ -11809,7 +11833,7 @@ void shaman_t::create_actions()
 
     dummy.deeply_rooted_elements->add_child( action.ascendance_damage );
   }
-  else if ( talent.ascendance.ok() && action.ascendance)
+  else if ( ( talent.ascendance.ok() || shadowlands_legacy.deeply_rooted_elements ) && action.ascendance )
   {
     action.ascendance_damage = new ascendance_damage_t( this, "ascendance_damage" );
     action.ascendance->add_child( action.ascendance_damage );
@@ -14579,6 +14603,9 @@ void shaman_t::apply_player_effects()
   eff::source_eff_builder_t( buff.lightning_shield ).build( this );
   eff::source_eff_builder_t( buff.ascendance ).build( this );
   eff::source_eff_builder_t( buff.surging_elements ).build( this );
+
+  // BracketSim legacy compatibility: Elemental Equilibrium (6990). The buff went up but nothing applied its 15%.
+  eff::source_eff_builder_t( buff.legacy_elemental_equilibrium ).build( this );
 }
 
 void shaman_t::apply_action_effects( parse_effects_t* a )
@@ -14883,6 +14910,9 @@ void shaman_t::init_action_list_enhancement()
   single_sb->add_action( "voltaic_blaze,if=(buff.doom_winds.up&buff.maelstrom_weapon.stack>=10-(1+2*talent.fire_nova.enabled)&!buff.maelstrom_weapon.stack=10)&talent.thorims_invocation.enabled" );
   single_sb->add_action( "windstrike,if=buff.maelstrom_weapon.stack>0&talent.thorims_invocation.enabled" );
   single_sb->add_action( "ascendance,if=raid_event.adds.in>=60|fight_remains<=20" );
+  // BracketSim: Windstrike replaces the Stormstrike button during Ascendance (talent, 4pc, or the Deeply Rooted
+  // Elements runeforge); below 71 these lists had no plain Windstrike line, so a proc'd Ascendance blocked Stormstrike.
+  single_sb->add_action( "windstrike,if=buff.ascendance.up" );
   single_sb->add_action( "stormstrike,if=buff.doom_winds.up&talent.thorims_invocation.enabled" );
   single_sb->add_action( "crash_lightning,if=buff.doom_winds.up&talent.thorims_invocation.enabled" );
   single_sb->add_action( "tempest,if=buff.maelstrom_weapon.stack=10" );
@@ -14912,6 +14942,9 @@ void shaman_t::init_action_list_enhancement()
   single_totemic->add_action( "windstrike,if=talent.thorims_invocation.enabled&buff.ascendance.up" );
   single_totemic->add_action( "ascendance,if=ti_lightning_bolt" );
   single_totemic->add_action( "crash_lightning,if=talent.thorims_invocation.enabled&buff.doom_winds.up|buff.ascendance.up" );
+  // BracketSim: Windstrike replaces the Stormstrike button during Ascendance (talent, 4pc, or the Deeply Rooted
+  // Elements runeforge); below 71 these lists had no plain Windstrike line, so a proc'd Ascendance blocked Stormstrike.
+  single_totemic->add_action( "windstrike,if=buff.ascendance.up" );
   single_totemic->add_action( "stormstrike,if=talent.thorims_invocation.enabled&buff.doom_winds.up" );
   single_totemic->add_action( "lightning_bolt,if=talent.elemental_tempo.enabled&(buff.maelstrom_weapon.stack>=5&(cooldown.lava_lash.remains>gcd.max)&(cooldown.lava_lash.remains<=buff.maelstrom_weapon.stack*0.3)|buff.maelstrom_weapon.stack>=10)" );
   single_totemic->add_action( "crash_lightning,if=!buff.crash_lightning.up" );

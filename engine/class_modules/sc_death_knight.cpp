@@ -962,6 +962,7 @@ public:
   {
     bool abominations_frenzy = false;
     bool absolute_zero = false;
+    bool reanimated_shambler = false;
     bool biting_cold = false;
     bool bryndaors_might = false;
     bool crimson_rune_weapon = false;
@@ -13978,6 +13979,42 @@ void runic_attenuation_proc( const special_effect_t& e )
   new runic_attenuation_proc( e );
 }
 
+// BracketSim legacy compatibility: Reanimated Shambler (6949) ===============
+struct legacy_necroblast_t : public death_knight_spell_t
+{
+  legacy_necroblast_t( death_knight_t* p ) : death_knight_spell_t( "legacy_necroblast", p, p->find_spell( 334851 ) )
+  {
+    background = true;
+    aoe = -1;
+    reduced_aoe_targets = data().effectN( 2 ).base_value() > 0 ? data().effectN( 2 ).base_value() : 8;
+    // The runeforge's text: Unholy's blast is 114.4% of the others'.
+    if ( p->specialization() == DEATH_KNIGHT_UNHOLY )
+      base_multiplier *= 1.144;
+  }
+};
+
+void legacy_reanimated_shambler_proc( const special_effect_t& e, action_t* blast )
+{
+  struct shambler_cb_t : public death_knight_proc_callback_t
+  {
+    action_t* blast;
+    shambler_cb_t( const special_effect_t& e, action_t* b ) : death_knight_proc_callback_t( e ), blast( b ) {}
+
+    void execute( const spell_data_t*, player_t* t, action_state_t* ) override
+    {
+      // The zombie shambles to the target first (Shadowlands SimC: 4.6 sec, sd 0.34).
+      timespan_t walk = timespan_t::from_seconds( std::max( 1.0, p()->rng().gauss( 4.597, 0.3399 ) ) );
+      action_t* a = blast;
+      make_event( *p()->sim, walk, [ a, t ] {
+        if ( t && !t->is_sleeping() )
+          a->execute_on_target( t );
+      } );
+    }
+  };
+
+  new shambler_cb_t( e, blast );
+}
+
 }  // UNNAMED NAMESPACE
 
 // Runeforges ===============================================================
@@ -16057,6 +16094,7 @@ void death_knight_t::init_spells()
 
   shadowlands_legacy.abominations_frenzy        = legacy_unity( 7458, "necrolord" );
   shadowlands_legacy.absolute_zero              = legacy( 6946 );
+  shadowlands_legacy.reanimated_shambler        = legacy( 6949 );
   shadowlands_legacy.biting_cold                = legacy( 6945 );
   shadowlands_legacy.bryndaors_might            = legacy( 6940 );
   shadowlands_legacy.crimson_rune_weapon        = legacy( 6941 );
@@ -17856,6 +17894,17 @@ void death_knight_t::init_uptimes()
 void death_knight_t::init_special_effects()
 {
   player_t::init_special_effects();
+
+  if ( shadowlands_legacy.reanimated_shambler )
+  {
+    auto shambler      = new special_effect_t( this );
+    shambler->name_str = "legacy_reanimated_shambler";
+    shambler->spell_id = 334836;
+    shambler->disable_action();
+    special_effects.push_back( shambler );
+
+    legacy_reanimated_shambler_proc( *shambler, new legacy_necroblast_t( this ) );
+  }
 
   if ( talent.runic_attenuation.ok() )
   {
