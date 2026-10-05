@@ -5213,7 +5213,9 @@ struct primal_wrath_t final : public cp_spender_t
 
     if ( data().ok() )
     {
-      rip = p->get_secondary_action<rip_t>( "rip_primal", p->find_spell( 1079 ), f );
+      // Each Primal Wrath owns its Rip (5 Oct 2026): a second one (Lycara's) that found and re-pointed the shared
+      // "rip_primal" deleted the first one's stats object and crashed at init.
+      rip = p->get_secondary_action<rip_t>( name_str == "primal_wrath" ? std::string( "rip_primal" ) : "rip_" + name_str, p->find_spell( 1079 ), f );
       rip->dot_duration = timespan_t::from_seconds( data().effectN( 2 ).base_value() );
       rip->dual = rip->background = rip->proc = true;
       replace_stats( this, rip );
@@ -13305,8 +13307,13 @@ void druid_t::create_actions()
   // BracketSim legacy compatibility: Lycara's Fleeting Glimpse (7110) - free, like Convoke's casts.
   if ( shadowlands_legacy.lycaras_fleeting_glimpse )
   {
-    // Cat Form's Primal Wrath is not built yet: a Primal Wrath made outside the talent crashes the engine during
-    // initialisation (5 Oct 2026, not yet traced). Balance's Starfall half works.
+    if ( specialization() == DRUID_FERAL )
+    {
+      auto a = get_secondary_action<primal_wrath_t>( "primal_wrath_lycaras", find_spell( 285381 ), flag_e::CONVOKE );
+      a->background = true;
+      a->proc = true;
+      active.legacy_lycaras_cat = a;
+    }
     if ( specialization() == DRUID_BALANCE )
     {
       auto a = get_secondary_action<starfall_t>( "starfall_lycaras", find_spell( 191034 ), flag_e::CONVOKE );

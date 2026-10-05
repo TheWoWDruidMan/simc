@@ -1384,6 +1384,8 @@ public:
     spawner::pet_spawner_t<pet::legacy_spark_elemental_t, shaman_t> legacy_spark_elemental;
 
     spawner::pet_spawner_t<pet::base_wolf_t, shaman_t> fire_wolves;
+    // BracketSim legacy compatibility: Witch Doctor's Wolf Bones' Feral Spirit (plain Spirit Wolves).
+    spawner::pet_spawner_t<pet::base_wolf_t, shaman_t> legacy_spirit_wolves;
     spawner::pet_spawner_t<pet::base_wolf_t, shaman_t> lightning_wolves;
 
     spawner::pet_spawner_t<heal_totem_pet_t, shaman_t> healing_stream_totem;
@@ -8544,6 +8546,36 @@ struct elemental_blast_t : public shaman_spell_t
   }
 };
 
+// BracketSim legacy compatibility: Feral Spirit (51533), for Witch Doctor's Wolf Bones ==
+struct legacy_feral_spirit_t : public shaman_spell_t
+{
+  buff_t* maelstrom;  // Shadowlands 333957: a Maelstrom Weapon stack at once and every 3 sec while the wolves are out
+
+  legacy_feral_spirit_t( shaman_t* player, util::string_view options_str )
+    : shaman_spell_t( "feral_spirit", player, player->find_spell( 51533 ) ), maelstrom( nullptr )
+  {
+    parse_options( options_str );
+    harmful  = false;
+    cooldown = player->cooldown.feral_spirits;
+    cooldown->duration = data().cooldown() > 0_ms ? data().cooldown() : 90_s;
+
+    maelstrom = make_buff( player, "legacy_feral_spirit_maelstrom", player->find_spell( 333957 ) )
+                    ->set_refresh_behavior( buff_refresh_behavior::DURATION )
+                    ->set_tick_callback( [ this ]( buff_t* b, int, timespan_t ) {
+                      int n = as<int>( b->data().effectN( 1 ).base_value() );
+                      p()->generate_maelstrom_weapon( this, n > 0 ? n : 1 );
+                    } );
+  }
+
+  void execute() override
+  {
+    shaman_spell_t::execute();
+    timespan_t d = p()->find_spell( 228562 )->duration() > 0_ms ? p()->find_spell( 228562 )->duration() : 15_s;
+    p()->pet.legacy_spirit_wolves.spawn( d, 2 );
+    maelstrom->trigger( d );
+  }
+};
+
 // Thunderstorm Spell =======================================================
 
 struct thunderstorm_t : public shaman_spell_t
@@ -9862,7 +9894,12 @@ struct riptide_t : public shaman_heal_t
 struct chain_heal_t : public shaman_heal_t
 {
   chain_heal_t( shaman_t* player, util::string_view options_str )
-    : shaman_heal_t("chain_heal", player, player->find_class_spell( "Chain Heal" ), options_str )
+    : shaman_heal_t( "chain_heal", player,
+                     player->find_class_spell( "Chain Heal" )->ok() ? player->find_class_spell( "Chain Heal" )
+                     : ( player->find_talent_spell( talent_tree::CLASS, "Chain Heal" )->ok() ||
+                         player->shadowlands_legacy.chains_of_devastation )
+                         ? player->find_spell( 1064 ) : spell_data_t::not_found(),
+                     options_str )
   {
     resurgence_gain =
         0.333 * p()->spell.resurgence->effectN( 1 ).average( player ) * p()->spec.resurgence->effectN( 1 ).percent();
@@ -11341,6 +11378,8 @@ action_t* shaman_t::create_action( util::string_view name, util::string_view opt
   // shared
   if ( name == "ascendance" )
     return new ascendance_t( this, "ascendance", options_str );
+  if ( name == "feral_spirit" && shadowlands_legacy.witch_doctors_wolf_bones )
+    return new legacy_feral_spirit_t( this, options_str );  // BracketSim legacy: Witch Doctor's Wolf Bones
   if ( name == "auto_attack" )
     return new auto_attack_t( this, options_str );
 
@@ -12230,6 +12269,9 @@ void shaman_t::init_spells()
     legacy_apl_actions.emplace_back( "primordial_wave" );
   if ( legacy_covenant.fae_transfusion->ok() )
     legacy_apl_actions.emplace_back( "fae_transfusion" );
+  // Witch Doctor's Wolf Bones brings the Feral Spirit button back, so the rotation presses it.
+  if ( shadowlands_legacy.witch_doctors_wolf_bones && specialization() == SHAMAN_ENHANCEMENT )
+    legacy_apl_actions.emplace_back( "feral_spirit" );
 
   legacy_covenant.vesper_totem_damage =
       legacy_covenant.vesper_totem->ok() ? find_spell( 324520 ) : spell_data_t::not_found();
@@ -16010,6 +16052,7 @@ shaman_t::pets_t::pets_t( shaman_t* s ) :
                             []( shaman_t* s ) { return new pet::legacy_spark_elemental_t( s ); } ),
 
     fire_wolves( "fiery_wolf", s, []( shaman_t* s ) { return new pet::fire_wolf_t( s ); } ),
+    legacy_spirit_wolves( "spirit_wolf", s, []( shaman_t* s ) { return new pet::spirit_wolf_t( s ); } ),
     lightning_wolves( "lightning_wolf", s, []( shaman_t* s ) { return new pet::lightning_wolf_t( s ); } ),
 
     healing_stream_totem( "healing_stream_totem", s, []( shaman_t* s ) { return new healing_stream_totem_t( s ); } ),

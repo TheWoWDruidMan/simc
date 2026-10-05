@@ -624,6 +624,7 @@ public:
     bool flamewakers_cobra_sting = false;
     bool nesingwarys_apparatus = false;
     bool qapla_eredun_war_order = false;
+    bool serpentstalkers_trickery = false;
     bool rylakstalkers_confounding_strikes = false;
     bool rylakstalkers_piercing_fangs = false;
     bool secrets_of_the_unblinking_vigil = false;
@@ -1160,6 +1161,7 @@ public:
     action_t* cobra_cleave = nullptr;
 
     action_t* legacy_wild_spirits_proc = nullptr;
+    action_t* legacy_serpent_sting = nullptr;  // Serpentstalker's Trickery
   } actions;
 
   cdwaste::player_data_t cd_waste;
@@ -5734,6 +5736,23 @@ struct multishot_t: public hunter_ranged_attack_t
 
 // Aimed Shot =========================================================================
 
+// BracketSim legacy compatibility: Serpent Sting for Serpentstalker's Trickery (Shadowlands 271788) ============
+struct legacy_serpent_sting_t : public hunter_spell_t
+{
+  legacy_serpent_sting_t( hunter_t* p ) : hunter_spell_t( "serpent_sting", p )
+  {
+    background = true;
+    school = SCHOOL_NATURE;
+    attack_power_mod.direct = 0.165;
+    attack_power_mod.tick = 0.165;
+    dot_duration = 18_s;
+    base_tick_time = 3_s;
+    hasted_ticks = true;
+    may_crit = tick_may_crit = true;
+    dot_behavior = DOT_REFRESH_PANDEMIC;
+  }
+};
+
 struct aimed_shot_base_t : public hunter_ranged_attack_t
 {
   struct state_data_t
@@ -5999,6 +6018,10 @@ struct aimed_shot_t : public aimed_shot_base_t
     hydra_target = p()->get_hydra_target( target );
 
     aimed_shot_base_t::execute();
+
+    // BracketSim legacy compatibility: Serpentstalker's Trickery (7013).
+    if ( p()->actions.legacy_serpent_sting )
+      p()->actions.legacy_serpent_sting->execute_on_target( target );
 
     if ( rng().roll( surging_shots.chance ) )
     {
@@ -8643,6 +8666,7 @@ void hunter_t::init_spells()
 
   shadowlands_legacy.call_of_the_wild                  = legacy( 7003 );
   shadowlands_legacy.dire_command                      = legacy( 7007 );
+  shadowlands_legacy.serpentstalkers_trickery          = legacy( 7013 );
   shadowlands_legacy.eagletalons_true_focus            = legacy( 7011 );
   shadowlands_legacy.flamewakers_cobra_sting           = legacy( 7008 );
   shadowlands_legacy.nesingwarys_apparatus             = legacy( 7004 );
@@ -9217,6 +9241,9 @@ void hunter_t::init_base_stats()
 void hunter_t::create_actions()
 {
   player_t::create_actions();
+
+  if ( shadowlands_legacy.serpentstalkers_trickery )
+    actions.legacy_serpent_sting = new attacks::legacy_serpent_sting_t( this );
 
   if ( talents.laceration.ok() )
     actions.laceration = new attacks::laceration_t( this );

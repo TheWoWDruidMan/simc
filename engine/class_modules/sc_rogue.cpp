@@ -7369,6 +7369,21 @@ struct legacy_sepsis_t : public rogue_attack_t
     rogue_attack_t::last_tick( d );
     // The free stealth ability the dot's expiry granted is not modelled.
     burst->execute_on_target( d->target );
+
+    // BracketSim legacy compatibility: Toxic Onslaught (7478), the other two specs' cooldowns for 10 sec.
+    if ( p()->legendary.toxic_onslaught )
+    {
+      timespan_t t = timespan_t::from_millis( p()->find_spell( 354473 )->effectN( 1 ).base_value() );
+      if ( t <= 0_ms )
+        t = 10_s;
+      auto spec = p()->specialization();
+      if ( spec == ROGUE_ASSASSINATION || spec == ROGUE_SUBTLETY )
+        p()->buffs.adrenaline_rush->extend_duration_or_trigger( t );
+      if ( spec == ROGUE_ASSASSINATION || spec == ROGUE_OUTLAW )
+        p()->buffs.shadow_blades->extend_duration_or_trigger( t );
+      if ( spec == ROGUE_OUTLAW || spec == ROGUE_SUBTLETY )
+        td( d->target )->debuffs.deathmark->extend_duration_or_trigger( t );
+    }
   }
 };
 
@@ -8468,7 +8483,9 @@ namespace buffs {
 struct adrenaline_rush_t : public rogue_buff_t
 {
   adrenaline_rush_t( rogue_t* p ) :
-    rogue_buff_t( p, "adrenaline_rush", p->talent.outlaw.adrenaline_rush )
+    rogue_buff_t( p, "adrenaline_rush",
+                  ( !p->talent.outlaw.adrenaline_rush->ok() && p->legendary.toxic_onslaught )
+                      ? p->find_spell( 13750 ) : p->talent.outlaw.adrenaline_rush.spell() )
   {
     set_cooldown( timespan_t::zero() );
     set_default_value_from_effect_type( A_MOD_RANGED_AND_MELEE_AUTO_ATTACK_SPEED );
@@ -10525,8 +10542,11 @@ rogue_td_t::rogue_td_t( player_t* target, rogue_t* source ) :
     ? make_buff( *this, "banshees_blight", source->find_spell( 358090 ) )
     : make_buff( *this, "banshees_blight" )->set_quiet( true );
   
-  debuffs.deathmark = make_buff<damage_buff_t>( *this, "deathmark", source->talent.assassination.deathmark, false )
-    ->set_direct_mod( source->talent.assassination.deathmark, 2 );
+  // BracketSim legacy compatibility: Toxic Onslaught's Vendetta is Deathmark now - base spell when not talented.
+  const spell_data_t* dm = ( !source->talent.assassination.deathmark->ok() && source->legendary.toxic_onslaught )
+                               ? source->find_spell( 360194 ) : source->talent.assassination.deathmark.spell();
+  debuffs.deathmark = make_buff<damage_buff_t>( *this, "deathmark", dm, false )
+    ->set_direct_mod( dm, 2 );
   debuffs.deathmark->set_cooldown( timespan_t::zero() );
 
   debuffs.caustic_spatter = make_buff( *this, "caustic_spatter", source->spec.caustic_spatter_buff )
@@ -12001,7 +12021,7 @@ void rogue_t::init_spells()
   spec.secret_technique_attack = spec.secret_technique->ok() ? find_spell( 280720 ) : spell_data_t::not_found();
   spec.secret_technique_clone_attack = spec.secret_technique->ok() ? find_spell( 282449 ) : spell_data_t::not_found();
   spec.shadowstrike_stealth_buff = spec.shadowstrike->ok() ? find_spell( 245623 ) : spell_data_t::not_found();
-  spec.shadow_blades_attack = talent.subtlety.shadow_blades->ok() ? find_spell( 279043 ) : spell_data_t::not_found();
+  spec.shadow_blades_attack = ( talent.subtlety.shadow_blades->ok() || legendary.toxic_onslaught ) ? find_spell( 279043 ) : spell_data_t::not_found();
   spec.shadow_focus_buff = talent.subtlety.shadow_focus->ok() ? find_spell( 112942 ) : spell_data_t::not_found();
   spec.shadow_techniques_energize = spec.shadow_techniques->ok() ? find_spell( 196911 ) : spell_data_t::not_found();
   spec.shot_in_the_dark_buff = talent.subtlety.shot_in_the_dark->ok() ? find_spell( 257506 ) : spell_data_t::not_found();
@@ -12181,6 +12201,10 @@ void rogue_t::init_spells()
     active.scoundrel_strike.coup_de_grace = get_secondary_trigger_action<actions::scoundrel_strike_t>(
       secondary_trigger::SCOUNDREL_STRIKE, "scoundrel_strike_coup_de_grace" );
   }
+
+  // BracketSim legacy compatibility: Toxic Onslaught gives Assassination and Outlaw Shadow Blades too.
+  if ( legendary.toxic_onslaught && specialization() != ROGUE_SUBTLETY )
+    active.shadow_blades_attack = get_background_action<actions::shadow_blades_attack_t>( "shadow_blades_attack" );
 
   // Subtlety
   if ( specialization() == ROGUE_SUBTLETY )
@@ -12745,7 +12769,9 @@ void rogue_t::create_buffs()
   buffs.find_weakness = make_buff( this, "find_weakness", spec.find_weakness_buff )
     ->set_default_value_from_effect_type( A_MOD_TARGET_ARMOR_PCT );
 
-  buffs.shadow_blades = make_buff( this, "shadow_blades", talent.subtlety.shadow_blades )
+  buffs.shadow_blades = make_buff( this, "shadow_blades",
+                                   ( !talent.subtlety.shadow_blades->ok() && legendary.toxic_onslaught )
+                                       ? find_spell( 121471 ) : talent.subtlety.shadow_blades.spell() )
     ->set_default_value_from_effect( 1 ) // Bonus Damage%
     ->set_cooldown( timespan_t::zero() )
     ->set_stack_change_callback( [ this ]( buff_t*, int, int new_ ) {
