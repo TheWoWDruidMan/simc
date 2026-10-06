@@ -625,16 +625,6 @@ stat_pair_t item_database::item_enchantment_effect_stats( player_t* player,
       if ( enchantment.max_scaling_level != 0 && static_cast< unsigned >( level ) > enchantment.max_scaling_level )
         level = enchantment.max_scaling_level;
 
-      // BracketSim (6 Oct 2026): the old scaling classes (-1 to -6) give their max_scaling_level value at EVERY
-      // level in game. In-game reads at level 30 of the 227 "class -1, max 35" enchants fit only the level-35
-      // budget (Major Spellpower 14, not 13); this rule matches 321 of 329 reads at 30 (was 250) and changes nothing
-      // at 35+. Class -7 (newer enchants) does follow the player's level, as before. Enchants only (gems share this
-      // path: TWW gems scale to 80 and a level 70 got their level-80 value) and only up to the max-35 group the reads
-      // cover.
-      if ( enchantment.id_gem == 0 && enchantment.max_scaling_level != 0 && enchantment.max_scaling_level <= 35 &&
-           enchantment.id_scaling <= -1 && enchantment.id_scaling >= -6 )
-        level = enchantment.max_scaling_level;
-
       double budget = player -> dbc->spell_scaling( static_cast< player_e >( enchantment.id_scaling ), level );
       value = util::round( budget * enchantment.ench_coeff[ index ] );
     }
