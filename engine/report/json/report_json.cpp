@@ -493,6 +493,28 @@ void to_json( JsonOutput root, const ::report::json::report_configuration_t& rep
       {
         json[ "item_name" ] = entry.action->item->name_str;
       }
+      // BracketSim (6 Oct 2026): a use_item_<item> line has no spell id (use_item_t keeps its own item pointer, so
+      // action_t::item is null too), and the site's ability log skips entries without one - a trinket pressed at 0:00
+      // (Scars of Fraternal Strife) never showed. Report the worn item's on-use spell and its name.
+      if ( entry.action->id == 0 && util::str_prefix_ci( entry.action->name_str, "use_item_" ) )
+      {
+        const std::string token = entry.action->name_str.substr( 9 );
+        for ( const item_t& it : entry.action->player->items )
+        {
+          if ( it.name_str != token )
+            continue;
+          for ( const special_effect_t* e : it.parsed.special_effects )
+          {
+            if ( e->type == SPECIAL_EFFECT_USE && e->spell_id )
+            {
+              json[ "id" ] = e->spell_id;
+              json[ "spell_name" ] = it.full_name();
+              break;
+            }
+          }
+          break;
+        }
+      }
     }
     else
     {

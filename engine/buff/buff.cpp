@@ -2444,7 +2444,11 @@ void buff_t::start( int stacks, double value, timespan_t duration )
 
   timespan_t d = (( duration >= timespan_t::zero() ) ? duration : buff_duration()) * get_time_duration_multiplier();
 
-  if ( sim->current_time() <= timespan_t::from_seconds( 0.01 ) )
+  // BracketSim (6 Oct 2026): only buffs from pre-combat and combat set-up (flask, food, passives) count as constant.
+  // An action at exactly 0:00 used to qualify too, and the sample ability log hides constant buffs: Death's Due
+  // cast at 0:00 showed no Death and Decay / Sanguine Ground, and Scars of Fraternal Strife pressed at 0:00 showed
+  // no second rune (both applied; only the report lost them).
+  if ( sim->current_time() <= timespan_t::from_seconds( 0.01 ) && !sim->bracketsim_fight_started )
   {
     if ( ( d == timespan_t::zero() || ( d > timespan_t::from_seconds( sim->expected_max_time() ) ) ) &&
          constant_behavior != buff_constant_behavior::NEVER_CONSTANT )

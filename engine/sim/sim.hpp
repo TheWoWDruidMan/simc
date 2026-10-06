@@ -179,6 +179,9 @@ struct sim_t : private sc_thread_t
   bool scale_itemlevel_down_only; // Items below the value of scale_to_itemlevel will not be scaled up.
   bool disable_set_bonuses; // Disables all set bonuses.
   bool bracketsim_legacy_set_bonuses; // BracketSim: also simulate set bonuses from before The War Within.
+  // BracketSim (6 Oct 2026): false during pre-combat and combat set-up, true once the fight's events run. A buff
+  // started at 0:00 by something the fight does (a Death's Due cast, a trinket press) is not a "constant" buff.
+  bool bracketsim_fight_started = false;
   bool enable_taunts;
   bool use_item_verification;  // Disable use-item action verification in the simulator
   std::string disable_2_set; // Disables all 2 set bonuses for the tier that this is set as

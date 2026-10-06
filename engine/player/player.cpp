@@ -6735,6 +6735,11 @@ void player_t::sequence_add( const action_t* a, const player_t* t )
       {
         auto& data = collected_data.action_sequence.emplace_back( a, t, sim->current_time(), this );
         a->sequence_add_fn( data.action_reporting, data.target_reporting );
+        // BracketSim (6 Oct 2026): a sequence= line records the spell it cast (Dancing Rune Weapon), not the
+        // sequence itself (no spell id), so the json2 ability log shows it. The html label above is kept.
+        if ( auto seq = dynamic_cast<const sequence_t*>( a ); seq && seq->current_action > 0 &&
+             as<size_t>( seq->current_action ) <= seq->sub_actions.size() )
+          data.action = seq->sub_actions[ seq->current_action - 1 ];
       }
     }
     else

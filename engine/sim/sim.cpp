@@ -1798,7 +1798,9 @@ void sim_t::combat()
   // combat_end   will flush any events remaining due to early termination
   // In the future, flushing may occur in event manager execute().
 
+  bracketsim_fight_started = false;
   combat_begin();
+  bracketsim_fight_started = true;
   event_mgr.execute();
   combat_end();
 }

@@ -2935,6 +2935,9 @@ void scars_of_fraternal_strife( special_effect_t& effect )
         : stat_buff_t( e.player, "scars_of_fraternal_strife_1", e.player->find_spell( 368635 ), e.item )
       {
         name_str_reporting = "the_first_rune";
+        // BracketSim (6 Oct 2026): applied at the pull and removed by the final rune, so never "always up" - a
+        // constant buff is hidden from the sample ability log, and the first rune never showed there.
+        set_constant_behavior( buff_constant_behavior::NEVER_CONSTANT );
 
         // timespan_t echo_delay = timespan_t::from_seconds( data().effectN( 3 ).base_value() ); NYI
         // double echo_pct = data().effectN( 2 ).percent();

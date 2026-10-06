@@ -134,7 +134,7 @@ void devourer( player_t* p )
   annihilator_ranged->add_action( "use_item,slot=trinket1,if=level<35&!buff.metamorphosis.up&buff.void_metamorphosis_stack.at_max_stacks&cooldown.void_ray.ready&(trinket.1.is.pendant_of_the_violet_eye|trinket.1.is.meteorite_crystal)" );
   annihilator_ranged->add_action( "use_item,slot=trinket2,if=level<35&!buff.metamorphosis.up&buff.void_metamorphosis_stack.at_max_stacks&cooldown.void_ray.ready&(trinket.2.is.pendant_of_the_violet_eye|trinket.2.is.meteorite_crystal)" );
   annihilator_ranged->add_action( "void_ray,if=level<35&!buff.metamorphosis.up&buff.void_metamorphosis_stack.at_max_stacks&bracketsim_cast_stack_window_remains>0" );
-  // BracketSim, level 30 only (4 Oct 2026, server58: "it still does the meta window without trinkets when it should hold
+  // BracketSim, level 30 only (4 Oct 2026, a player: "it still does the meta window without trinkets when it should hold
   // meta for trinkets"): with the Pendant/Crystal worn, Meta waits for the trinket window unless waiting would cost a
   // Meta - the trinket is back too late for this fight, or there is time for another Meta after the held one. Same
   // seed, 6-8k iterations: 3 min +1.6%, 4 min +0.9%, 5-7 min +0.3%, never below the old line. Holding unconditionally
