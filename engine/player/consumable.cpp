@@ -570,6 +570,11 @@ struct potion_t : public dbc_consumable_base_t
     {
       timespan_t duration = consumable_buff->buff_duration();
 
+      // BracketSim (7 Oct 2026, a player): Refined Palate (Venthyr, Theotar) - "The effects of combat potions last 100% to
+      // 200% longer" (336243: effects 100 and 200). Rolled per potion, evenly between the two.
+      if ( player->legacy_soulbinds.has( legacy_soulbind::REFINED_PALATE ) )
+        duration *= 1.0 + rng().range( 1.0, 2.0 );
+
       if ( !player->in_combat )
       {
         duration -= pre_pot_time;

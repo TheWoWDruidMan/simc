@@ -40,6 +40,7 @@ struct player_t;
 struct buff_t;
 struct cooldown_t;
 struct action_t;
+struct shuffled_rng_t;
 
 namespace legacy_soulbind
 {
@@ -89,6 +90,9 @@ enum trait_e : unsigned
   BONDED_HEARTS       = 352503,  // Night Fae/ Niya
   GNASHING_CHOMPERS   = 323919,  // Necrolord/ Emeni
   BETTER_TOGETHER     = 351146,  // Kyrian   / Pelagos
+  NEWFOUND_RESOLVE    = 351149,  // Kyrian   / Pelagos     (7 Oct 2026)
+  NIYAS_TOOLS_BURRS   = 320659,  // Night Fae/ Niya        (7 Oct 2026)
+  REFINED_PALATE      = 336243,  // Venthyr  / Theotar the Mad Duke (7 Oct 2026)
 
   /*
    * VOLATILE SOLVENT, and how a spell the client no longer exports was recovered
@@ -256,6 +260,9 @@ struct effects_t
 
   // Volatile Solvent's Humanoid benefit, triggered by casting Fleshcraft.
   buff_t* volatile_solvent_humanoid = nullptr;
+  buff_t* newfound_resolve      = nullptr;
+  action_t* spiked_burrs        = nullptr;
+  shuffled_rng_t* newfound_doubt = nullptr;   // built at init, as class modules do (a mid-fight build crashed)
 
   bool has( unsigned id ) const
   {

@@ -4,6 +4,8 @@
 #include "player/legacy_soulbind_effects.hpp"
 
 #include "action/action_state.hpp"
+#include "action/dbc_proc_callback.hpp"
+#include "item/special_effect.hpp"
 #include "action/spell.hpp"
 #include "buff/buff.hpp"
 #include "dbc/dbc.hpp"
@@ -11,6 +13,7 @@
 #include "player/player.hpp"
 #include "sim/cooldown.hpp"
 #include "sim/event.hpp"
+#include "sim/proc_rng.hpp"
 #include "sim/sim.hpp"
 
 #include <algorithm>
@@ -108,11 +111,81 @@ int enchanted_armor_pieces( const player_t* p )
 }
 }  // namespace
 
+namespace
+{
+/*
+ * NIYA'S TOOLS: BURRS (7 Oct 2026, a player). "Your damaging attacks and spells have a chance to toss Niya's Spiked Burrs
+ * under your target ... inflicting N Nature damage over 6 sec." Every spell is gone from Midnight's export; the numbers are
+ * the Shadowlands DBC on this machine (simc-shadowlands SpellDataDump): driver 320659 = 1.75 RPPM on yellow melee, yellow
+ * ranged and hostile spells; projectile 321659 = 1 sec delay; DoT 333526 = 6 sec, a tick every 1 sec (hasted), each tick
+ * $points = max(SP, AP) x 0.3312 x (1 + versatility). As Shadowlands SimulationCraft did, the DoT lands on the target after
+ * the delay - a boss is standing on the burrs.
+ */
+struct spiked_burrs_t : public spell_t
+{
+  spiked_burrs_t( player_t* p ) : spell_t( "spiked_burrs", p )
+  {
+    id = 333526;   // the report's icon and tooltip
+    school = SCHOOL_NATURE;
+    background = true;
+    may_crit = tick_may_crit = true;
+    dot_duration = 6_s;
+    base_tick_time = 1_s;
+    hasted_ticks = true;
+    spell_power_mod.tick = 0.3312;
+    travel_delay = 1.0;
+  }
+
+  double composite_total_spell_power() const override
+  {
+    return std::max( spell_t::composite_total_spell_power(), spell_t::composite_total_attack_power() );
+  }
+};
+
+stat_pct_buff_type primary_pct_buff_type( const player_t* p )
+{
+  switch ( p->convert_hybrid_stat( STAT_STR_AGI_INT ) )
+  {
+    case STAT_STRENGTH: return STAT_PCT_BUFF_STRENGTH;
+    case STAT_AGILITY:  return STAT_PCT_BUFF_AGILITY;
+    default:            return STAT_PCT_BUFF_INTELLECT;
+  }
+}
+}  // namespace
+
 void effects_t::create_buffs( player_t* p )
 {
+  /*
+   * NEWFOUND RESOLVE (7 Oct 2026, a player): "your Doubt will manifest ... Directly facing your Doubt will overcome it,
+   * granting 10% Intellect and Stamina for 15 sec" - 10% of the PRIMARY stat (352917: Modify Total Stat% 10, $pri). Built
+   * for everyone, like volatile_solvent_humanoid, so `buff.newfound_resolve` resolves on any actor; only the trait triggers
+   * it (combat_begin).
+   */
+  newfound_resolve = make_buff( p, "newfound_resolve" )
+                         ->set_duration( 15_s )
+                         ->set_default_value( 0.10 )
+                         ->set_pct_buff_type( primary_pct_buff_type( p ) );
+
   enabled = !chosen.empty();
   if ( !enabled )
     return;
+
+  if ( has( NEWFOUND_RESOLVE ) )
+    newfound_doubt = p->get_shuffled_rng( "newfound_resolve", 1, 30 );
+
+  if ( has( NIYAS_TOOLS_BURRS ) )
+  {
+    spiked_burrs = new spiked_burrs_t( p );
+    auto burrs = new special_effect_t( p );
+    burrs->name_str     = "niyas_tools_burrs";
+    burrs->type         = SPECIAL_EFFECT_EQUIP;
+    burrs->proc_flags_  = PF_MELEE_ABILITY | PF_RANGED_ABILITY | PF_NONE_HARMFUL | PF_MAGIC_SPELL;
+    burrs->proc_flags2_ = PF2_ALL_HIT;
+    burrs->ppm_         = -1.75;   // real PPM, as 320659 states; no haste scaling listed
+    burrs->rppm_scale_  = RPPM_NONE;
+    burrs->execute_action = spiked_burrs;
+    new dbc_proc_callback_t( p, *burrs );
+  }
 
   // ---------------------------------------------------------------- Kyrian --
   // "Chance to critical strike is increased by 2% for every nearby enemy or
@@ -584,6 +657,26 @@ void effects_t::combat_begin( player_t* p )
   // Tactics, which is the trait that arms it.
   if ( has( WILD_HUNT_STRATAGEM ) && has( WILD_HUNT_TACTICS ) )
     wild_hunt_stratagem->trigger();
+
+  /*
+   * Newfound Resolve's Doubt: 351149 rolls every 3 sec (Periodic Dummy). Shadowlands SimulationCraft's model, kept: a shuffled
+   * 1-in-30 roll (about once per 90 sec), and the player faces it after ~4 sec (gauss, 20%), never sooner than its 0.9 sec
+   * travel + 2 sec, never later than the 11 sec Trial of Doubt lasts; facing it always succeeds.
+   */
+  if ( has( NEWFOUND_RESOLVE ) && newfound_doubt )
+  {
+    buff_t* resolve = newfound_resolve;
+    shuffled_rng_t* doubt = newfound_doubt;
+    timespan_t first = timespan_t::from_seconds( p->rng().range( 0.0, 3.0 ) );
+    make_event( p->sim, first, [ p, resolve, doubt ] {
+      make_repeating_event( p->sim, 3_s, [ p, resolve, doubt ] {
+        if ( !doubt->trigger() )
+          return;
+        double face = std::clamp( p->rng().gauss( 4.0, 0.8 ), 2.9, 11.0 );
+        make_event( p->sim, timespan_t::from_seconds( face ), [ resolve ] { resolve->trigger(); } );
+      } );
+    } );
+  }
 }
 
 double effects_t::player_multiplier( const player_t* p ) const
