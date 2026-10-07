@@ -141,7 +141,9 @@ inline const entry_t* table( std::size_t& n )
     {  107,  338319, "Haunting Apparitions", { 31, 34.1, 37.2, 40.3, 43.4, 46.5, 49.6, 52.7, 55.8, 58.9, 62, 65.1, 68.2, 71.3, 74.4 } },
     {  108,  338330, "Insatiable Appetite", { 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2, 2.1, 2.2, 2.3, 2.4 } },
     {  109,  338318, "Unruly Winds", { 15, 17, 20, 22, 25, 27, 30, 32, 35, 37, 40, 42, 45, 47, 50 } },
-    {  110,  338322, "Focused Lightning", { 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12 } },
+    // BracketSim (7 Oct 2026): the live game tooltip, +2.5% to +6% per Maelstrom Weapon stack by rank (rank 11 +5%), not
+    // the Shadowlands table (5-12, which applied +10% per stack at rank 11). Same check as Merciless Bonegrinder.
+    {  110,  338322, "Focused Lightning", { 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5, 5.25, 5.5, 5.75, 6 } },
     {  111,  338331, "Magma Fist", { 12, 13.8, 15.6, 17.4, 19.2, 21, 22.8, 24.6, 26.4, 28.2, 30, 31.8, 33.6, 35.4, 37.2 } },
     {  112,  338325, "Chilled to the Core", { 30, 33, 36, 39, 42, 45, 48, 51, 54, 57, 60, 63, 66, 69, 72 } },
     {  113,  338332, "Mind Devourer", { 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12 } },
