@@ -4298,6 +4298,15 @@ void singularity_supreme( special_effect_t& effect )
 */
 void gavel_of_the_first_arbiter( special_effect_t& effect )
 {
+  // BracketSim (7 Oct 2026, player report): a rotation that checks these buffs failed to start for any setup without the
+  // Gavel ("Buff 'boon_of_the_end_active' not found") - e.g. Best Gear comparing it with another weapon. Without the
+  // Gavel they exist and never rise, as the SimulationCraft fallbacks for Singularity Supreme and others do.
+  if ( unique_gear::create_fallback_buffs( effect, { "boon_of_looming_winter_active", "boon_of_divine_command_active",
+                                                   "boon_of_harvested_hope_active", "boon_of_assured_victory_active",
+                                                   "boon_of_the_end_active", "boon_of_the_end_str",
+                                                   "boon_of_looming_winter_absorb" } ) )
+    return;
+
   struct twisted_judgment_t : public proc_spell_t
   {
     std::vector<buff_t*> buffs;
@@ -5199,7 +5208,7 @@ void register_special_effects()
 
     // 9.2 Weapons
     unique_gear::register_special_effect( 367952, items::singularity_supreme, true );
-    unique_gear::register_special_effect( 367953, items::gavel_of_the_first_arbiter );
+    unique_gear::register_special_effect( 367953, items::gavel_of_the_first_arbiter, true );
 
     // Armor
     unique_gear::register_special_effect( 352081, items::passablyforged_credentials );
