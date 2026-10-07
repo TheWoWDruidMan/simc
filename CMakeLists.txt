@@ -69,6 +69,11 @@ execute_process(
     OUTPUT_VARIABLE GIT_COMMIT_HASH
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
+# BracketSim (7 Oct 2026): a build made from a private working copy names the PUBLIC fork commit it matches, so a
+# report's engine version is one anyone can look up. Set BRACKETSIM_GIT_REV when configuring; unset = the checkout's own.
+if(DEFINED ENV{BRACKETSIM_GIT_REV})
+    set(GIT_COMMIT_HASH $ENV{BRACKETSIM_GIT_REV})
+endif()
 
 # link in all activated targets
 add_subdirectory(engine)
