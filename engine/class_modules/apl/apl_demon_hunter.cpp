@@ -352,9 +352,12 @@ void havoc( player_t* p )
 //havoc_ptr_apl_end
 // clang-format on
 
+// BracketSim (7 Oct 2026 SimulationCraft merge): upstream rewrote the Vengeance rotation for level 80 hero-tree
+// builds. Same seed on the merged engine, the OLD rotation (this function: the pre-merge list, our no-hero-tree
+// fall-through and the level-45 Annihilator choice, unchanged) beats the new one at 30-50 by 1.0-2.9%; the new one
+// wins at 60 (+2.6%) and 80 (+2.9%), 70 ties. Below 60 keeps the old list, so no bracket loses DPS to the merge.
 // clang-format off
-//vengeance_apl_start
-void vengeance( player_t* p )
+static void vengeance_below_60( player_t* p )
 {
   action_priority_list_t* default_ = p->get_action_priority_list( "default" );
   action_priority_list_t* precombat = p->get_action_priority_list( "precombat" );
@@ -601,6 +604,170 @@ void vengeance( player_t* p )
   trinkets->add_action( "use_item,use_off_gcd=1,slot=trinket1,if=!variable.trinket_1_buffs&(variable.damage_trinket_priority=1|trinket.2.cooldown.remains|trinket.2.cooldown.duration=0)&gcd.remains>0.1", "Non-buff on-use trinkets (direct damage): fire on cooldown, off-GCD" );
   trinkets->add_action( "use_item,use_off_gcd=1,slot=trinket2,if=!variable.trinket_2_buffs&(variable.damage_trinket_priority=2|trinket.1.cooldown.remains|trinket.1.cooldown.duration=0)&gcd.remains>0.1" );
   trinkets->add_action( "use_item,slot=trinket1,if=variable.execute", "End of fight: dump everything" );
+  trinkets->add_action( "use_item,slot=trinket2,if=variable.execute" );
+}
+// clang-format on
+
+// clang-format off
+//vengeance_apl_start
+void vengeance( player_t* p )
+{
+  if ( p->true_level < 60 )  // BracketSim: see vengeance_below_60
+  {
+    vengeance_below_60( p );
+    return;
+  }
+
+  action_priority_list_t* default_ = p->get_action_priority_list( "default" );
+  action_priority_list_t* precombat = p->get_action_priority_list( "precombat" );
+  action_priority_list_t* aldrachi_reaver = p->get_action_priority_list( "aldrachi_reaver" );
+  action_priority_list_t* ar_quick_consume = p->get_action_priority_list( "ar_quick_consume" );
+  action_priority_list_t* ar_fillers = p->get_action_priority_list( "ar_fillers" );
+  action_priority_list_t* ar_glaive_cycle = p->get_action_priority_list( "ar_glaive_cycle" );
+  action_priority_list_t* annihilator = p->get_action_priority_list( "annihilator" );
+  action_priority_list_t* anni_cooldowns = p->get_action_priority_list( "anni_cooldowns" );
+  action_priority_list_t* anni_voidfall_spending = p->get_action_priority_list( "anni_voidfall_spending" );
+  action_priority_list_t* anni_meta_entry = p->get_action_priority_list( "anni_meta_entry" );
+  action_priority_list_t* anni_pre_meta_spb = p->get_action_priority_list( "anni_pre_meta_spb" );
+  action_priority_list_t* anni_generate_fury = p->get_action_priority_list( "anni_generate_fury" );
+  action_priority_list_t* anni_filler_no_spend = p->get_action_priority_list( "anni_filler_no_spend" );
+  action_priority_list_t* trinkets = p->get_action_priority_list( "trinkets" );
+
+  precombat->add_action( "snapshot_stats" );
+  precombat->add_action( "sigil_of_flame" );
+  precombat->add_action( "sigil_of_spite,if=hero_tree.aldrachi_reaver|talent.soul_carver" );
+  precombat->add_action( "immolation_aura" );
+
+  default_->add_action( "variable,name=aoe,value=spell_targets.spirit_bomb>=3" );
+  default_->add_action( "variable,name=execute,value=fight_remains<20" );
+  default_->add_action( "variable,name=is_dungeon,value=fight_style.dungeonroute|fight_style.dungeonslice" );
+  default_->add_action( "cycling_variable,name=dung_pull_ttd,op=reset" );
+  default_->add_action( "cycling_variable,name=dung_pull_ttd,op=max,value=target.time_to_die" );
+  default_->add_action( "variable,name=dung_next_pull,value=variable.is_dungeon&raid_event.adds.exists&raid_event.pull.remains<12&(raid_event.adds.has_boss|raid_event.adds.count>=3)" );
+  default_->add_action( "variable,name=dung_cd_ok,value=variable.execute|!variable.is_dungeon|(variable.dung_pull_ttd>12&!variable.dung_next_pull)" );
+  default_->add_action( "variable,name=dung_meta_ok,value=variable.execute|!variable.is_dungeon|(variable.dung_pull_ttd>(15-5*hero_tree.annihilator)&!variable.dung_next_pull)" );
+  default_->add_action( "variable,name=trinket_1_buffs,value=trinket.1.has_use_buff|(trinket.1.has_buff.agility|trinket.1.has_buff.mastery|trinket.1.has_buff.versatility|trinket.1.has_buff.haste|trinket.1.has_buff.crit|trinket.1.has_buff.attack_power)" );
+  default_->add_action( "variable,name=trinket_2_buffs,value=trinket.2.has_use_buff|(trinket.2.has_buff.agility|trinket.2.has_buff.mastery|trinket.2.has_buff.versatility|trinket.2.has_buff.haste|trinket.2.has_buff.crit|trinket.2.has_buff.attack_power)" );
+  default_->add_action( "variable,name=trinket_priority,op=setif,value=2,value_else=1,condition=!variable.trinket_1_buffs&variable.trinket_2_buffs|variable.trinket_2_buffs&((trinket.2.proc.any_dps.duration)*trinket.2.proc.any_dps.default_value)>((trinket.1.proc.any_dps.duration)*trinket.1.proc.any_dps.default_value)" );
+  default_->add_action( "variable,name=damage_trinket_priority,op=setif,value=2,value_else=1,condition=!variable.trinket_1_buffs&!variable.trinket_2_buffs&trinket.2.ilvl>=trinket.1.ilvl" );
+  default_->add_action( "variable,name=fiery_demise_active,value=talent.fiery_demise&dot.fiery_brand.ticking" );
+  default_->add_action( "variable,name=fragment_target,op=setif,value=5+apex.2,value_else=variable.fiery_demise_active*3+!variable.fiery_demise_active*(5-buff.metamorphosis.up),condition=hero_tree.aldrachi_reaver" );
+  default_->add_action( "auto_attack" );
+  default_->add_action( "disrupt,if=target.debuff.casting.react" );
+  default_->add_action( "infernal_strike,use_off_gcd=1" );
+  default_->add_action( "demon_spikes,use_off_gcd=1,if=!buff.demon_spikes.up&in_combat" );
+  default_->add_action( "run_action_list,name=aldrachi_reaver,if=hero_tree.aldrachi_reaver" );
+  default_->add_action( "run_action_list,name=annihilator,if=hero_tree.annihilator" );
+  // BracketSim legacy compatibility: hero talent trees do not exist below
+  // level 71, so on a level 50 or 60 character every condition above is
+  // false and the rotation is never reached. aldrachi_reaver carries the plainest
+  // rotation of the alternatives; its hero-specific lines fail their own
+  // conditions when the tree is absent. 7 Oct 2026 (upstream rewrote these lists): Aldrachi Reaver beats Annihilator
+  // at every level 30-70, same seed (-1.2% to -12.5% for Annihilator), so the old level-45 Annihilator choice is gone.
+  default_->add_action( "run_action_list,name=aldrachi_reaver,if=!hero_tree.aldrachi_reaver&!hero_tree.annihilator" );
+
+  aldrachi_reaver->add_action( "sigil_of_flame" );
+  aldrachi_reaver->add_action( "immolation_aura,if=in_combat" );
+  aldrachi_reaver->add_action( "metamorphosis,use_off_gcd=1,if=buff.untethered_rage.up|(!buff.metamorphosis.up&variable.dung_meta_ok)" );
+  aldrachi_reaver->add_action( "soul_cleave,if=!variable.aoe&soul_fragments.total>=variable.fragment_target&!(buff.glaive_flurry.up&buff.rending_strike.up&variable.prio_slashes)" );
+  aldrachi_reaver->add_action( "variable,name=anchor_rem,value=(variable.anchor_at>0)*(20-(time-variable.anchor_at))", "Seconds left on the Reaver's Mark stacks applied by the last Fracture-second cycle" );
+  aldrachi_reaver->add_action( "variable,name=prio_slashes,value=variable.aoe|variable.execute|variable.anchor_rem>11-3*(talent.soul_carver&cooldown.soul_carver.remains<6)-1.5*(talent.sigil_of_spite&cooldown.sigil_of_spite.remains<6)", "Slash-second only while the Mark has time to spare; otherwise go Fracture-second to refresh it" );
+  aldrachi_reaver->add_action( "call_action_list,name=trinkets" );
+  aldrachi_reaver->add_action( "reavers_glaive,if=!buff.rending_strike.up&!buff.glaive_flurry.up&(variable.execute|variable.prio_slashes|variable.anchor_rem<=4*gcd.max|buff.art_of_the_glaive.stack+soul_fragments>=(18-buff.metamorphosis.up))" );
+  aldrachi_reaver->add_action( "call_action_list,name=ar_glaive_cycle,if=buff.rending_strike.up|buff.glaive_flurry.up" );
+  aldrachi_reaver->add_action( "fiery_brand,if=charges>=2|!variable.fiery_demise_active|variable.execute" );
+  aldrachi_reaver->add_action( "sigil_of_spite,if=variable.dung_cd_ok&!buff.reavers_glaive.up" );
+  aldrachi_reaver->add_action( "call_action_list,name=ar_quick_consume,if=buff.art_of_the_glaive.stack+soul_fragments>=20|variable.aoe&soul_fragments>=6" );
+  aldrachi_reaver->add_action( "fel_devastation,if=variable.dung_cd_ok&fury>85&(soul_fragments.inactive>1|variable.aoe)" );
+  aldrachi_reaver->add_action( "soul_carver,if=variable.dung_cd_ok&(variable.fiery_demise_active|variable.execute)" );
+  aldrachi_reaver->add_action( "call_action_list,name=ar_fillers" );
+
+  ar_quick_consume->add_action( "spirit_bomb,if=variable.aoe" );
+  ar_quick_consume->add_action( "soul_cleave,if=!variable.aoe" );
+
+  ar_fillers->add_action( "fracture,if=buff.warblades_hunger.stack" );
+  ar_fillers->add_action( "soul_cleave,if=(!variable.aoe|fury>=2*action.soul_cleave.cost|cooldown.fracture.charges>=1|cooldown.fracture.remains<=gcd.max)&!(buff.glaive_flurry.up&buff.rending_strike.up&variable.prio_slashes)" );
+  ar_fillers->add_action( "fracture" );
+  ar_fillers->add_action( "felblade" );
+  ar_fillers->add_action( "fel_devastation" );
+
+  ar_glaive_cycle->add_action( "potion,use_off_gcd=1" );
+  ar_glaive_cycle->add_action( "invoke_external_buff,name=power_infusion" );
+  ar_glaive_cycle->add_action( "variable,name=anchor_at,value=time,if=buff.rending_strike.up&!buff.glaive_flurry.up" );
+  ar_glaive_cycle->add_action( "fracture,if=buff.rending_strike.up&(variable.prio_slashes|!buff.glaive_flurry.up)" );
+  ar_glaive_cycle->add_action( "soul_cleave,if=buff.glaive_flurry.up&(!variable.prio_slashes|!buff.rending_strike.up)" );
+  ar_glaive_cycle->add_action( "felblade" );
+
+  annihilator->add_action( "invoke_external_buff,name=power_infusion,if=buff.voidfall_spending.stack=3|variable.execute" );
+  annihilator->add_action( "call_action_list,name=anni_voidfall_spending,if=buff.voidfall_spending.up" );
+  annihilator->add_action( "sigil_of_flame,if=soul_fragments<=2+talent.soul_sigils" );
+  annihilator->add_action( "fracture,if=buff.voidfall_building.stack>=2&soul_fragments.total>=variable.fragment_target" );
+  annihilator->add_action( "call_action_list,name=anni_generate_fury,if=buff.voidfall_building.stack>=2&cooldown.fracture.charges_fractional>=0.75" );
+  annihilator->add_action( "call_action_list,name=anni_meta_entry,if=buff.untethered_rage.up|(variable.dung_meta_ok&cooldown.metamorphosis.remains<3*gcd.max)" );
+  annihilator->add_action( "call_action_list,name=anni_cooldowns,if=variable.dung_cd_ok&(!talent.fiery_demise|variable.fiery_demise_active|cooldown.fiery_brand.remains>20|variable.execute)" );
+  annihilator->add_action( "fracture,if=full_recharge_time<gcd.max" );
+  annihilator->add_action( "immolation_aura,if=(talent.fallout&variable.aoe)|(talent.charred_flesh&variable.fiery_demise_active)" );
+  annihilator->add_action( "spirit_bomb,if=soul_fragments>=variable.fragment_target" );
+  annihilator->add_action( "immolation_aura" );
+  annihilator->add_action( "sigil_of_flame" );
+  annihilator->add_action( "fracture,if=soul_fragments.total<=4|fury<40" );
+  annihilator->add_action( "soul_cleave,if=!(apex.3&!buff.untethered_rage.up&buff.seething_anger.stack>=10)&!cooldown.metamorphosis.up|(!talent.sigil_of_spite|!action.sigil_of_spite.placed)" );
+  annihilator->add_action( "felblade" );
+  annihilator->add_action( "throw_glaive" );
+
+  anni_cooldowns->add_action( "spirit_bomb,if=soul_fragments>=variable.fragment_target" );
+  anni_cooldowns->add_action( "sigil_of_spite,if=soul_fragments<=2+talent.soul_sigils" );
+  anni_cooldowns->add_action( "call_action_list,name=anni_generate_fury,if=cooldown.fel_devastation.up&fury<50" );
+
+  anni_voidfall_spending->add_action( "soul_cleave,if=prev_gcd.1.spirit_bomb&buff.voidfall_spending.stack=3", "Soul Cleave right after the 3-stack Spirit Bomb lands inside its window for a bonus meteor" );
+  anni_voidfall_spending->add_action( "fiery_brand,if=charges>=2|!variable.fiery_demise_active" );
+  anni_voidfall_spending->add_action( "fracture,if=buff.voidfall_spending.stack=buff.voidfall_spending.max_stack&cooldown.spirit_bomb.ready&soul_fragments.total>=variable.fragment_target&fury>=45&fury<75" );
+  anni_voidfall_spending->add_action( "soul_cleave,if=cooldown.spirit_bomb.remains>gcd.max*4" );
+  anni_voidfall_spending->add_action( "spirit_bomb,if=(soul_fragments.total>=variable.fragment_target|buff.voidfall_spending.stack=3)&(buff.voidfall_spending.stack<3|fury>=75)" );
+  anni_voidfall_spending->add_action( "felblade,if=(fury<40&cooldown.spirit_bomb.remains<=gcd.max)|(fury<25&cooldown.spirit_bomb.remains>gcd.max)" );
+  anni_voidfall_spending->add_action( "immolation_aura,if=(fury<40&cooldown.spirit_bomb.remains<=gcd.max)|(fury<25&cooldown.spirit_bomb.remains>gcd.max)" );
+  anni_voidfall_spending->add_action( "soul_carver,if=(cooldown.spirit_bomb.remains<=gcd.max)&soul_fragments.total<variable.fragment_target&(!talent.sigil_of_spite|!action.sigil_of_spite.placed)" );
+  anni_voidfall_spending->add_action( "sigil_of_spite,if=(cooldown.spirit_bomb.remains<=gcd.max)&soul_fragments.total<variable.fragment_target" );
+  anni_voidfall_spending->add_action( "call_action_list,name=anni_filler_no_spend" );
+
+  anni_meta_entry->add_action( "metamorphosis,use_off_gcd=1,if=gcd.remains=0&buff.untethered_rage.up&!buff.voidfall_spending.up&cooldown.fracture.charges>=1" );
+  anni_meta_entry->add_action( "sigil_of_spite,if=!cooldown.sigil_of_spite.up" );
+  anni_meta_entry->add_action( "spirit_bomb,if=soul_fragments>=variable.fragment_target&fury>=60" );
+  anni_meta_entry->add_action( "potion,use_off_gcd=1,if=(variable.fiery_demise_active|variable.execute)&(!variable.is_dungeon|in_boss_encounter)" );
+  anni_meta_entry->add_action( "call_action_list,name=trinkets" );
+  anni_meta_entry->add_action( "invoke_external_buff,name=power_infusion" );
+  anni_meta_entry->add_action( "call_action_list,name=anni_pre_meta_spb,if=cooldown.spirit_bomb.remains<3*gcd.max&soul_fragments.total<variable.fragment_target" );
+  anni_meta_entry->add_action( "fiery_brand,if=charges>=2|!variable.fiery_demise_active" );
+  anni_meta_entry->add_action( "sigil_of_spite,if=soul_fragments.total<variable.fragment_target" );
+  anni_meta_entry->add_action( "call_action_list,name=anni_generate_fury,if=fury<75&cooldown.metamorphosis.up&cooldown.spirit_bomb.remains>gcd.max*3" );
+  anni_meta_entry->add_action( "metamorphosis,use_off_gcd=1,if=variable.dung_meta_ok&gcd.remains=0&cooldown.spirit_bomb.remains>gcd.max*3&(soul_fragments.total>=variable.fragment_target|(talent.sigil_of_spite&action.sigil_of_spite.placed))" );
+  anni_meta_entry->add_action( "call_action_list,name=anni_filler_no_spend" );
+
+  anni_pre_meta_spb->add_action( "fracture" );
+  anni_pre_meta_spb->add_action( "immolation_aura,if=variable.aoe" );
+  anni_pre_meta_spb->add_action( "fiery_brand,if=charges>=2|!variable.fiery_demise_active" );
+  anni_pre_meta_spb->add_action( "soul_carver,if=(cooldown.soul_carver.up+cooldown.sigil_of_spite.up+cooldown.fel_devastation.up)>=2" );
+  anni_pre_meta_spb->add_action( "fel_devastation,if=(cooldown.soul_carver.up+cooldown.sigil_of_spite.up+cooldown.fel_devastation.up)>=2" );
+  anni_pre_meta_spb->add_action( "felblade" );
+
+  anni_generate_fury->add_action( "immolation_aura" );
+  anni_generate_fury->add_action( "sigil_of_flame" );
+  anni_generate_fury->add_action( "felblade" );
+  anni_generate_fury->add_action( "fracture" );
+
+  anni_filler_no_spend->add_action( "immolation_aura" );
+  anni_filler_no_spend->add_action( "sigil_of_flame" );
+  anni_filler_no_spend->add_action( "felblade" );
+  anni_filler_no_spend->add_action( "soul_carver,if=!talent.sigil_of_spite|!action.sigil_of_spite.placed" );
+  anni_filler_no_spend->add_action( "sigil_of_spite" );
+  anni_filler_no_spend->add_action( "fracture" );
+  anni_filler_no_spend->add_action( "throw_glaive" );
+
+  trinkets->add_action( "use_item,slot=trinket1,if=variable.trinket_1_buffs&variable.dung_cd_ok&(!trinket.2.has_cooldown|trinket.2.cooldown.remains|variable.trinket_priority=1)" );
+  trinkets->add_action( "use_item,slot=trinket2,if=variable.trinket_2_buffs&variable.dung_cd_ok&(!trinket.1.has_cooldown|trinket.1.cooldown.remains|variable.trinket_priority=2)" );
+  trinkets->add_action( "use_item,use_off_gcd=1,slot=trinket1,if=!variable.trinket_1_buffs&(variable.damage_trinket_priority=1|trinket.2.cooldown.remains|trinket.2.cooldown.duration=0)&gcd.remains>0.1" );
+  trinkets->add_action( "use_item,use_off_gcd=1,slot=trinket2,if=!variable.trinket_2_buffs&(variable.damage_trinket_priority=2|trinket.1.cooldown.remains|trinket.1.cooldown.duration=0)&gcd.remains>0.1" );
+  trinkets->add_action( "use_item,slot=trinket1,if=variable.execute" );
   trinkets->add_action( "use_item,slot=trinket2,if=variable.execute" );
 }
 //vengeance_apl_end

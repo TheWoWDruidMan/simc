@@ -10988,7 +10988,9 @@ struct festering_base_t : public death_knight_melee_attack_t
   {
     min_ghouls = as<int>( p->spec.festering_strike->effectN( 3 ).base_value() );
     // rng().range() does not include the max value, so we add 1 here
-    max_ghouls = as<int>( p->spec.festering_strike->effectN( 4 ).base_value() + 1 );
+    max_ghouls  = as<int>( p->spec.festering_strike->effectN( 4 ).base_value() + 1 );
+    trigger_gcd = data().gcd();
+    gcd_type    = gcd_haste_type::ATTACK_HASTE;
   }
 
   double composite_target_multiplier( player_t* target ) const override
@@ -11021,11 +11023,20 @@ private:
 
 struct festering_scythe_t final : public festering_base_t
 {
-  festering_scythe_t( std::string_view n, death_knight_t* p )
-    : festering_base_t( n, p, p->spell.festering_scythe )
+  festering_scythe_t( std::string_view n, death_knight_t* p ) : festering_base_t( n, p, p->spell.festering_scythe )
   {
-    aoe             = -1;
-    background      = true;
+    aoe = -1;
+  }
+
+  timespan_t gcd() const override
+  {
+    timespan_t t = festering_base_t::gcd();
+
+    // Festering scythe currently double dips the hasted gcd.
+    if ( p()->bugs )
+      t *= p()->composite_melee_haste();
+
+    return t;
   }
 
   void execute() override
@@ -11055,7 +11066,8 @@ struct festering_strike_t final : public festering_base_t
       cankerous_wounds_chance = p->azerite.cankerous_wounds.spell()->effectN( 2 ).base_value() / 100;
 
     if ( p->talent.unholy.festering_scythe.ok() )
-      set_replacement_action( get_action<festering_scythe_t>( "festering_scythe", p ), p->buffs.festering_scythe, !p->options.wcl_reporting_mode );
+      set_replacement_action( new festering_scythe_t( "festering_scythe", p ), p->buffs.festering_scythe,
+                              !p->options.wcl_reporting_mode );
   }
 
   // Flat extra damage on the strike itself.
@@ -13339,7 +13351,7 @@ struct sanguinary_burst_t : public death_knight_spell_t
 struct scourge_strike_base_t : public death_knight_melee_attack_t
 {
   scourge_strike_base_t( std::string_view name, death_knight_t* p, const spell_data_t* spell )
-    : death_knight_melee_attack_t( name, p, spell ), summon_ghoul( nullptr ), errupt_mult( 1.0 )
+    : death_knight_melee_attack_t( name, p, spell ), summon_ghoul( nullptr ), errupt_mult( 1.0 ), max_targets( 0 )
   {
     errupt_mult = p->talent.unholy.scourge_strike->effectN( 2 ).percent();
 
@@ -13348,13 +13360,20 @@ struct scourge_strike_base_t : public death_knight_melee_attack_t
 
     weapon = &( player->main_hand_weapon );
     aoe    = 1;
+    max_targets = data().max_targets();
 
     summon_ghoul = p->pet_summon.fs_ghoul;
   }
 
   int n_targets() const override
   {
-    return p()->buffs.clawing_shadows->check() ? aoe + as<int>( p()->buffs.clawing_shadows->check_stack_value() ) : aoe;
+    auto t = aoe;
+
+    if ( p()->talent.unholy.clawing_shadows.ok() )
+      t += as<int>( p()->buffs.clawing_shadows->check_stack_value() );
+
+    // Scourge Strike is hard capped at 5 targets total in its max_targets data for some unknown reason.
+    return std::min( t, max_targets );
   }
 
   std::vector<player_t*>& target_list() const override
@@ -13484,6 +13503,7 @@ struct scourge_strike_base_t : public death_knight_melee_attack_t
 
 private:
   action_t* summon_ghoul;
+  int max_targets;
 
 public:
   double errupt_mult;
@@ -19222,97 +19242,13 @@ struct death_knight_module_t : public module_t
   void register_hotfixes() const override
   {
     /*
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Frost aura (direct) buffed 6%", 179689,
+    hotfix::register_effect( "Death Knight", "2026-10-2", "Blightfall reverted to 100%.", 1285178,
                              hotfix::HOTFIX_FLAG_LIVE )
         .field( "base_value" )
         .operation( hotfix::HOTFIX_SET )
-        .modifier( 2 )
-        .verification_value( -4 );
-
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Frost aura (periodic) buffed 6%", 191174,
-                             hotfix::HOTFIX_FLAG_LIVE )
-        .field( "base_value" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( 2 )
-        .verification_value( -4 );
-
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Frost aura (pet) buffed 6%", 844541,
-                             hotfix::HOTFIX_FLAG_LIVE )
-        .field( "base_value" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( 2 )
-        .verification_value( -4 );
-
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Frost aura (guardian) buffed 6%", 1032340,
-                             hotfix::HOTFIX_FLAG_LIVE )
-        .field( "base_value" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( 2 )
-        .verification_value( -4 );
-
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Frost aura (melee) buffed 6%", 1052714,
-                             hotfix::HOTFIX_FLAG_LIVE )
-        .field( "base_value" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( 314 )
-        .verification_value( 297 );
-
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Obliterate (oh) buffed 15%", 60372,
-                             hotfix::HOTFIX_FLAG_LIVE )
-        .field( "ap_coefficient" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( .6210621 )
-        .verification_value( .540054 );
-
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Obliterate (mh) buffed 15%", 331344,
-                             hotfix::HOTFIX_FLAG_LIVE )
-        .field( "ap_coefficient" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( .6210621 )
-        .verification_value( .540054 );
-
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Obliterate (2h) buffed 15%", 815754,
-                             hotfix::HOTFIX_FLAG_LIVE )
-        .field( "ap_coefficient" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( .919399 )
-        .verification_value( .799477 );
-
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Obliterate (oh) buffed 15%", 60372,
-                             hotfix::HOTFIX_FLAG_LIVE )
-        .field( "ap_coefficient" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( .6210621 )
-        .verification_value( .540054 );
-
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Obliterate (mh frost) buffed 15%", 1275166,
-                             hotfix::HOTFIX_FLAG_LIVE )
-        .field( "ap_coefficient" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( .6210621 )
-        .verification_value( .540054 );
-
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Obliterate (oh frost) buffed 15%", 1275169,
-                             hotfix::HOTFIX_FLAG_LIVE )
-        .field( "ap_coefficient" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( .6210621 )
-        .verification_value( .540054 );
-
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Obliterate (2h) buffed 15%", 815754,
-                             hotfix::HOTFIX_FLAG_LIVE )
-        .field( "ap_coefficient" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( .919399 )
-        .verification_value( .799477 );
-
-    hotfix::register_effect( "Death Knight", "2026-08-22", "Obliterate (2h frost) buffed 15%", 1275170,
-                             hotfix::HOTFIX_FLAG_LIVE )
-        .field( "ap_coefficient" )
-        .operation( hotfix::HOTFIX_SET )
-        .modifier( .919399 )
-        .verification_value( .799477 );
-   */
+        .modifier( 100 )
+        .verification_value( 200 );
+    */
   }
 
   void register_actor_initializers( sim_t* ) const override
