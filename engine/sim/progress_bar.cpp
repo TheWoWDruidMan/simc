@@ -129,7 +129,10 @@ bool progress_bar_t::update( bool finished, int index )
   auto progress = sim.progress( nullptr, index );
   if ( ! finished )
   {
-    auto update_interval = last_update - chrono::wall_clock::now();
+    // BracketSim (7 Oct 2026): was last_update - now, always negative, so the "at least once a second" rule never fired
+    // and a long single-thread run (My PC's tie-break parts) printed nothing until 1% of its iterations - the page sat at
+    // 0% for ~20 seconds. Progress output only; results are unchanged.
+    auto update_interval = chrono::wall_clock::now() - last_update;
     if ( progress.current_iterations < update_number + interval &&
          update_interval < max_interval_time )
     {
