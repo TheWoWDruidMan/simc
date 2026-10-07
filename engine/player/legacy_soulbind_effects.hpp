@@ -94,6 +94,7 @@ enum trait_e : unsigned
   NIYAS_TOOLS_BURRS   = 320659,  // Night Fae/ Niya        (7 Oct 2026)
   REFINED_PALATE      = 336243,  // Venthyr  / Theotar the Mad Duke (7 Oct 2026)
   PARTY_FAVORS        = 351750,  // Venthyr  / Theotar the Mad Duke (7 Oct 2026)
+  PUSTULE_ERUPTION    = 351094,  // Necrolord/ Emeni        (7 Oct 2026)
 
   /*
    * VOLATILE SOLVENT, and how a spell the client no longer exports was recovered
@@ -265,6 +266,7 @@ struct effects_t
   action_t* spiked_burrs        = nullptr;
   shuffled_rng_t* newfound_doubt = nullptr;   // built at init, as class modules do (a mid-fight build crashed)
   buff_t* party_favors[ 4 ]     = {};        // the Mad Duke's Teas this actor may drink (one per fight)
+  buff_t* trembling_pustules    = nullptr;   // Pustule Eruption: pustules from Fleshcraft
   unsigned party_favor_count    = 0;
 
   bool has( unsigned id ) const

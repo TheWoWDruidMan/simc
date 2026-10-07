@@ -4582,6 +4582,22 @@ void player_t::create_actions()
     }
   }
 
+  // BracketSim legacy compatibility: Pustule Eruption (7 Oct 2026) lives on Fleshcraft's pustules - the same free
+  // pre-pull cast Volatile Solvent gets below (9 pustules). No in-combat refresh: the channel costs globals.
+  if ( is_player() && legacy_soulbinds.has( legacy_soulbind::PUSTULE_ERUPTION ) &&
+       !legacy_soulbinds.has( legacy_soulbind::VOLATILE_SOLVENT ) &&
+       !util::str_compare_ci( legacy_apl_placement, "none" ) )
+  {
+    auto& pre = get_action_priority_list( "precombat" )->action_list;
+    if ( range::find_if( pre, []( const action_priority_t& ap ) {
+           return util::str_prefix_ci( ap.action_, "fleshcraft" );
+         } ) == pre.end() )
+      // FIRST, not last (7 Oct 2026): appended after a list's own pre-pull casts (Vengeance: Sigil of Flame, Sigil of
+      // Spite, Immolation Aura) it never got its turn - queued, then cancelled at the end of the fight. Shadowlands'
+      // lists opened with it.
+      pre.insert( pre.begin(), { "fleshcraft", "BracketSim legacy ability" } );
+  }
+
   if ( is_player() && legacy_soulbinds.has( legacy_soulbind::VOLATILE_SOLVENT ) &&
        !util::str_compare_ci( legacy_apl_placement, "none" ) )
   {
@@ -4601,7 +4617,10 @@ void player_t::create_actions()
            return util::str_prefix_ci( ap.action_, "fleshcraft" );
          } ) == pre.end() )
     {
-      pre.emplace_back( "fleshcraft", "BracketSim legacy ability" );
+      // FIRST, not last (7 Oct 2026): appended after a list's own pre-pull casts (Vengeance: Sigil of Flame, Sigil of
+      // Spite, Immolation Aura) it never got its turn - queued, then cancelled at the end of the fight. Shadowlands'
+      // lists opened with it.
+      pre.insert( pre.begin(), { "fleshcraft", "BracketSim legacy ability" } );
     }
 
     // And then the in-combat refresh. MEASURED, level 60 Necrolord demonology

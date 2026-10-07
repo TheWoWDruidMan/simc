@@ -460,6 +460,8 @@ public:
     // Vengeance (30 Sep 2026)
     azerite_power_t essence_sever;
     azerite_power_t cycle_of_binding;
+    // Infernal Armor (7 Oct 2026): the Midnight talent of the same name is its successor - same effect.
+    azerite_power_t legacy_infernal_armor;
   } azerite;
 
   // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
@@ -4864,6 +4866,21 @@ struct immolation_aura_t : public demon_hunter_spell_t
     infernal_armor_damage_t( util::string_view name, demon_hunter_t* p )
       : demon_hunter_spell_t( name, p, p->spell.infernal_armor_damage )
     {
+      // Legacy Azerite: Infernal Armor adds its Fire damage to each hit when the talent is also taken.
+      base_dd_adder += p->azerite.legacy_infernal_armor.value( 1 );
+    }
+  };
+
+  // Legacy Azerite: Infernal Armor without the talent - "Immolation Aura ... causes melee attackers to take $s1 Fire
+  // damage" (273239, the trait's own hit), on the same melee-hit-taken path as the talent.
+  struct legacy_infernal_armor_t : public demon_hunter_spell_t
+  {
+    legacy_infernal_armor_t( util::string_view name, demon_hunter_t* p )
+      : demon_hunter_spell_t( name, p, p->find_spell( 273239 ) )
+    {
+      background = true;
+      base_dd_min = base_dd_max = p->azerite.legacy_infernal_armor.value( 1 );
+      spell_power_mod.direct = attack_power_mod.direct = 0;
     }
   };
 
@@ -5041,6 +5058,11 @@ struct immolation_aura_t : public demon_hunter_spell_t
     if ( p->talent.demon_hunter.infernal_armor->ok() && !p->active.infernal_armor )
     {
       p->active.infernal_armor = p->get_background_action<infernal_armor_damage_t>( "infernal_armor" );
+      add_child( p->active.infernal_armor );
+    }
+    else if ( p->azerite.legacy_infernal_armor.enabled() && !p->active.infernal_armor )
+    {
+      p->active.infernal_armor = p->get_background_action<legacy_infernal_armor_t>( "infernal_armor" );
       add_child( p->active.infernal_armor );
     }
 
@@ -11545,6 +11567,7 @@ void demon_hunter_t::init_spells()
   azerite.thirsting_blades              = find_azerite_spell( "Thirsting Blades" );
   azerite.essence_sever                 = find_azerite_spell( "Essence Sever" );
   azerite.cycle_of_binding              = find_azerite_spell( "Cycle of Binding" );
+  azerite.legacy_infernal_armor         = find_azerite_spell( "Infernal Armor" );
 
   // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
   // off the bonus id the original legendary item carried.

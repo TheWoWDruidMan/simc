@@ -5,6 +5,7 @@
 
 #include "action/action_state.hpp"
 #include "action/dbc_proc_callback.hpp"
+#include "action/dot.hpp"
 #include "item/special_effect.hpp"
 #include "action/spell.hpp"
 #include "buff/buff.hpp"
@@ -114,6 +115,42 @@ int enchanted_armor_pieces( const player_t* p )
 namespace
 {
 /*
+ * PUSTULE ERUPTION (7 Oct 2026): "Fleshcraft covers you in 3 pustules per 1 sec channeled. Taking damage or being healed
+ * pops a pustule, dealing 274 Nature damage to nearby enemies". Midnight's export dropped 351094, 352086 and 352095;
+ * the Shadowlands client data gives Trembling Pustules 9 stacks / 2 min and the pop 8 yd, split between targets, and
+ * Shadowlands SimulationCraft's tooltip-read 0.72 x max(spell power, attack power). Shadowlands popped them on a 1 sec
+ * timer; here one pops per melee hit actually taken (BracketSim's rule for "when you take damage" effects - a tank
+ * is hit by the boss, a damage dealer is not).
+ */
+struct pustule_eruption_t : public spell_t
+{
+  buff_t* pustules;
+
+  pustule_eruption_t( player_t* p, buff_t* b ) : spell_t( "pustule_eruption", p ), pustules( b )
+  {
+    background = may_crit = true;
+    school = SCHOOL_NATURE;
+    aoe = -1;
+    split_aoe_damage = true;
+    radius = 8.0;
+    spell_power_mod.direct = 0.72;
+  }
+
+  double composite_total_spell_power() const override
+  {
+    return std::max( spell_t::composite_total_spell_power(), spell_t::composite_total_attack_power() );
+  }
+
+  void execute() override
+  {
+    if ( !pustules || !pustules->check() )
+      return;
+    pustules->decrement();
+    spell_t::execute();
+  }
+};
+
+/*
  * NIYA'S TOOLS: BURRS (7 Oct 2026, a player). "Your damaging attacks and spells have a chance to toss Niya's Spiked Burrs
  * under your target ... inflicting N Nature damage over 6 sec." Every spell is gone from Midnight's export; the numbers are
  * the Shadowlands DBC on this machine (simc-shadowlands SpellDataDump): driver 320659 = 1.75 RPPM on yellow melee, yellow
@@ -185,6 +222,19 @@ void effects_t::create_buffs( player_t* p )
     burrs->rppm_scale_  = RPPM_NONE;
     burrs->execute_action = spiked_burrs;
     new dbc_proc_callback_t( p, *burrs );
+  }
+
+  if ( has( PUSTULE_ERUPTION ) )
+  {
+    trembling_pustules = make_buff( p, "trembling_pustules" )->set_max_stack( 9 )->set_duration( 120_s );
+    auto pop = new special_effect_t( p );
+    pop->name_str     = "pustule_eruption";
+    pop->type         = SPECIAL_EFFECT_EQUIP;
+    pop->proc_flags_  = PF_MELEE_TAKEN | PF_MELEE_ABILITY_TAKEN;
+    pop->proc_flags2_ = PF2_ALL_HIT;
+    pop->proc_chance_ = 1.0;
+    pop->execute_action = new pustule_eruption_t( p, trembling_pustules );
+    new dbc_proc_callback_t( p, *pop );
   }
 
   /*
@@ -896,6 +946,23 @@ struct fleshcraft_t : public spell_t
 
     if ( volatile_solvent && player->legacy_soulbinds.volatile_solvent_humanoid )
       player->legacy_soulbinds.volatile_solvent_humanoid->trigger();
+
+    // Pustule Eruption: a pre-pull cast has no channel, so it hands over the full 9 (Shadowlands did the same).
+    if ( is_precombat && player->legacy_soulbinds.trembling_pustules )
+      player->legacy_soulbinds.trembling_pustules->trigger( 9 );
+  }
+
+  void last_tick( dot_t* d ) override
+  {
+    spell_t::last_tick( d );
+
+    // Pustule Eruption: 3 pustules per full second channeled, granted as the channel ends.
+    if ( player->legacy_soulbinds.trembling_pustules )
+    {
+      int stacks = 3 * static_cast<int>( std::floor( ( base_tick_time * d->current_tick ) / 1_s ) );
+      if ( stacks > 0 )
+        player->legacy_soulbinds.trembling_pustules->trigger( stacks );
+    }
   }
 
   timespan_t composite_dot_duration( const action_state_t* s ) const override
