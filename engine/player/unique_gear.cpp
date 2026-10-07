@@ -82,6 +82,10 @@ namespace item
   void molten_ironfoe( special_effect_t& );
   void chillpike( special_effect_t& );
   void deaths_verdict( special_effect_t& );
+  void goblet_of_nightmarish_ichor( special_effect_t& );
+  void ceaseless_swarmgland( special_effect_t& );
+  void sepulchers_savior( special_effect_t& );
+  void sepulchers_savior_use( special_effect_t& );
   void jackhammer( special_effect_t& );
   void heartrazor( special_effect_t& );
   void untamed_blade( special_effect_t& );
@@ -1201,6 +1205,92 @@ void item::deaths_verdict( special_effect_t& effect )
   effect.custom_buff = buff;
 
   new dbc_proc_callback_t( effect.item, effect );
+}
+
+// BracketSim: Goblet of Nightmarish Ichor, item 139324 (7 Oct 2026). Registered upstream as "222027Trigger", but the
+// Versatility buff (222027) carries 0 - the amount is the DRIVER's second effect (222015: Modify Rating, secondary
+// rating scaled to the item) - so the buff had no stats and was never built. "Taking damage ... creates a Nightmare
+// Ichor nearby. Absorbing the Ichor increases your Versatility": a tank who is hit, picks it up.
+void item::goblet_of_nightmarish_ichor( special_effect_t& effect )
+{
+  effect.trigger_spell_id = 222027;
+  effect.name_str         = "nightmarish_ichor";
+  if ( already_built( effect ) )
+    return;
+
+  auto buff = make_buff<stat_buff_t>( effect.player, effect.name_str, effect.trigger(), effect.item );
+  buff->set_stat( STAT_VERSATILITY_RATING, effect.driver()->effectN( 2 ).average( effect.item ) );
+  effect.custom_buff = buff;
+
+  new dbc_proc_callback_t( effect.item, effect );
+}
+
+// BracketSim: Ceaseless Swarmgland, item 219316 (7 Oct 2026) - no upstream handler. "Taking damage has a high chance
+// to retaliate against attackers, inflicting $s1 x 6 Nature damage over 6 sec": driver 443545 (6 RPPM, damage-taken
+// flags), the DoT 450969 (a tick every 1 sec), $s1 = the driver's first effect scaled to the item. The proc is aimed
+// at the attacker (dbc_proc_callback_t::trigger, 4 Oct 2026). Its damage-reduction half is defensive.
+void item::ceaseless_swarmgland( special_effect_t& effect )
+{
+  auto dot = create_proc_action<generic_proc_t>( "ceaseless_swarm", effect, effect.player->find_spell( 450969 ) );
+  dot->base_td = effect.driver()->effectN( 1 ).average( effect.item );
+  effect.execute_action = dot;
+
+  new dbc_proc_callback_t( effect.item, effect );
+}
+
+// BracketSim: Sepulcher's Savior, item 189584 (7 Oct 2026) - no upstream handler. Two modes, 366059 marking Offense:
+// Offense - "Deal $s2 Cosmic damage to melee attackers" (366057 effect 2, 0.5 sec internal cooldown, melee-taken flags);
+// Defense - more Block. The 90 sec use (366061) in Offense deals $s4 Cosmic damage (366057 effect 4) and switches to
+// Defense; in Defense it shields the most injured party member (not modelled) and switches back. Starts in Offense,
+// the damage mode; a list that presses the use on cooldown alternates hit / shield as the item does.
+static buff_t* sepulchers_savior_offense( player_t* p )
+{
+  if ( buff_t* b = buff_t::find( p, "sepulchers_savior_offense" ) )
+    return b;
+  buff_t* b = make_buff( p, "sepulchers_savior_offense", p->find_spell( 366059 ) )->set_duration( timespan_t::zero() );
+  p->register_combat_begin( [ b ]( player_t* ) { b->trigger(); } );
+  return b;
+}
+
+void item::sepulchers_savior( special_effect_t& effect )
+{
+  buff_t* offense = sepulchers_savior_offense( effect.player );
+  auto thorns = create_proc_action<generic_proc_t>( "sepulchers_savior_thorns", effect, effect.player->find_spell( 366061 ) );
+  thorns->base_dd_min = thorns->base_dd_max = effect.driver()->effectN( 2 ).average( effect.item );
+  thorns->cooldown->duration = timespan_t::zero();
+  effect.execute_action = thorns;
+
+  auto cb = new dbc_proc_callback_t( effect.item, effect );
+  cb->activate_with_buff( offense, true );
+}
+
+void item::sepulchers_savior_use( special_effect_t& effect )
+{
+  struct savior_use_t : public generic_proc_t
+  {
+    buff_t* offense;
+    savior_use_t( const special_effect_t& e, buff_t* b ) : generic_proc_t( e, "sepulchers_savior", e.player->find_spell( 366061 ) ), offense( b )
+    {
+      base_dd_min = base_dd_max = e.player->find_spell( 366057 )->effectN( 4 ).average( e.item );
+    }
+
+    void execute() override
+    {
+      if ( offense->check() )
+      {
+        generic_proc_t::execute();
+        offense->expire();
+      }
+      else
+      {
+        // Defense: the shield goes to the most injured party member - not modelled - and the item returns to Offense.
+        offense->trigger();
+        cooldown->start();
+      }
+    }
+  };
+
+  effect.execute_action = create_proc_action<savior_use_t>( "sepulchers_savior", effect, sepulchers_savior_offense( effect.player ) );
 }
 
 void item::jackhammer( special_effect_t& effect )
@@ -7028,7 +7118,10 @@ void unique_gear::register_special_effects()
   register_special_effect( 107786,  "107787Trigger"  ); /* No'Kaled, the Elements of Death */
   register_special_effect( 109866,  "109867Trigger"  ); /* No'Kaled, the Elements of Death */
   register_special_effect( 109873,  "109868Trigger"  ); /* No'Kaled, the Elements of Death */
-  register_special_effect( 222015,  "222027Trigger"  ); /* Goblet of Nightmarish Ichor */
+  register_special_effect( 222015,  item::goblet_of_nightmarish_ichor ); /* Goblet of Nightmarish Ichor (BracketSim, 7 Oct 2026) */
+  register_special_effect( 443545,  item::ceaseless_swarmgland ); /* Ceaseless Swarmgland (BracketSim, 7 Oct 2026) */
+  register_special_effect( 366057,  item::sepulchers_savior ); /* Sepulcher's Savior, passive (BracketSim, 7 Oct 2026) */
+  register_special_effect( 366061,  item::sepulchers_savior_use ); /* Sepulcher's Savior, use (BracketSim, 7 Oct 2026) */
   register_special_effect( 344221,  "344227Trigger"  ); /* Consumptive Infusion */
   register_special_effect( 457489,  "457533Trigger"  ); /* Wings of Shattered Sorrow */
   register_special_effect( 1220488, "1219104Trigger" ); /* Darkfuse Medichopper */

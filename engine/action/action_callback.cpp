@@ -39,7 +39,12 @@ void proc_data_t::_init()
 
 bool proc_data_t::check_proc_trigger( const proc_data_t& source, const proc_data_t& target, proc_trigger_type_e type )
 {
-  if ( target.can_only_proc_from_class_abilities && !source.allow_class_ability_procs )
+  // BracketSim, 7 Oct 2026: "only procs from class abilities" is about the WEARER's abilities. On a damage-TAKEN
+  // proc the source is the attacker - a boss melee swing, never a class ability - so applying it there meant every
+  // "when struck / when you dodge" item with the flag could never fire (Delicate Vial of the Sanguinaire, Goblet of
+  // Nightmarish Ichor, The General's Heart). Outgoing procs are unchanged.
+  if ( target.can_only_proc_from_class_abilities && !source.allow_class_ability_procs &&
+       type != proc_trigger_type_e::TRIGGER_ACTION_TAKEN && type != proc_trigger_type_e::TRIGGER_ACTION_PROC_TAKEN )
   {
     return false;
   }
