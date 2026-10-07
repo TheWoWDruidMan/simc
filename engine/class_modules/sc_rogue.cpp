@@ -6756,12 +6756,20 @@ struct sinister_strike_t : public rogue_attack_t
     {
       rogue_attack_t::execute();
 
+      p()->buffs.snake_eyes->decrement();
+
       if ( !legacy_is_triple_threat && legacy_triple_threat &&
            secondary_trigger_type == secondary_trigger::SINISTER_STRIKE &&
            p()->rng().roll( p()->legacy_conduits.percent( 241 ) ) )
       {
         legacy_triple_threat->trigger_secondary_action( execute_state->target, 300_ms );
       }
+    }
+
+    // Legacy Azerite: Snake Eyes - the extra Sinister Strike gets the bonus and uses a charge, as in Battle for Azeroth.
+    double bonus_da( const action_state_t* s ) const override
+    {
+      return rogue_attack_t::bonus_da( s ) + p()->buffs.snake_eyes->check_value();
     }
 
     double composite_energize_amount( const action_state_t* ) const override
@@ -6829,9 +6837,17 @@ struct sinister_strike_t : public rogue_attack_t
     }
   }
 
+  // Legacy Azerite: Snake Eyes - damage per combo point spent on the last Slice and Dice, for 10 Sinister Strikes.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    return rogue_attack_t::bonus_da( s ) + p()->buffs.snake_eyes->check_value();
+  }
+
   void execute() override
   {
     rogue_attack_t::execute();
+    if ( result_is_hit( execute_state->result ) )
+      p()->buffs.snake_eyes->decrement();
     trigger_unseen_blade( execute_state );
     trigger_opportunity( execute_state, extra_attack );
     p()->buffs.mid2_outlaw_4pc->trigger();
@@ -6888,6 +6904,11 @@ struct slice_and_dice_t : public rogue_spell_t
       snd_duration -= precombat_seconds;
 
     p()->buffs.slice_and_dice->trigger( snd_duration );
+
+    // Legacy Azerite: Snake Eyes - Battle for Azeroth's Slice and Dice route (its Roll the Bones route spent combo
+    // points, which Midnight's Roll the Bones no longer does): all stacks, worth the trait's value per point spent.
+    if ( p()->azerite.snake_eyes.ok() )
+      p()->buffs.snake_eyes->trigger( p()->buffs.snake_eyes->max_stack(), cp * p()->azerite.snake_eyes.value() );
 
     // Legacy Azerite: Paradise Lost rides along with Slice and Dice.
     if ( p()->azerite.paradise_lost.ok() )

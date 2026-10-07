@@ -3753,6 +3753,10 @@ struct arcane_missiles_tick_t final : public custom_state_spell_t<arcane_mage_sp
   {
     custom_state_spell_t::execute();
 
+    // Legacy Azerite: Arcane Pummeling - each wave of a Clearcast Arcane Missiles deals more than the last. Every
+    // Midnight Arcane Missiles is a Clearcast one (ready() needs Clearcasting), so every channel ramps.
+    p()->buffs.arcane_pummeling->trigger();
+
     p()->buffs.cumulative_power->trigger();
 
     p()->trigger_arcane_salvo( salvo_source );
@@ -3777,6 +3781,11 @@ struct arcane_missiles_tick_t final : public custom_state_spell_t<arcane_mage_sp
 
     // BracketSim legacy compatibility: Arcane Harmony.
     p()->buffs.legacy_arcane_harmony->trigger();
+  }
+
+  double bonus_da( const action_state_t* s ) const override
+  {
+    return custom_state_spell_t::bonus_da( s ) + p()->buffs.arcane_pummeling->check_stack_value();
   }
 
   double action_multiplier() const override
@@ -3861,6 +3870,9 @@ struct arcane_missiles_t final : public custom_state_spell_t<arcane_mage_spell_t
   {
     if ( get_dot( target )->is_ticking() )
       channel_finish();
+
+    // Legacy Azerite: Arcane Pummeling restarts its ramp with each new channel.
+    p()->buffs.arcane_pummeling->expire();
 
     custom_state_spell_t::execute();
   }
@@ -7905,6 +7917,8 @@ void mage_t::init_rng()
   accumulated_rng.pyromaniac = get_accumulated_rng( "pyromaniac", talents.pyromaniac.ok() ? 0.00605 : 0.0 );
 
   double cc_chance = spec.clearcasting->effectN( 2 ).percent();
+  if ( azerite.arcane_pummeling.enabled() )
+    cc_chance *= 1.0 + azerite.arcane_pummeling.spell_ref().effectN( 2 ).percent();
   // TODO: There is no longer a cap on the BLP but the constant still assumes a BLP cap is present
   accumulated_rng.clearcasting = get_accumulated_rng(
     "clearcasting", prd::find_constant( cc_chance, bugs ? 13 : options.clearcasting_blp_threshold ),

@@ -6872,9 +6872,13 @@ struct raptor_strike_base_t : public melee_focus_spender_t
       p()->buffs.legacy_flame_infusion->trigger();
 
     // Legacy Azerite: Primeval Intuition, also a Mongoose Bite effect in Battle
-    // for Azeroth. Blur of Talons shared the same host but needed Coordinated
-    // Assault, which the current kit no longer has.
+    // for Azeroth.
     p()->buffs.primeval_intuition->trigger();
+
+    // Legacy Azerite: Blur of Talons - Agility per Raptor Strike / Mongoose Bite during Coordinated Assault, up
+    // to 5 stacks. Coordinated Assault's Midnight successor is Takedown (the mapping the Shadowlands ports use).
+    if ( p()->legacy_azerite.blur_of_talons.ok() && p()->buffs.takedown->check() )
+      p()->buffs.blur_of_talons->trigger();
 
     // BracketSim legacy compatibility: Rylakstalker's Confounding Strikes.
     if ( p()->shadowlands_legacy.rylakstalkers_confounding_strikes &&

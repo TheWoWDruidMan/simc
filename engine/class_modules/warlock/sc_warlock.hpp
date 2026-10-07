@@ -859,6 +859,7 @@ public:
     // ride a covenant ability.
     buff_t* legacy_decaying_soul_satchel;
     buff_t* legacy_shard_of_annihilation;
+    buff_t* legacy_languishing_soul_detritus;
     buff_t* legacy_decimating_bolt;  // 325299: +100% to the next 3 bolts (BracketSim legacy)
 
     // Shared Buffs
@@ -1012,6 +1013,7 @@ public:
     bool sacrolashs_dark_strike = false;
     bool decaying_soul_satchel = false;
     bool shard_of_annihilation = false;
+    bool languishing_soul_detritus = false;
 
     bool embers_of_the_diabolic_raiment = false;
     bool forces_of_the_horned_nightmare = false;

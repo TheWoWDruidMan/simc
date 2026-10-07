@@ -861,6 +861,16 @@ using namespace helpers;
       // The Soul Shards it refunded when the target died under it are not
       // modelled: the sim's target does not die.
     }
+
+    // BracketSim legacy compatibility: Languishing Soul Detritus. A Tithe that runs out on a living target gives
+    // the smaller buff (360953: +15% critical strike for 8 sec).
+    void last_tick( dot_t* d ) override
+    {
+      warlock_spell_t::last_tick( d );
+
+      if ( !d->target->is_sleeping() && p()->shadowlands_legacy.languishing_soul_detritus )
+        p()->buffs.legacy_languishing_soul_detritus->trigger( 1, p()->find_spell( 360953 )->effectN( 2 ).percent() );
+    }
   
     void execute() override
     {

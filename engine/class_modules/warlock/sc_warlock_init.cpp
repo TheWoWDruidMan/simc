@@ -43,6 +43,7 @@ namespace warlock
     shadowlands_legacy.sacrolashs_dark_strike               = legacy( 7030 );
     shadowlands_legacy.decaying_soul_satchel                = legacy_unity( 7712, "night_fae" );
     shadowlands_legacy.shard_of_annihilation                = legacy_unity( 7711, "necrolord" );
+    shadowlands_legacy.languishing_soul_detritus            = legacy_unity( 7710, "kyrian" );
     shadowlands_legacy.embers_of_the_diabolic_raiment       = legacy( 7040 );
     shadowlands_legacy.forces_of_the_horned_nightmare       = legacy( 7035 );
     // Languishing Soul Detritus (7710) is deliberately absent: the buff Soul
@@ -822,6 +823,14 @@ namespace warlock
         make_buff( this, "decimating_bolt", find_spell( 325299 ) )
             ->set_chance( legacy_covenant.decimating_bolt->ok() ? 1.0 : 0.0 );
 
+    // Languishing Soul Detritus (bonus 7710, Kyrian): critical strike chance after Scouring Tithe. 356255 is the
+    // version for a Tithe that refunds Soul Shards (+45%), 360953 the one for a Tithe that runs out (+15%); the
+    // value is passed on trigger, as Shadowlands did.
+    buffs.legacy_languishing_soul_detritus =
+        make_buff( this, "languishing_soul_detritus", find_spell( 356255 ) )
+            ->set_pct_buff_type( STAT_PCT_BUFF_CRIT )
+            ->set_default_value( find_spell( 356255 )->effectN( 2 ).percent() )
+            ->set_chance( shadowlands_legacy.languishing_soul_detritus ? 1.0 : 0.0 );
     buffs.legacy_shard_of_annihilation =
         make_buff( this, "shard_of_annihilation", find_spell( 356342 ) )
             ->set_chance( shadowlands_legacy.shard_of_annihilation ? 1.0 : 0.0 );

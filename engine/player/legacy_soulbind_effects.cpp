@@ -187,6 +187,40 @@ void effects_t::create_buffs( player_t* p )
     new dbc_proc_callback_t( p, *burrs );
   }
 
+  /*
+   * PARTY FAVORS (7 Oct 2026): Theotar's Mad Duke's Tea, one drunk before the fight - +3% Haste (354016), Critical
+   * Strike (354017), primary stat (353266) or Versatility (354018). Shadowlands SimulationCraft's model and option, kept:
+   * shadowlands.party_favor_type picks one, "random" (its default) draws one per fight.
+   */
+  if ( has( PARTY_FAVORS ) )
+  {
+    auto tea = [ p ]( std::string_view name, unsigned id, stat_pct_buff_type type ) {
+      return make_buff( p, name, p->find_spell( id ) )
+          ->set_default_value( p->find_spell( id )->effectN( 1 ).percent() )
+          ->set_pct_buff_type( type );
+    };
+    buff_t* haste   = tea( "the_mad_dukes_tea_haste", 354016, STAT_PCT_BUFF_HASTE );
+    buff_t* crit    = tea( "the_mad_dukes_tea_crit", 354017, STAT_PCT_BUFF_CRIT );
+    buff_t* primary = tea( "the_mad_dukes_tea_primary", 353266, primary_pct_buff_type( p ) );
+    buff_t* vers    = tea( "the_mad_dukes_tea_versatility", 354018, STAT_PCT_BUFF_VERSATILITY );
+    std::string_view type = p->sim->shadowlands_opts.party_favor_type;
+    if ( util::str_compare_ci( type, "haste" ) )
+      party_favors[ party_favor_count++ ] = haste;
+    else if ( util::str_compare_ci( type, "crit" ) )
+      party_favors[ party_favor_count++ ] = crit;
+    else if ( util::str_compare_ci( type, "primary" ) )
+      party_favors[ party_favor_count++ ] = primary;
+    else if ( util::str_compare_ci( type, "versatility" ) )
+      party_favors[ party_favor_count++ ] = vers;
+    else if ( util::str_compare_ci( type, "random" ) )
+    {
+      party_favors[ 0 ] = haste; party_favors[ 1 ] = crit; party_favors[ 2 ] = primary; party_favors[ 3 ] = vers;
+      party_favor_count = 4;
+    }
+    else if ( !util::str_compare_ci( type, "none" ) )
+      p->sim->error( "Warning: Invalid type '{}' for Party Favors, ignoring.", type );
+  }
+
   // ---------------------------------------------------------------- Kyrian --
   // "Chance to critical strike is increased by 2% for every nearby enemy or
   // ally, up to 6%."
@@ -584,6 +618,10 @@ void effects_t::combat_begin( player_t* p )
 
   if ( has( SPEAR_OF_THE_ARCHON ) )
     spear_of_the_archon->trigger();
+
+  // Party Favors: the tea drunk before the pull (one, drawn per fight when the option is "random").
+  if ( party_favor_count )
+    party_favors[ party_favor_count == 1 ? 0 : static_cast<unsigned>( p->rng().range( 0, party_favor_count ) ) ]->trigger();
 
   // Valiant Strikes goes straight to its cap - see create_buffs for why
   // nothing ever consumes the stacks in a solo sim.

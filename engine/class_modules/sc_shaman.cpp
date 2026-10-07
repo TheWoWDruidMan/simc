@@ -1512,6 +1512,8 @@ public:
 
     // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
     buff_t* legacy_chains_of_devastation_chain_lightning;
+    buff_t* legacy_doom_winds;
+    buff_t* legacy_doom_winds_driver;
     buff_t* legacy_chains_of_devastation_chain_heal;
     buff_t* legacy_echoes_of_great_sundering;
     buff_t* legacy_elemental_equilibrium;
@@ -4857,6 +4859,17 @@ struct windfury_attack_t : public shaman_attack_t
 
     // Windfury can not proc itself
     may_proc_windfury = false;
+  }
+
+  // BracketSim legacy compatibility: Doom Winds (runeforge) - Windfury Attack damage +25% (335903 effect 3).
+  double action_multiplier() const override
+  {
+    double m = shaman_attack_t::action_multiplier();
+
+    if ( p()->buff.legacy_doom_winds->check() )
+      m *= 1.0 + p()->buff.legacy_doom_winds->data().effectN( 3 ).percent();
+
+    return m;
   }
 
   // Legacy Azerite: Thunderaan's Fury
@@ -13186,6 +13199,8 @@ double shaman_t::windfury_proc_chance()
     ( 1.0 + talent.storms_wrath->effectN( 2 ).percent() );
 
   proc_chance += cache.mastery() * proc_mul;
+  // BracketSim legacy compatibility: Doom Winds (runeforge) adds a flat chance, as Shadowlands did.
+  proc_chance += buff.legacy_doom_winds->check_value();
   if ( buff.doom_winds->up() )
   {
     proc_chance *= 1 + talent.doom_winds->effectN( 1 ).trigger()->effectN( 1 ).percent();
@@ -13926,6 +13941,20 @@ void shaman_t::create_buffs()
   }
 
   // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
+  // Doom Winds (bonus 6993) fired from dropping Windfury Totem, which Midnight removed. The Shadowlands rotation
+  // dropped the totem whenever the 60 sec lockout (335904) had run out, so the buff comes on that timer from the
+  // pull: +100% Windfury chance and +25% Windfury damage for 12 sec.
+  buff.legacy_doom_winds = make_buff( this, "legacy_doom_winds", find_spell( 335903 ) )
+      ->set_default_value( find_spell( 335903 )->effectN( 1 ).percent() )
+      ->set_chance( shadowlands_legacy.doom_winds ? 1.0 : 0.0 );
+  buff.legacy_doom_winds_driver = make_buff( this, "legacy_doom_winds_driver", find_spell( 335904 ) )
+      ->set_duration( timespan_t::zero() )
+      ->set_period( find_spell( 335904 )->duration() )
+      ->set_tick_on_application( true )
+      ->set_quiet( true )
+      ->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) { buff.legacy_doom_winds->trigger(); } );
+  if ( shadowlands_legacy.doom_winds )
+    register_combat_begin( [ this ]( player_t* ) { buff.legacy_doom_winds_driver->trigger(); } );
   buff.legacy_chains_of_devastation_chain_lightning =
       make_buff( this, "legacy_chains_of_devastation_chain_lightning", find_spell( 336736 ) )
           ->set_chance( shadowlands_legacy.chains_of_devastation ? 1.0 : 0.0 );

@@ -892,6 +892,18 @@ struct vampiric_touch_t final : public priest_spell_t
     parse_options( options_str );
   }
 
+  // Legacy Azerite: Thought Harvester - Vampiric Touch deals more damage per tick (Battle for Azeroth added
+  // value 2 to every tick). Its other half empowered Mind Sear, which Midnight removed.
+  double bonus_ta( const action_state_t* s ) const override
+  {
+    double d = priest_spell_t::bonus_ta( s );
+
+    if ( priest().legacy_azerite.thought_harvester.enabled() )
+      d += priest().legacy_azerite.thought_harvester.value( 2 );
+
+    return d;
+  }
+
   void impact( action_state_t* s ) override
   {
     if ( child_swp )

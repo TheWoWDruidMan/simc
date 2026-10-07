@@ -404,6 +404,9 @@ struct sim_t : private sc_thread_t
     /// Type stat gained from So'leah's Secret Technique
     /// Buff type: "mastery", "haste", "crit", "versatility"
     std::string soleahs_secret_technique_type = "haste";
+    /// BracketSim legacy compatibility: Party Favors (Theotar) - which Mad Duke's Tea is drunk:
+    /// "random" (Shadowlands' default), "haste", "crit", "primary", "versatility" or "none".
+    std::string party_favor_type = "random";
     /// How long before combat to start channeling Shadowed Orb of Torment
     timespan_t shadowed_orb_of_torment_precombat_channel = 0_ms;
     /// How often does the player fall below 20% HP for Reactive Defense Matrix?

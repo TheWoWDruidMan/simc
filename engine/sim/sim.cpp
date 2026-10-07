@@ -4202,7 +4202,7 @@ void sim_t::create_options()
   add_option( opt_obsoleted( "shadowlands.thrill_seeker_killing_blow_chance" ) );
   add_option( opt_obsoleted( "shadowlands.wild_hunt_tactics_duration_multiplier" ) );
   add_option( opt_obsoleted( "shadowlands.bonded_hearts_other_covenant_chance" ) );
-  add_option( opt_obsoleted( "shadowlands.party_favor_type" ) );
+  add_option( opt_string( "shadowlands.party_favor_type", shadowlands_opts.party_favor_type ) );
   add_option( opt_obsoleted( "shadowlands.battlefield_presence_enemies" ) );
   add_option( opt_obsoleted( "shadowlands.better_together_ally" ) );
   add_option( opt_timespan( "shadowlands.salvaged_fusion_amplifier_precast", shadowlands_opts.salvaged_fusion_amplifier_precast, 0_s, 20_s ) );
