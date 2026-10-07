@@ -42,6 +42,18 @@ struct power_word_radiance_t final : public priest_heal_t
       priest().buffs.harsh_discipline->trigger();
     }
 
+    // Legacy Azerite: Sudden Revelation - 287356 rolls its proc chance on each Radiance: the next Holy Nova deals more
+    // and Radiance's cooldown drops by effect 2 (3 sec).
+    if ( priest().legacy_azerite.sudden_revelation.enabled() )
+    {
+      const spell_data_t* driver = priest().find_spell( 287356 );
+      if ( rng().roll( driver->proc_chance() > 0 ? driver->proc_chance() : 0.5 ) )
+      {
+        priest().buffs.legacy_sudden_revelation->trigger();
+        cooldown->adjust( -timespan_t::from_millis( driver->effectN( 2 ).base_value() ) );
+      }
+    }
+
     // BracketSim legacy compatibility: The Penitent One procs off this cast.
     if ( priest().shadowlands_legacy.the_penitent_one )
     {

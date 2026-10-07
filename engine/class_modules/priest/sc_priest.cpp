@@ -1923,9 +1923,20 @@ struct holy_nova_t final : public priest_spell_t
     add_child( child_heal );
   }
 
+  // Legacy Azerite: Sudden Revelation - the trait's damage on the next Holy Nova after Power Word: Radiance procs it.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = priest_spell_t::bonus_da( s );
+    if ( priest().buffs.legacy_sudden_revelation->check() )
+      b += priest().legacy_azerite.sudden_revelation.value( 1 );
+    return b;
+  }
+
   void execute() override
   {
     priest_spell_t::execute();
+
+    priest().buffs.legacy_sudden_revelation->expire();
 
     child_heal->execute();
 
@@ -3786,6 +3797,7 @@ void priest_t::init_spells()
   // BracketSim legacy compatibility: Battle for Azeroth Azerite traits.
   legacy_azerite.sanctum                = find_azerite_spell( "Sanctum" );
   legacy_azerite.contemptuous_homily    = find_azerite_spell( "Contemptuous Homily" );
+  legacy_azerite.sudden_revelation      = find_azerite_spell( "Sudden Revelation" );
 
   // BracketSim legacy compatibility: Shadowlands runeforge legendaries, keyed
   // off the bonus id the original legendary item carried.
@@ -4150,6 +4162,8 @@ void priest_t::create_buffs()
   // BracketSim legacy compatibility: Talbadar's Stratagem. The buff carries the
   // +55% itself in effect 1, and is retriggered for the shortest of the three
   // dots so it never outlives the condition that granted it.
+  buffs.legacy_sudden_revelation = make_buff( this, "sudden_revelation", find_spell( 287360 ) )
+                                      ->set_chance( legacy_azerite.sudden_revelation.enabled() ? 1.0 : 0.0 );
   buffs.legacy_talbadars_stratagem =
       make_buff( this, "talbadars_stratagem", find_spell( 342416 ) )
           ->set_default_value_from_effect( 1, 0.01 )

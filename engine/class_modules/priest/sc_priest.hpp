@@ -239,6 +239,8 @@ public:
     // BracketSim legacy compatibility: Talbadar's Stratagem (buff 342416),
     // +55% Mind Blast while all three dots are on the target.
     buff_t* legacy_talbadars_stratagem;
+    // Legacy Azerite: Sudden Revelation (287360) - the next Holy Nova deals more.
+    buff_t* legacy_sudden_revelation;
 
     propagate_const<buff_t*> voidform;
     // Legacy Azerite (Battle for Azeroth)
@@ -290,6 +292,7 @@ public:
     azerite_power_t torment_of_torments;
     azerite_power_t whispers_of_the_damned;
     azerite_power_t contemptuous_homily;  // Discipline (30 Sep 2026): Penance damage + Shadow Word: Pain extension
+    azerite_power_t sudden_revelation;    // Discipline (7 Oct 2026): Power Word: Radiance -> next Holy Nova
   } legacy_azerite;
 
   // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight

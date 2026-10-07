@@ -5103,6 +5103,7 @@ struct glacial_spike_t final : public frost_mage_spell_t
   action_t* duality_pyroblast = nullptr;
   int freezing_consume;
   shatter_source_t* shatter_source;
+  int legacy_icicles_spent = 0;  // Legacy Azerite: Flash Freeze - Icicles this Spike launched
 
   glacial_spike_t( std::string_view n, mage_t* p, std::string_view options_str ) :
     frost_mage_spell_t( n, p, p->find_spell( 199786 ) ),
@@ -5144,8 +5145,15 @@ struct glacial_spike_t final : public frost_mage_spell_t
 
   void execute() override
   {
+    // Legacy Azerite: Flash Freeze, mapped onto Glacial Spike (the author, 7 Oct 2026): Midnight's Icicles no longer fly as
+    // separate hits, Glacial Spike launches them. Each Icicle it spends carries the trait's damage (288164 effect 2,
+    // added in bonus_da - the Spike calculates on impact) and its 5% Fingers of Frost roll (effect 1).
+    legacy_icicles_spent = p()->buffs.icicles->check();
     frost_mage_spell_t::execute();
     p()->buffs.glacial_spike->decrement();
+    if ( p()->azerite.flash_freeze.enabled() )
+      for ( int i = 0; i < legacy_icicles_spent; i++ )
+        p()->trigger_fof( p()->azerite.flash_freeze.spell_ref().effectN( 1 ).percent(), proc_fof );
     p()->buffs.icicles->expire();
 
     p()->trigger_brain_freeze( bf_chance, proc_brain_freeze, 150_ms );
@@ -5165,6 +5173,14 @@ struct glacial_spike_t final : public frost_mage_spell_t
 
     if ( p()->accumulated_rng.rapid_refreezing->trigger() )
       p()->buffs.rapid_refreezing->trigger();
+  }
+
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = frost_mage_spell_t::bonus_da( s );
+    if ( p()->azerite.flash_freeze.enabled() )
+      b += legacy_icicles_spent * p()->azerite.flash_freeze.value( 2 );
+    return b;
   }
 
   void impact( action_state_t* s ) override

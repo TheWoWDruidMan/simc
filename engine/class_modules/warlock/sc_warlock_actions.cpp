@@ -868,6 +868,10 @@ using namespace helpers;
     {
       warlock_spell_t::last_tick( d );
 
+      // "If they survive, Scouring Tithe's cooldown is refreshed" (312321) - Shadowlands SimulationCraft reset it here too.
+      if ( !d->target->is_sleeping() )
+        cooldown->reset( true );
+
       if ( !d->target->is_sleeping() && p()->shadowlands_legacy.languishing_soul_detritus )
         p()->buffs.legacy_languishing_soul_detritus->trigger( 1, p()->find_spell( 360953 )->effectN( 2 ).percent() );
     }
