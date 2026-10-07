@@ -7287,8 +7287,18 @@ struct tar_trap_t : public trap_base_t
 {
   timespan_t debuff_duration;
 
+  // BracketSim legacy compatibility: Tar Trap was baseline in Shadowlands; Soulforge Embers and Nesingwary's Trapping
+  // Apparatus bring the button back (187698) for a character without the Midnight talent.
+  static spell_data_ptr_t tar_trap_spell( hunter_t* p )
+  {
+    if ( !p->talents.tar_trap.ok() &&
+         ( p->shadowlands_legacy.soulforge_embers || p->shadowlands_legacy.nesingwarys_apparatus ) )
+      return p->find_spell( 187698 );
+    return p->talents.tar_trap;
+  }
+
   tar_trap_t( hunter_t* p, util::string_view options_str ) :
-    trap_base_t( "tar_trap", p, p -> talents.tar_trap )
+    trap_base_t( "tar_trap", p, tar_trap_spell( p ) )
   {
     parse_options( options_str );
 
@@ -7300,6 +7310,53 @@ struct tar_trap_t : public trap_base_t
     trap_base_t::impact( s );
 
     p() -> state.tar_trap_aoe = make_event<events::tar_trap_aoe_t>( *p() -> sim, p(), s -> target, debuff_duration );
+  }
+};
+
+// Flare + Soulforge Embers (BracketSim legacy compatibility) =================================================
+// Soulforge Embers (bonus 7005): "Launching a Flare into your Tar Trap causes up to 5 enemies inside of the Tar Trap
+// to burn for (240% of Attack Power) Fire damage over 12 sec" - the burn is 331269 (Fire every 2 sec for 12 sec; 336746,
+// which Shadowlands used, has no damage effect in Midnight's data), beyond 5 targets reduced by sqrt(5/n), as
+// Shadowlands SimulationCraft did. Midnight has no Flare action, so it is added here.
+struct legacy_flare_t : hunter_spell_t
+{
+  struct soulforge_embers_t final : hunter_spell_t
+  {
+    soulforge_embers_t( util::string_view n, hunter_t* p ) : hunter_spell_t( n, p, p->find_spell( 331269 ) )
+    {
+      background = true;
+      aoe = -1;
+      reduced_aoe_targets = p->find_spell( 336745 )->effectN( 1 ).base_value();
+    }
+
+    double calculate_tick_amount( action_state_t* state, double mult ) const override
+    {
+      if ( reduced_aoe_targets > 0 && as<double>( state->n_targets ) > reduced_aoe_targets )
+        mult *= std::sqrt( reduced_aoe_targets / state->n_targets );
+      return hunter_spell_t::calculate_tick_amount( state, mult );
+    }
+  };
+
+  soulforge_embers_t* soulforge_embers = nullptr;
+
+  legacy_flare_t( hunter_t* p, util::string_view options_str ) : hunter_spell_t( "flare", p, p->find_spell( 1543 ) )
+  {
+    parse_options( options_str );
+    harmful = false;
+
+    if ( p->shadowlands_legacy.soulforge_embers )
+    {
+      soulforge_embers = p->get_background_action<soulforge_embers_t>( "soulforge_embers" );
+      add_child( soulforge_embers );
+    }
+  }
+
+  void execute() override
+  {
+    hunter_spell_t::execute();
+
+    if ( soulforge_embers && p()->state.tar_trap_aoe )
+      soulforge_embers->execute_on_target( target );
   }
 };
 
@@ -8557,6 +8614,7 @@ action_t* hunter_t::create_action( util::string_view name, util::string_view opt
   if ( name == "call_pet_1"            ) return new             summon_pet_t( this, options_str );
   if ( name == "takedown"              ) return new               takedown_t( this, options_str );
   if ( name == "tar_trap"              ) return new               tar_trap_t( this, options_str );
+  if ( name == "flare"                 ) return new           legacy_flare_t( this, options_str );
   if ( name == "trueshot"              ) return new               trueshot_t( this, options_str );
   if ( name == "volley"                ) return new                 volley_t( this, options_str );
   if ( name == "wailing_arrow"         ) return new          wailing_arrow_t( this, options_str );
@@ -8703,6 +8761,11 @@ void hunter_t::init_spells()
     legacy_apl_actions.emplace_back( "death_chakram" );
   if ( legacy_covenant.wild_spirits->ok() )
     legacy_apl_actions.emplace_back( "wild_spirits" );
+
+  // BracketSim legacy compatibility: the two trap legendaries are NOT given traps in the rotation (7 Oct 2026, measured
+  // same seed at 60). Nesingwary's Focus does not pay for Tar Trap's global cooldown (Beast Mastery -1.99%, Survival
+  // -0.08%); Soulforge Embers' burn (Shadowlands' Attack Power coefficient) does not pay for Tar Trap + Flare's
+  // (Beast Mastery -3.8%, Marksmanship -4.3%, Survival -5.0%, 3 targets -1.5%). Both work when a list throws them.
 
   legacy_conduits.parse();
 
