@@ -1494,6 +1494,7 @@ public:
     // Restoration
     buff_t* spirit_walk;
     buff_t* spiritwalkers_grace;
+    buff_t* healing_tide_totem;  // BracketSim: Preeminence haste only
     buff_t* tidal_waves;
 
     // PvP
@@ -7982,10 +7983,11 @@ struct lava_burst_t : public shaman_spell_t
       m *= p()->buff.purging_flames->data().effectN( 1 ).percent();
     }
 
-    if (player->specialization() == SHAMAN_ELEMENTAL)
-    {
-      m *= 1.0 + this->composite_crit_chance();
-    }
+    // BracketSim, 8 Oct 2026: "Lava Burst will always critically strike if the target is affected by Flame Shock and its
+    // damage is increased by your critical strike chance" is every shaman's Lava Burst (51505) text, not Elemental's
+    // alone. Restoration lost it, so crit did nothing for half its damage and simmed under haste - the reverse of what
+    // level 30 Restoration players measure in game.
+    m *= 1.0 + this->composite_crit_chance();
 
     return m;
   }
@@ -8614,6 +8616,28 @@ struct spiritwalkers_grace_t : public shaman_spell_t
     shaman_spell_t::execute();
 
     p()->buff.spiritwalkers_grace->trigger();
+  }
+};
+
+// BracketSim, 8 Oct 2026: Healing Tide Totem (108280), for its damage-side effect only. Preeminence (462443) raises the
+// totem's own haste effect (#4, 0 without the talent) to 25% and its 10 sec duration by 3 sec - "Your haste is increased
+// by 25% while Ascendance or Healing Tide Totem is active". The engine had no Healing Tide Totem at all, so a Restoration
+// Shaman who took it with Preeminence lost the haste. Its healing is not simmed (BracketSim sims healers for damage).
+struct healing_tide_totem_t : public shaman_spell_t
+{
+  healing_tide_totem_t( shaman_t* player, util::string_view options_str ) :
+    shaman_spell_t( "healing_tide_totem", player,
+                    player->find_talent_spell( talent_tree::SPECIALIZATION, "Healing Tide Totem" ) )
+  {
+    parse_options( options_str );
+    may_miss = may_crit = harmful = callbacks = false;
+  }
+
+  void execute() override
+  {
+    shaman_spell_t::execute();
+
+    p()->buff.healing_tide_totem->trigger();
   }
 };
 
@@ -11491,6 +11515,8 @@ action_t* shaman_t::create_action( util::string_view name, util::string_view opt
     return new chain_heal_t( this, options_str );
   if ( name == "healing_rain" )
     return new healing_rain_t( this, options_str );
+  if ( name == "healing_tide_totem" )
+    return new healing_tide_totem_t( this, options_str );
   if ( name == "healing_surge" )
     return new healing_surge_t( this, options_str );
   if ( name == "healing_wave" )
@@ -12624,7 +12650,9 @@ void shaman_t::init_spells()
   {
     case SHAMAN_ELEMENTAL:   spell.ascendance = find_spell( 1219480 ); break;
     case SHAMAN_ENHANCEMENT: spell.ascendance = find_spell( 114051 ); break;
-    case SHAMAN_RESTORATION: spell.ascendance = find_spell( 114052 ); break;
+    // BracketSim, 8 Oct 2026: 114052 is a level 50 spell; the level-checked find_spell() blanked it below 50, so a
+    // Restoration Shaman who took the Ascendance talent could never cast it (and never got Preeminence's haste).
+    case SHAMAN_RESTORATION: spell.ascendance = dbc::find_spell( this, 114052 ); break;
     default:                 break;
   }
 
@@ -14362,6 +14390,8 @@ void shaman_t::create_buffs()
           ->set_cooldown( timespan_t::zero() );
   buff.tidal_waves =
       make_buff( this, "tidal_waves", spec.tidal_waves->ok() ? find_spell( 53390 ) : spell_data_t::not_found() );
+  buff.healing_tide_totem = make_buff( this, "healing_tide_totem", find_spell( 108280 ) )
+      ->set_cooldown( timespan_t::zero() );
 
 }
 
@@ -14664,6 +14694,9 @@ void shaman_t::apply_player_effects()
   eff::source_eff_builder_t( buff.crash_lightning )
     .set_effect_mask( effect_mask_t( false ).enable( 2 ) )
     .build( this );
+
+  // Restoration (BracketSim, 8 Oct 2026): Healing Tide Totem's haste effect, 25% with Preeminence.
+  eff::source_eff_builder_t( buff.healing_tide_totem ).set_effect_mask( effect_mask_t( false ).enable( 4 ) ).build( this );
 
   // Elemental
   eff::source_eff_builder_t( mastery.elemental_overload ).build( this );
