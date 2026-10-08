@@ -14063,6 +14063,11 @@ void runeforge::fallen_crusader( special_effect_t& effect )
   effect.custom_buff    = buff;
   effect.execute_action = get_action<fallen_crusader_heal_t>( "unholy_strength", dk );
 
+  // BracketSim, 8 Oct 2026: four 5-minute level 30 Frost dummy logs (97 procs) gave 4.8 procs a minute and 72-84%
+  // uptime; scaled by haste alone the sim gave 4.2 and 68%, with the auto attack count matching the log. Scaling
+  // the 3 RPPM by auto attack speed (haste plus Icy Talons' attack speed) instead accounts for the gap.
+  effect.rppm_scale_ = RPPM_AUTO_ATTACK_SPEED;
+
   new dbc_proc_callback_t( effect.player, effect );
 }
 
