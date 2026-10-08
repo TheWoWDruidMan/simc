@@ -1429,7 +1429,7 @@ void item::jackhammer( special_effect_t& effect )
 // A second copy (a dual-wielded Heartrazor) shares the buff but gets its own
 // roll, as each hand's proc did.
 static void weapon_stat_proc( special_effect_t& effect, const std::string& name, double ppm,
-                              double fallback_speed )
+                              double fallback_speed, bool any_hand = false )
 {
   effect.name_str     = name;
   effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
@@ -1447,7 +1447,9 @@ static void weapon_stat_proc( special_effect_t& effect, const std::string& name,
     effect.custom_buff = buff;
   }
 
-  chance_on_hit( effect );
+  auto cb = static_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) );
+  if ( any_hand )
+    cb->hand = nullptr;
 }
 
 void item::heartrazor( special_effect_t& effect )
@@ -1455,9 +1457,13 @@ void item::heartrazor( special_effect_t& effect )
   weapon_stat_proc( effect, "heartrazor", 1.0, 1.8 );
 }
 
+// 8 Oct 2026: The Untamed Blade rolls on every melee hit, either hand, at its own 1 PPM x 3.4 sec rate. A level 30 Fury
+// dummy log (Untamed Blade main hand, The Jackhammer off hand): 89 procs from 891 main-hand and 797 off-hand hits - 96
+// expected from every hit, 53 from its own hand's - where the sim gave ~43 and 68-75% uptime against 92% in game. A
+// two-hander on its own (Frost DK logs) is unchanged: 25 procs in game, 24.4 simmed.
 void item::untamed_blade( special_effect_t& effect )
 {
-  weapon_stat_proc( effect, "untamed_fury", 1.0, 3.4 );
+  weapon_stat_proc( effect, "untamed_fury", 1.0, 3.4, true );
 }
 
 // BracketSim: Blackout Truncheon (27901) and Despair (28573), 23 September 2026 -
