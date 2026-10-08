@@ -230,14 +230,63 @@ namespace generic
  */
 static bool lands_as_melee_hit( const action_state_t* s, bool weapon_proc )
 {
-  if ( !s || !s->action || s->result_amount <= 0 )
+  if ( !s || !s->action )
     return false;
+  /*
+   * ONE EXCEPTION to "deals damage": a warrior's bleed landing - Rend (388539) or Deep Wounds (262115 / 115767) - is a
+   * hit of its own for the AURA procs. the author's raid logs on WarcraftLogs (Protection, jar worn, isolated hits):
+   * Thunder Clap 227 motes from 109 hits (it puts Rend on almost every time), Devastate 177/90, Revenge 142/71,
+   * Execute 22/11 (Deep Wounds) - two each - against Shield Slam 144/144 and white swings 142/142, which apply neither.
+   * His Fury dummy log shows the same: a Rend refresh landing with a swing gave a second mote. Weapon procs do not take
+   * it: Crusader on the same Protection characters read 0.049 a hit, where counting the bleeds would make it ~0.064.
+   * Poison and disease DoTs do not count either (Deadly Poison refreshes, Blood Boil's Blood Plague - one mote each).
+   */
+  if ( s->result_amount <= 0 )
+  {
+    const unsigned id = s->action->data().id();
+    if ( weapon_proc || !( id == 388539 || id == 262115 || id == 115767 ) )
+      return false;
+  }
   const spell_data_t& d = s->action->data();
   if ( s->proc_type() == PROC1_MAGIC_SPELL && !d.flags( static_cast<spell_attribute>( 41u ) ) )
     return false;
   if ( weapon_proc && d.equipped_class() == ITEM_CLASS_ARMOR )
     return false;
   return true;
+}
+
+/*
+ * The warrior bleeds that count for aura procs (lands_as_melee_hit) do no damage when they land, so they never reach an
+ * impact proc - they only "land". This listens for exactly those landings and hands them to the aura proc's own
+ * callback, which then rolls as for any other hit. Nothing else comes through here, so no hit is counted twice.
+ */
+struct bleed_landing_cb_t final : public dbc_proc_callback_t
+{
+  dbc_proc_callback_t* main;
+
+  bleed_landing_cb_t( const special_effect_t& e, dbc_proc_callback_t* m ) : dbc_proc_callback_t( e.player, e ), main( m )
+  {
+  }
+
+  void trigger( const proc_data_t& d, player_t* t, action_state_t* s, proc_trigger_type_e type ) override
+  {
+    if ( !s || !s->action || s->result_amount > 0 )
+      return;
+    const unsigned id = s->action->data().id();
+    if ( id != 388539 && id != 262115 && id != 115767 )
+      return;
+    main->trigger( d, t, s, type );
+  }
+};
+
+// The landing listener needs an effect of its own (a callback keeps a reference to it for life): same driver, "landed"
+// instead of "hit". Built once per aura proc and kept for the run.
+static void listen_for_bleed_landings( const special_effect_t& effect, dbc_proc_callback_t* main )
+{
+  auto* e = new special_effect_t( effect );
+  e->proc_flags_  = PF_MELEE_ABILITY;
+  e->proc_flags2_ = PF2_LANDED;
+  new bleed_landing_cb_t( *e, main );
 }
 
 struct chance_on_hit_cb_t : public dbc_proc_callback_t
@@ -2018,7 +2067,7 @@ void item::shadowmourne( special_effect_t& effect )
   // strict gate inside dbc_proc_callback_t and drops every ability again.
   effect.weapon_proc = false;
   effect.proc_flags_ |= PF_MAGIC_SPELL;  // Blood Boil, Death's Caress - see lands_as_melee_hit
-  new shadowmourne_cb_t( effect, fragments, chaos_bane, burst );
+  listen_for_bleed_landings( effect, new shadowmourne_cb_t( effect, fragments, chaos_bane, burst ) );
 }
 
 // Nibelung, item 49992 (normal) and 50648 (heroic).
@@ -3342,7 +3391,7 @@ void item::tiny_abomination_in_a_jar( special_effect_t& effect )
   motes->set_chance( 1.0 );
   effect.custom_buff = motes;
 
-  new tiny_abomination_cb_t( effect, motes );
+  listen_for_bleed_landings( effect, new tiny_abomination_cb_t( effect, motes ) );
 }
 
 // Blazefury Medallion
