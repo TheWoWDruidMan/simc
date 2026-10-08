@@ -3260,11 +3260,12 @@ struct manifest_anger_t final : public attack_t
     callbacks = true;
     may_crit = true;
 
-    // Apply the 50% value to the complete auto attack, including current
-    // low-level auto-attack tuning and flat weapon modifiers. The driver spell
-    // normally encodes this as a weapon multiplier, which would omit those
-    // modifiers in the modern engine.
-    weapon_multiplier = 1.0;
+    // 50% WEAPON DAMAGE, WITHOUT THE LOW-LEVEL AUTO-ATTACK TUNING (8 Oct 2026). It used to take half of a complete auto
+    // attack, low-level auto-attack multiplier included (x5.87 for a level 30 Outlaw): 377 before armor a hit. the author's
+    // level 30 Outlaw log (WoWCombatLog-100826_164121, 33 hits): base 65-67 off the main hand (71433) and 31-33 off the
+    // off hand (71434) - 0.5 x this engine's weapon damage (128.55 / 63.2 with the off-hand penalty). In game the jar
+    // was 1.5% of the damage; the engine said 7.7%.
+    weapon_multiplier = 0.5;
   }
 
   // Its spell (71433) is missing from this client, so its hits fell under no proc type and reached no proc at all.
@@ -3272,17 +3273,6 @@ struct manifest_anger_t final : public attack_t
   proc_types proc_type() const override
   {
     return PROC1_MELEE_ABILITY;
-  }
-
-  double composite_da_multiplier( const action_state_t* state ) const override
-  {
-    return 0.5 * ( source_auto_attack ? source_auto_attack->composite_da_multiplier( state )
-                                      : attack_t::composite_da_multiplier( state ) );
-  }
-
-  double bonus_da( const action_state_t* state ) const override
-  {
-    return source_auto_attack ? source_auto_attack->bonus_da( state ) : attack_t::bonus_da( state );
   }
 
   double composite_target_multiplier( player_t* target ) const override
