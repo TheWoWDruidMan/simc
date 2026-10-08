@@ -214,9 +214,36 @@ namespace generic
  * fire off a main-hand swing. An ability has no hand, is one attack, and rolls
  * once. That is the game's behaviour, and it is the whole of the difference.
  */
+/*
+ * WHAT COUNTS AS A MELEE HIT for these procs (8 October 2026, the author's dummy logs; Tiny Abomination in a Jar is the
+ * counter - it procs on 100% of qualifying hits - with Shadowmourne, Crusader and Bonereaver's Edge beside it):
+ *
+ *   - A hit that DEALS damage. A DoT a poison refreshes, or a cast whose damage is its child strikes, is not one.
+ *     Assassination: 43 Deadly Poison hits + 76 other melee hits = 119, against 121 motes - while the engine was also
+ *     counting ~270 Deadly Poison refreshes.
+ *   - Melee spells (the game's damage class), poison hits included, AND magic spells that start auto-attack
+ *     (attribute 41): Blood Boil 0.52 and Death's Caress 0.72 Soul Fragments per isolated hit. Magic spells without it
+ *     never: Eye Beam 0 of 1,180 hits, Immolation Aura 0/719, Consecration 0/2,051, Avenger's Shield 0/196.
+ *   - WEAPON procs (Crusader, Bonereaver's, the armor-shred weapons) not from SHIELD attacks: Shield Slam 0 of 1,002
+ *     hits and Shield of the Righteous 0 of 28, on characters whose Thunder Clap and Revenge did proc them. The spell
+ *     data marks both "Requires armor: Shield". Aura procs (Shadowmourne, the jar) are not limited this way.
+ */
+static bool lands_as_melee_hit( const action_state_t* s, bool weapon_proc )
+{
+  if ( !s || !s->action || s->result_amount <= 0 )
+    return false;
+  const spell_data_t& d = s->action->data();
+  if ( s->proc_type() == PROC1_MAGIC_SPELL && !d.flags( static_cast<spell_attribute>( 41u ) ) )
+    return false;
+  if ( weapon_proc && d.equipped_class() == ITEM_CLASS_ARMOR )
+    return false;
+  return true;
+}
+
 struct chance_on_hit_cb_t : public dbc_proc_callback_t
 {
   const weapon_t* hand;
+  bool weapon_rule = true;  // shield attacks excluded; Shadowmourne (an aura) clears it
 
   chance_on_hit_cb_t( const special_effect_t& effect )
     : dbc_proc_callback_t( effect.item, effect ),
@@ -227,6 +254,9 @@ struct chance_on_hit_cb_t : public dbc_proc_callback_t
   void trigger( const proc_data_t& data, player_t* target, action_state_t* state,
                 proc_trigger_type_e type ) override
   {
+    if ( !lands_as_melee_hit( state, weapon_rule ) )
+      return;
+
     if ( state && state->action && state->action->weapon && hand &&
          state->action->weapon != hand )
     {
@@ -247,6 +277,7 @@ struct chance_on_hit_cb_t : public dbc_proc_callback_t
 static dbc_proc_callback_t* chance_on_hit( special_effect_t& effect )
 {
   effect.weapon_proc = false;
+  effect.proc_flags_ |= PF_MAGIC_SPELL;  // the magic spells that start auto-attack - see lands_as_melee_hit
   return new chance_on_hit_cb_t( effect );
 }
 
@@ -784,7 +815,15 @@ void enchants::crusader( special_effect_t& effect )
   // applications and 46 refreshes in a 300 second fight, 91.6% uptime, 245.8 ->
   // 323.3 dps. That uptime is high because Fury lands a great many hits, and it
   // is the behaviour he described rather than a bug.
-  effect.ppm_         = 1.0;
+  //
+  // 8 October 2026: as a flat chance per hit at the enchanted weapon's speed. Through `ppm_` the engine read an
+  // ability with no weapon (Thunder Clap, poisons, a monk's kicks) at a 1.5 second "cast time" - 2.5% a hit instead
+  // of 6% on a 3.6 second weapon.
+  {
+    const weapon_t* w = effect.item ? effect.item->weapon() : nullptr;
+    effect.proc_chance_ = ( ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 2.6 ) / 60.0;
+    effect.ppm_         = 0;
+  }
   /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
   effect.custom_buff  = buff;
 
@@ -1846,6 +1885,7 @@ struct shadowmourne_cb_t final : public chance_on_hit_cb_t
      * fragments than main-hand hits, so the off hand rolls it too.
      */
     hand = nullptr;
+    weapon_rule = false;
   }
 
   void execute( const spell_data_t*, player_t*, action_state_t* state ) override
@@ -1977,6 +2017,7 @@ void item::shadowmourne( special_effect_t& effect )
   // flag is cleared here for the same reason: leaving it set re-applies the
   // strict gate inside dbc_proc_callback_t and drops every ability again.
   effect.weapon_proc = false;
+  effect.proc_flags_ |= PF_MAGIC_SPELL;  // Blood Boil, Death's Caress - see lands_as_melee_hit
   new shadowmourne_cb_t( effect, fragments, chaos_bane, burst );
 }
 
@@ -2968,7 +3009,7 @@ void item::bonereavers_edge( special_effect_t& effect )
  * 170 main-hand and 142 off-hand hits. Phantom Strike 18 procs, Armor Shatter
  * 11. The log does not say which hand held which, so the mean of the two hands
  * is used: 0.115 and 0.071 per hit, 2.7 and 1.6 PPM at their 2.6 speed. Small
- * samples (18 and 11 procs). Vibroblade had no log: 1.0 PPM is an assumption.
+ * samples (18 and 11 procs). Vibroblade 1.4 PPM from an Outlaw log (9 procs) - see item::vibroblade.
  */
 namespace armor_shred
 {
@@ -3069,6 +3110,7 @@ static void weapon( special_effect_t& effect, util::string_view name, double ppm
       ppm, ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 2.6 );
   effect.ppm_         = 0;
   effect.weapon_proc  = false;
+  effect.proc_flags_ |= PF_MAGIC_SPELL;  // see lands_as_melee_hit
 
   double amount = std::fabs( effect.item ? effect.driver()->effectN( 1 ).average( effect.item )
                                          : effect.driver()->effectN( 1 ).average( effect.player ) );
@@ -3103,7 +3145,9 @@ void item::phantom_blade( special_effect_t& effect )
 
 void item::vibroblade( special_effect_t& effect )
 {
-  armor_shred::weapon( effect, "puncture_armor", 1.0 );
+  // 1.4 PPM: the author's level 30 Outlaw log (Vibroblade main hand), 9 procs in 60 seconds against ~150 hits the engine
+  // rolls a main-hand weapon on. Nine procs: a rough number, but the 1.0 it replaces was a guess.
+  armor_shred::weapon( effect, "puncture_armor", 1.4 );
 }
 
 void item::annihilator( special_effect_t& effect )
@@ -3174,6 +3218,13 @@ struct manifest_anger_t final : public attack_t
     weapon_multiplier = 1.0;
   }
 
+  // Its spell (71433) is missing from this client, so its hits fell under no proc type and reached no proc at all.
+  // In game they proc like any melee hit - the author's Fury log has motes and Soul Fragments landing with them (8 Oct 2026).
+  proc_types proc_type() const override
+  {
+    return PROC1_MELEE_ABILITY;
+  }
+
   double composite_da_multiplier( const action_state_t* state ) const override
   {
     return 0.5 * ( source_auto_attack ? source_auto_attack->composite_da_multiplier( state )
@@ -3226,7 +3277,7 @@ struct tiny_abomination_cb_t final : public dbc_proc_callback_t
   {
     // Manifest Anger itself gives motes (8 October 2026): the driver carries "Can Proc From Procs", and the author's Fury log
     // shows motes landing with Manifest Anger hits. The motes are spent before it strikes, so it cannot chain.
-    if ( !state || !state->action || !counts( state->action ) )
+    if ( !counts( state ) )
     {
       return;
     }
@@ -3234,16 +3285,20 @@ struct tiny_abomination_cb_t final : public dbc_proc_callback_t
     dbc_proc_callback_t::trigger( source_data, target, state, type );
   }
 
-  // Weaponless melee abilities (a Brewmaster's Rushing Jade Wind, Keg Smash) give motes in game too - held back until
-  // a rogue log shows whether poisons do. See _backups/engine/2026-10-08-armor-shred/pending/.
-  static bool counts( const action_t* a )
+  /*
+   * WEAPONLESS MELEE ABILITIES COUNT (8 October 2026). A Brewmaster's Rushing Jade Wind, Spinning Crane Kick and Keg
+   * Smash carry no weapon in this engine, so the jar gave that monk 40 motes a minute; poisons have none either. the author's
+   * logs, jar worn: 633 isolated Rushing Jade Wind hits gave 639 motes, Crane Kick 31/31, Keg Smash 16/17 (Brewmaster);
+   * Assassination 121 motes from 119 melee hits counting the 43 Deadly Poison hits. lands_as_melee_hit decides.
+   */
+  static bool counts( const action_state_t* s )
   {
-    return a->weapon != nullptr;
+    return lands_as_melee_hit( s, false );
   }
 
   void execute( const spell_data_t*, player_t* target, action_state_t* state ) override
   {
-    if ( !state || !state->action || !counts( state->action ) || !motes->trigger() )
+    if ( !counts( state ) || !motes->trigger() )
       return;
 
     if ( motes->check() == 1 )
@@ -3279,6 +3334,7 @@ void item::tiny_abomination_in_a_jar( special_effect_t& effect )
    * 85 seconds against the log's 56 in 66.
    */
   effect.proc_chance_ = 1.0;
+  effect.proc_flags_ |= PF_MAGIC_SPELL;  // see lands_as_melee_hit
 
   const unsigned mote_count = effect.spell_id == 71545 ? 7U : 8U;
   auto motes = make_buff( effect.player, "mote_of_anger", effect.player->find_spell( 71432 ) );
@@ -7454,7 +7510,7 @@ void unique_gear::register_special_effects()
   register_special_effect( 36041,   item::heartrazor ); /* Heartrazor - 1.0 PPM (wowsims tbc) */
   register_special_effect( 23719,   item::untamed_blade ); /* The Untamed Blade - Untamed Fury, 1.0 PPM (wowsims classic) */
   register_special_effect( 9806,    item::phantom_blade ); /* Phantom Blade - Phantom Strike armor debuff, 2.7 PPM (the author's log) */
-  register_special_effect( 144260,  item::vibroblade ); /* Vibroblade - Puncture Armor debuff, 1.0 PPM (assumed) */
+  register_special_effect( 144260,  item::vibroblade ); /* Vibroblade - Puncture Armor debuff, 1.4 PPM (the author's log) */
   register_special_effect( 16928,   item::annihilator ); /* Annihilator - Armor Shatter debuff x3, 1.6 PPM (the author's log) */
   register_special_effect( 36111,   item::world_breaker ); /* World Breaker - 3.7/60 per hit, spent by the next attack (wowsims tbc) */
   register_special_effect( 33489,   item::blackout_truncheon ); /* Blackout Truncheon - Blinding Speed, 0.8 PPM (wowsims tbc) */
