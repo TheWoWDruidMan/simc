@@ -358,6 +358,9 @@ struct player_t : public actor_t
     // `find_spell` returns not_found below that), so every character in the
     // 30-45 brackets uses drums instead and had nothing at all until this.
     std::string raid_haste;
+    // "<weapon>:<item level>/..." (8 Oct 2026), e.g. "annihilator:13/phantom_blade:13": a teammate keeps that
+    // weapon's armor debuff on the boss all fight. See unique_gear::bracketsim_ally_armor_shred.
+    std::string ally_armor_shred;
     // "<item id>:<item level>/..." (30 Sep 2026): the item level the GAME gives an old consumable whose spell scales
     // with the casting item's level (Elixir of the Mongoose: 12 in game, 23 in the item data - read at 23 it gave
     // double). Only those consumables read it; unset changes nothing.

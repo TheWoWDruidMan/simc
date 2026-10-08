@@ -100,6 +100,9 @@ namespace item
   void love_struck( special_effect_t& );
   void tiny_abomination_in_a_jar( special_effect_t& );
   void shadowmourne( special_effect_t& );
+  void phantom_blade( special_effect_t& );
+  void vibroblade( special_effect_t& );
+  void annihilator( special_effect_t& );
   void nibelung( special_effect_t& );
   void dislodged_foreign_object( special_effect_t& );
   void stack_per_cast_use( special_effect_t& );
@@ -1833,7 +1836,17 @@ struct shadowmourne_cb_t final : public chance_on_hit_cb_t
 
   shadowmourne_cb_t( const special_effect_t& effect, buff_t* f, buff_t* c, action_t* b )
     : chance_on_hit_cb_t( effect ), fragments( f ), chaos_bane( c ), burst( b )
-  {}
+  {
+    /*
+     * NO HAND RULE (8 October 2026). Shadowmourne is not a weapon "chance on hit"
+     * but a passive aura, 71903, with White Melee + Yellow Melee proc flags: every
+     * landed melee hit rolls it, off-hand ones included. the author's level 30 Fury log
+     * (Shadowmourne main hand, Bonereaver's Edge off hand, a dummy): 54 fragments
+     * from 70 hits made while Chaos Bane was down, 31 of them main-hand hits - more
+     * fragments than main-hand hits, so the off hand rolls it too.
+     */
+    hand = nullptr;
+  }
 
   void execute( const spell_data_t*, player_t*, action_state_t* state ) override
   {
@@ -1909,8 +1922,25 @@ void item::shadowmourne( special_effect_t& effect )
    * level 80 on the unsquished item. This log is the live game at the bracket
    * being simulated, so it wins - but the gap is large enough to be worth
    * re-measuring if a second character ever wears one.
+   *
+   * RE-MEASURED 8 October 2026, and wowsims were right. The 0.42 above divided
+   * by EVERY hit, including the hits made while Chaos Bane is up - and no
+   * fragment can be gained then (see execute). Counting only the hits that
+   * could have rolled it:
+   *
+   *     a test character, the same Blood logs (Naxxramas, 3 files, 7 Oct re-run):
+   *         2,987 fragments / 3,438 swings + weapon strikes = 0.87 per hit
+   *         2,987 / 4,502 with Blood Boil                    = 0.66 per hit
+   *         0 fragments from 3,280 hits made while Chaos Bane was up
+   *     a test character, level 30 Fury, dummy (WoWCombatLog-100726_234457):
+   *         54 fragments / 70 hits (both hands)               = 0.77 per hit
+   *         0 fragments from 297 hits made while Chaos Bane was up
+   *
+   * wowsims' 12 PPM at the 3.7 second speed is 0.74 per hit, inside both. With
+   * 0.42 a level 30 Fury warrior held Chaos Bane 46% of the fight; the log
+   * shows about 90%.
    */
-  effect.proc_chance_ = chance_on_hit_from_ppm( 7.0, 3.6 );
+  effect.proc_chance_ = chance_on_hit_from_ppm( 12.0, 3.7 );
   effect.ppm_         = 0;
   /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
 
@@ -2875,8 +2905,26 @@ void item::bonereavers_edge( special_effect_t& effect )
    * swing came from. This divides by every landed melee hit, which is what the
    * engine now rolls on. Same procs, different denominator, and only one of the
    * two denominators matches the model.
+   *
+   * IT DID NOT, and the rate is back to wowsims' 2.0 (8 October 2026). The
+   * 0.0534 divided by the hits of BOTH hands, while the engine rolls a weapon's
+   * chance on hit only on its OWN hand's hits (chance_on_hit_cb_t) - so a dual
+   * wielder got half the procs, and a two-hander got the both-hands rate on one
+   * hand. Per hit of the weapon's own hand:
+   *
+   *     the two warriors above, 0.0519 / 0.0515 per hit of either hand  -> ~0.105
+   *     a test character, Fury, Bonereaver's in the OFF hand, 16 / 170 OH hits = 0.094
+   *     a test character, Blood, two-hander, 4 / 40 hits                     = 0.100
+   *     wowsims 2.0 PPM at its 3.4 second speed                          = 0.113
+   *
+   * The Fury log held three stacks most of the fight; at 0.0534 the engine
+   * averaged 1.2 stacks on the same character.
    */
-  effect.proc_chance_ = chance_on_hit_from_ppm( 0.89, 3.6 );
+  {
+    const weapon_t* w = effect.item ? effect.item->weapon() : nullptr;
+    effect.proc_chance_ = chance_on_hit_from_ppm(
+        2.0, ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 3.4 );
+  }
   effect.ppm_         = 0;
   /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
 
@@ -2888,6 +2936,224 @@ void item::bonereavers_edge( special_effect_t& effect )
   effect.custom_buff = buff;
 
   chance_on_hit( effect );
+}
+
+/*
+ * BracketSim: armor-shred weapons, 8 October 2026 - Phantom Blade (7961),
+ * Vibroblade (9485), Annihilator (12798). Each is a chance-on-hit DEBUFF that
+ * lowers the target's armor; until now all three were simulated as stat sticks.
+ *
+ *     9806    Phantom Strike   20 sec
+ *     144260  Puncture Armor   30 sec
+ *     16928   Armor Shatter    45 sec, stacks to 3
+ *
+ * AMOUNTS are the client's own, effect 1 scaled by the weapon's item level.
+ * the author's level 30 Fury log (WoWCombatLog-100726_234457) records the dummy's
+ * armor on every hit: 340 -> 304 -> 267 for Armor Shatter's first two stacks,
+ * -23 for Phantom Strike, 207 with both up - both weapons at item level 13.
+ *
+ * STACKING (BossStats, the author's addon): Phantom Strike adds to either of the other
+ * two; Puncture Armor and Armor Shatter do not stack - the larger counts. The
+ * same debuff from a teammate (bracketsim_ally_armor_shred) does not add to the
+ * wearer's own either; the larger counts.
+ *
+ * "Max Aura Level 49" in the spell data is not about the TARGET (the log shows
+ * all of it on a level 70 dummy) but the WEARER: this engine does not find the
+ * three spells for a character above 49, so they work in the 30-45 brackets
+ * only (BossStats says the same). Item levels there: Phantom Blade and
+ * Annihilator 13, Vibroblade 33, at every level 30-45.
+ *
+ * RATES, per landed hit of the weapon's own hand (the hand rule in
+ * chance_on_hit_cb_t, as for Bonereaver's Edge), from the same log: 51 seconds,
+ * 170 main-hand and 142 off-hand hits. Phantom Strike 18 procs, Armor Shatter
+ * 11. The log does not say which hand held which, so the mean of the two hands
+ * is used: 0.115 and 0.071 per hit, 2.7 and 1.6 PPM at their 2.6 speed. Small
+ * samples (18 and 11 procs). Vibroblade had no log: 1.0 PPM is an assumption.
+ */
+namespace armor_shred
+{
+// One per target: what the three debuffs (own and a teammate's) currently take
+// off its armor, applied as a stat change so every hit reads it.
+struct ledger_t final : public buff_t
+{
+  double applied = 0;
+
+  ledger_t( player_t* t ) : buff_t( t, "bracketsim_armor_shred" )
+  {
+    set_quiet( true );
+  }
+
+  // Created before any of the debuffs, so it resets first: the stats were just
+  // reset to initial, and the debuffs' own expiry below must not add back armor
+  // that is no longer missing.
+  void reset() override
+  {
+    applied = 0;
+    buff_t::reset();
+  }
+
+  double value_of( util::string_view name ) const
+  {
+    buff_t* b = buff_t::find( player, name );
+    return b && b->check() ? b->check_stack_value() : 0.0;
+  }
+
+  void update()
+  {
+    double phantom = std::max( value_of( "phantom_strike" ), value_of( "ally_phantom_strike" ) );
+    double big     = std::max( { value_of( "puncture_armor" ), value_of( "ally_puncture_armor" ),
+                                 value_of( "armor_shatter" ), value_of( "ally_armor_shatter" ) } );
+    double want    = std::clamp( phantom + big, 0.0, std::max( 0.0, player->current.stats.armor + applied ) );
+    double delta   = want - applied;
+    if ( delta > 0 )
+      player->stat_loss( STAT_ARMOR, delta );
+    else if ( delta < 0 )
+      player->stat_gain( STAT_ARMOR, -delta );
+    applied = want;
+    sim->print_debug( "{} armor shred now {} (armor {})", *player, want, player->current.stats.armor );
+  }
+};
+
+static ledger_t* ledger( player_t* t )
+{
+  if ( buff_t* b = buff_t::find( t, "bracketsim_armor_shred" ) )
+    return debug_cast<ledger_t*>( b );
+  return make_buff<ledger_t>( t );
+}
+
+// Get or create a debuff on the target. `amount` is armor removed per stack.
+static buff_t* debuff( player_t* t, util::string_view name, const spell_data_t* s, double amount )
+{
+  ledger_t* l = ledger( t );
+  if ( buff_t* b = buff_t::find( t, name ) )
+    return b;
+  return make_buff( t, name, s )
+    ->set_chance( 1.0 )
+    ->set_default_value( amount )
+    ->set_stack_change_callback( [ l ]( buff_t*, int, int ) { l->update(); } );
+}
+
+struct shred_cb_t final : public chance_on_hit_cb_t
+{
+  std::string name;
+  const spell_data_t* spell;
+  double amount;
+
+  shred_cb_t( const special_effect_t& effect, util::string_view n, double a )
+    : chance_on_hit_cb_t( effect ), name( n ), spell( effect.driver() ), amount( a )
+  {
+  }
+
+  void execute( const spell_data_t*, player_t* target, action_state_t* state ) override
+  {
+    player_t* t = state && state->target ? state->target : target;
+    if ( !t || !t->is_enemy() )
+      return;
+    debuff( t, name, spell, amount )->trigger();
+  }
+};
+
+static void weapon( special_effect_t& effect, util::string_view name, double ppm )
+{
+  // One callback per item: whatever runs an initializer twice must not double the rate (see already_built).
+  std::string marker = fmt::format( "{}_{}", name, effect.item ? effect.item->slot_name() : "none" );
+  if ( buff_t::find( effect.player, marker ) )
+    return;
+  make_buff( effect.player, marker )->set_quiet( true );
+
+  effect.name_str     = name;
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  const weapon_t* w   = effect.item ? effect.item->weapon() : nullptr;
+  effect.proc_chance_ = chance_on_hit_from_ppm(
+      ppm, ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 2.6 );
+  effect.ppm_         = 0;
+  effect.weapon_proc  = false;
+
+  double amount = std::fabs( effect.item ? effect.driver()->effectN( 1 ).average( effect.item )
+                                         : effect.driver()->effectN( 1 ).average( effect.player ) );
+  effect.player->sim->print_debug( "{} {} removes {} armor per stack, {:.4f} per hit", *effect.player, name, amount,
+                                   effect.proc_chance_ );
+
+  // Built now rather than on the first proc, so every target's report lists them.
+  for ( player_t* t : effect.player->sim->target_list )
+    debuff( t, name, effect.driver(), amount );
+
+  new shred_cb_t( effect, name, amount );
+}
+
+struct ally_t
+{
+  const char* option;
+  const char* name;
+  unsigned spell_id;
+};
+
+static constexpr ally_t ALLY[] = {
+  { "phantom_blade", "ally_phantom_strike", 9806 },
+  { "vibroblade", "ally_puncture_armor", 144260 },
+  { "annihilator", "ally_armor_shatter", 16928 },
+};
+}  // namespace armor_shred
+
+void item::phantom_blade( special_effect_t& effect )
+{
+  armor_shred::weapon( effect, "phantom_strike", 2.7 );
+}
+
+void item::vibroblade( special_effect_t& effect )
+{
+  armor_shred::weapon( effect, "puncture_armor", 1.0 );
+}
+
+void item::annihilator( special_effect_t& effect )
+{
+  armor_shred::weapon( effect, "armor_shatter", 1.6 );
+}
+
+/*
+ * bracketsim_ally_armor_shred=<weapon>:<item level>/... - a teammate keeps that
+ * weapon's debuff on the boss for the whole fight (full stacks, 100% uptime).
+ * Weapons: phantom_blade, vibroblade, annihilator. The item level is the
+ * teammate's copy, which sets the amount exactly as the wearer's own does.
+ */
+static void ally_armor_shred( player_t* p, util::string_view option )
+{
+  if ( option.empty() || p->is_enemy() )
+    return;
+
+  for ( auto entry : util::string_split<util::string_view>( option, "/" ) )
+  {
+    auto parts = util::string_split<util::string_view>( entry, ":" );
+    if ( parts.size() != 2 )
+      throw std::invalid_argument( "bracketsim_ally_armor_shred wants <weapon>:<item level>/..." );
+    unsigned ilvl = util::to_unsigned( parts[ 1 ] );
+    if ( ilvl == 0 )
+      throw std::invalid_argument( fmt::format( "bracketsim_ally_armor_shred: bad item level '{}'", parts[ 1 ] ) );
+
+    const armor_shred::ally_t* found = nullptr;
+    for ( const auto& a : armor_shred::ALLY )
+      if ( parts[ 0 ] == a.option )
+        found = &a;
+    if ( !found )
+      throw std::invalid_argument( fmt::format(
+          "bracketsim_ally_armor_shred: unknown weapon '{}' (phantom_blade, vibroblade, annihilator)", parts[ 0 ] ) );
+
+    const spell_data_t* s = p->find_spell( found->spell_id );
+    if ( !s->ok() )
+      throw std::invalid_argument( fmt::format( "bracketsim_ally_armor_shred: spell {} missing", found->spell_id ) );
+    unsigned scaled = s->max_scaling_level() > 0 ? std::min( ilvl, s->max_scaling_level() ) : ilvl;
+    double amount   = std::fabs( s->effectN( 1 ).average_no_item( p, scaled ) );
+    int stacks      = std::max( 1, as<int>( s->max_stacks() ) );
+    p->sim->print_debug( "{} teammate {} at item level {}: {} armor x{}", *p, found->option, ilvl, amount, stacks );
+
+    for ( player_t* t : p->sim->target_list )
+    {
+      buff_t* b = armor_shred::debuff( t, found->name, s, amount );
+      b->set_duration( timespan_t::zero() );
+      p->register_combat_begin( [ b, stacks ]( player_t* ) { b->trigger( stacks ); } );
+    }
+  }
 }
 
 struct manifest_anger_t final : public attack_t
@@ -2958,8 +3224,9 @@ struct tiny_abomination_cb_t final : public dbc_proc_callback_t
   void trigger( const proc_data_t& source_data, player_t* target, action_state_t* state,
                 proc_trigger_type_e type ) override
   {
-    if ( !state || !state->action || !state->action->weapon ||
-         state->action->internal_id == manifest_anger->internal_id )
+    // Manifest Anger itself gives motes (8 October 2026): the driver carries "Can Proc From Procs", and the author's Fury log
+    // shows motes landing with Manifest Anger hits. The motes are spent before it strikes, so it cannot chain.
+    if ( !state || !state->action || !counts( state->action ) )
     {
       return;
     }
@@ -2967,14 +3234,21 @@ struct tiny_abomination_cb_t final : public dbc_proc_callback_t
     dbc_proc_callback_t::trigger( source_data, target, state, type );
   }
 
+  // Weaponless melee abilities (a Brewmaster's Rushing Jade Wind, Keg Smash) give motes in game too - held back until
+  // a rogue log shows whether poisons do. See _backups/engine/2026-10-08-armor-shred/pending/.
+  static bool counts( const action_t* a )
+  {
+    return a->weapon != nullptr;
+  }
+
   void execute( const spell_data_t*, player_t* target, action_state_t* state ) override
   {
-    if ( !state || !state->action || !state->action->weapon || !motes->trigger() )
+    if ( !state || !state->action || !counts( state->action ) || !motes->trigger() )
       return;
 
     if ( motes->check() == 1 )
     {
-      first_mote_weapon = state->action->weapon;
+      first_mote_weapon = state->action->weapon ? state->action->weapon : &listener->main_hand_weapon;
       first_mote_attack = first_mote_weapon->slot == SLOT_OFF_HAND ? listener->off_hand_attack
                                                                    : listener->main_hand_attack;
     }
@@ -2983,7 +3257,8 @@ struct tiny_abomination_cb_t final : public dbc_proc_callback_t
       return;
 
     manifest_anger->source_auto_attack = first_mote_attack;
-    manifest_anger->weapon = first_mote_weapon ? first_mote_weapon : state->action->weapon;
+    manifest_anger->weapon = first_mote_weapon ? first_mote_weapon
+                           : state->action->weapon ? state->action->weapon : &listener->main_hand_weapon;
     first_mote_attack = nullptr;
     first_mote_weapon = nullptr;
     motes->expire();
@@ -2996,7 +3271,14 @@ void item::tiny_abomination_in_a_jar( special_effect_t& effect )
   effect.name_str     = "tiny_abomination_in_a_jar";
   effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
   effect.proc_flags2_ = PF2_ALL_HIT;
-  effect.proc_chance_ = 0.5;
+  /*
+   * EVERY HIT, not half of them (8 October 2026). Both drivers, 71406 and 71545,
+   * read "Proc Chance: 100%" in this client. the author's level 30 Fury log (heroic jar,
+   * 7 motes): about 1.07 motes per landed melee hit over 679 hits, 103 Manifest
+   * Anger strikes in two minutes. At 0.5 the engine gave the same character 24 in
+   * 85 seconds against the log's 56 in 66.
+   */
+  effect.proc_chance_ = 1.0;
 
   const unsigned mote_count = effect.spell_id == 71545 ? 7U : 8U;
   auto motes = make_buff( effect.player, "mote_of_anger", effect.player->find_spell( 71432 ) );
@@ -5736,6 +6018,15 @@ bool action_has_damage( const action_t* action )
 }
 } // UNNAMED NAMESPACE
 
+namespace unique_gear
+{
+// BracketSim: see ally_armor_shred. Declared where it is called (player.cpp, create_buffs).
+void bracketsim_ally_armor_shred( player_t* p, util::string_view option )
+{
+  ally_armor_shred( p, option );
+}
+}  // namespace unique_gear
+
 item_targetdata_initializer_t::item_targetdata_initializer_t( unsigned iid, util::span<const slot_e> s )
   : targetdata_initializer_t(), item_id( iid ), spell_id( 0 ), slots_( s.begin(), s.end() )
 {
@@ -7162,6 +7453,9 @@ void unique_gear::register_special_effects()
   // on tooltip wording ("Increases attack power by", no "your"). See the handlers.
   register_special_effect( 36041,   item::heartrazor ); /* Heartrazor - 1.0 PPM (wowsims tbc) */
   register_special_effect( 23719,   item::untamed_blade ); /* The Untamed Blade - Untamed Fury, 1.0 PPM (wowsims classic) */
+  register_special_effect( 9806,    item::phantom_blade ); /* Phantom Blade - Phantom Strike armor debuff, 2.7 PPM (the author's log) */
+  register_special_effect( 144260,  item::vibroblade ); /* Vibroblade - Puncture Armor debuff, 1.0 PPM (assumed) */
+  register_special_effect( 16928,   item::annihilator ); /* Annihilator - Armor Shatter debuff x3, 1.6 PPM (the author's log) */
   register_special_effect( 36111,   item::world_breaker ); /* World Breaker - 3.7/60 per hit, spent by the next attack (wowsims tbc) */
   register_special_effect( 33489,   item::blackout_truncheon ); /* Blackout Truncheon - Blinding Speed, 0.8 PPM (wowsims tbc) */
   register_special_effect( 34580,   item::despair ); /* Despair - Impale, 0.5 PPM (wowsims tbc) */

@@ -73,6 +73,12 @@
 #include <stdexcept>
 #include <utility>
 
+namespace unique_gear
+{
+// BracketSim, defined in unique_gear.cpp: a teammate's armor-shred weapon (bracketsim_ally_armor_shred).
+void bracketsim_ally_armor_shred( player_t* p, util::string_view option );
+}
+
 namespace
 {
 
@@ -5415,6 +5421,10 @@ void player_t::create_buffs()
     sim->print_debug( "{} BracketSim raid haste +{}% for {} every {}", *this, pct * 100.0,
                       duration, period );
   }
+
+  // A teammate's armor-shred weapon, debuff up all fight (8 Oct 2026). Refused loudly on a bad value, like the others.
+  if ( !is_enemy() && !bracketsim.ally_armor_shred.empty() )
+    unique_gear::bracketsim_ally_armor_shred( this, bracketsim.ally_armor_shred );
 
   if ( !is_enemy() && !bracketsim.timed_stat.empty() )
   {
@@ -14246,6 +14256,7 @@ void player_t::create_options()
   add_option( opt_string( "bracketsim_creature_damage", bracketsim.creature_damage ) );
   add_option( opt_string( "bracketsim_timed_stat", bracketsim.timed_stat ) );
   add_option( opt_string( "bracketsim_raid_haste", bracketsim.raid_haste ) );
+  add_option( opt_string( "bracketsim_ally_armor_shred", bracketsim.ally_armor_shred ) );
   add_option( opt_string( "bracketsim_consumable_ilvl", bracketsim.consumable_ilvl ) );
   add_option( opt_int( "bracketsim_trinket_fallback", bracketsim.trinket_fallback, 0, 600 ) );
   add_option( opt_float( "bracketsim_dragonwrath_chance",
