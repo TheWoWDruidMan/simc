@@ -12054,6 +12054,16 @@ struct heart_strike_t : public heart_strike_base_t
     if ( p()->shadowlands_legacy.gorefiends_domination )
       p()->cooldown.vampiric_blood->adjust( -timespan_t::from_seconds(
           p()->find_spell( 334580 )->effectN( 1 ).base_value() ) );
+
+    // Legacy Shadowlands: Field of Blossoms (Dreamweaver). In game every Heart Strike inside Death and Decay plants a new
+    // patch ~1.1 sec later (a game bug players use): a 60 Blood dummy log had 27 patches from 3 Death's Due, each ~2.9
+    // sec (the trait's 3 sec for a DK), so the haste stays up through Death and Decay. Not from the rune weapon's copy.
+    if ( p()->buffs.death_and_decay->check() && p()->legacy_soulbinds.has( legacy_soulbind::FIELD_OF_BLOSSOMS ) &&
+         p()->legacy_soulbinds.field_of_blossoms )
+    {
+      buff_t* fob = p()->legacy_soulbinds.field_of_blossoms;
+      make_event( *sim, 1100_ms, [ fob ] { fob->trigger(); } );
+    }
   }
 
 private:
