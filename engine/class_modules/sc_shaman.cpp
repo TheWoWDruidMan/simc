@@ -10009,6 +10009,7 @@ struct healing_rain_t : public shaman_heal_t
 
   action_t* acid_rain;
   timespan_t acid_rain_period;
+  ground_aoe_event_t* acid_rain_event = nullptr;  // the rain now falling; a new cast replaces it
 
   // BracketSim (29 Sep 2026): Healing Rain is a TALENT in this build, so find_specialization_spell() returns
   // not_found and the action was made background - it was never cast, with or without Acid Rain.
@@ -10041,10 +10042,18 @@ struct healing_rain_t : public shaman_heal_t
     {
       acid_rain = new acid_rain_damage_t( player );
       // Its own row, not Healing Rain's child (29 Sep, the author): a damage breakdown reading "Healing Rain" confused people.
-      timespan_t period = player->find_spell( 378463 )->effectN( 1 ).period();
-      if ( period > 0_ms )
-        acid_rain_period = period;
+      // 9 Oct 2026: the pulse is Healing Rain's own tick - the tooltip reads "every $73920t3 sec", Healing Rain effect
+      // #3, 2 sec and hasted ("Spell Haste Affects Periodic"). It was 378463's 1 sec, and every cast added a second rain
+      // on top of the last (18 sec rain, 12 sec cooldown): 404 pulses in 5 minutes at level 30 against ~165.
+      timespan_t period = data().effectN( 3 ).period();
+      acid_rain_period = period > 0_ms ? period : 2_s;
     }
+  }
+
+  void reset() override
+  {
+    shaman_heal_t::reset();
+    acid_rain_event = nullptr;
   }
 
   void execute() override
@@ -10053,12 +10062,22 @@ struct healing_rain_t : public shaman_heal_t
 
     if ( acid_rain )
     {
+      // One Healing Rain at a time ("inside of your Healing Rain"): the new rain replaces the one still falling.
+      if ( acid_rain_event )
+        event_t::cancel( acid_rain_event );
       make_event<ground_aoe_event_t>( *sim, player,
         ground_aoe_params_t()
           .target( player->target )
           .duration( data().duration() > 0_ms ? data().duration() : 10_s )
           .pulse_time( acid_rain_period )
-          .action( acid_rain ) );
+          .hasted( ground_aoe_params_t::SPELL_HASTE )
+          .action( acid_rain )
+          .state_callback( [ this ]( ground_aoe_params_t::state_type type, ground_aoe_event_t* e ) {
+            if ( type == ground_aoe_params_t::EVENT_CREATED )
+              acid_rain_event = e;
+            else if ( type == ground_aoe_params_t::EVENT_DESTRUCTED && acid_rain_event == e )
+              acid_rain_event = nullptr;
+          } ) );
     }
   }
 };
