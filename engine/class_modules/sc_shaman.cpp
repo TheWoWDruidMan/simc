@@ -9383,10 +9383,10 @@ public:
       proc_chance *= 1.0 + p()->talent.mystic_knowledge->effectN( 1 ).percent();
       ;
 
-      if ( p()->spec.restoration_shaman->ok() )
-      {
-        proc_chance += p()->spec.restoration_shaman->effectN( 7 ).percent();
-      }
+      // BracketSim, 9 Oct 2026: Restoration added its spec aura's effect #7 here. In this client that effect is "Modify
+      // Guardian Damage Done%" (57 + 1 per level: +87% at 30), not a Lava Surge bonus, and no Restoration effect touches
+      // Lava Surge (77756). A level 30 Restoration Shaman got Lava Surge on ~57% of Flame Shock ticks against 9% in her
+      // own combat log (12 from ~128 ticks), and cast ~45% more Lava Bursts than in game.
 
       // Legacy Azerite: Igneous Potential sets a floor under the Lava Surge
       // chance. Battle for Azeroth replaced the chance outright, but Midnight's
