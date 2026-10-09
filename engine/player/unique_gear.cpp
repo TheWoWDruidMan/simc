@@ -841,15 +841,20 @@ void enchants::executioner( special_effect_t& effect )
 void enchants::crusader( special_effect_t& effect )
 {
   const spell_data_t* spell = effect.item->player->find_spell( effect.spell_id );
-  auto buff = static_cast<stat_buff_t*>( buff_t::find( effect.item->player, tokenized_name( spell ) ) );
+  // One Holy Strength per hand (9 Oct 2026): in game a Crusader on each weapon gives two separate buffs, both up at once
+  // (a Fury warrior's log: a second applybuff 8.6 s after the first, no removal between). One shared buff only refreshed.
+  std::string name = tokenized_name( spell );
+  if ( effect.item->slot == SLOT_OFF_HAND )
+    name += "_oh";
+  auto buff = static_cast<stat_buff_t*>( buff_t::find( effect.item->player, name ) );
 
   if ( !buff )
   {
-    buff = make_buff<stat_buff_t>( effect.item->player, tokenized_name( spell ), spell );
+    buff = make_buff<stat_buff_t>( effect.item->player, name, spell );
     buff->set_activated( false );
   }
 
-  effect.name_str     = tokenized_name( spell );
+  effect.name_str     = name;
   effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
   effect.proc_flags2_ = PF2_ALL_HIT;
   // Old-style PPM, not real PPM. `ppm_` positive is the per-hit conversion
