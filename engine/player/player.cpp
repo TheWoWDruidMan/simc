@@ -5485,6 +5485,21 @@ void player_t::create_buffs()
     sim->print_debug( "{} BracketSim {} damage +{}%", *this, util::school_type_string( school ), pct * 100.0 );
   }
 
+  // "+N% damage done, every school" (11 Oct 2026: Icecrown Citadel buff 30%, Plague Stream 100%). The option appends,
+  // so each buff adds its own "<percent>/" and they multiply.
+  bracketsim.damage_done_mult = 1.0;
+  if ( !is_enemy() && !bracketsim.damage_done.empty() )
+  {
+    for ( auto part : util::string_split<util::string_view>( bracketsim.damage_done, "/" ) )
+    {
+      double pct = util::to_double( part ) / 100.0;
+      if ( pct <= 0 )
+        throw std::invalid_argument( fmt::format( "bracketsim_damage_done: bad value '{}'", bracketsim.damage_done ) );
+      bracketsim.damage_done_mult *= 1.0 + pct;
+    }
+    sim->print_debug( "{} BracketSim damage done x{}", *this, bracketsim.damage_done_mult );
+  }
+
   // Infinite-Stacking Buffs and De-Buffs for everyone
   buffs.stunned = make_buff( this, "stunned" )
     ->set_max_stack( 1 )
@@ -6246,6 +6261,9 @@ double player_t::composite_player_multiplier( school_e school ) const
   // BracketSim: bracketsim_school_damage (Fengus' Ferocity).
   if ( bracketsim.school_damage_pct > 0 && dbc::is_school( school, bracketsim.school_damage_school ) )
     m *= 1.0 + bracketsim.school_damage_pct;
+
+  // BracketSim: bracketsim_damage_done (Icecrown Citadel buff, Plague Stream).
+  m *= bracketsim.damage_done_mult;
 
   return m;
 }
@@ -14294,6 +14312,7 @@ void player_t::create_options()
   add_option( opt_string( "bracketsim_creature_damage", bracketsim.creature_damage ) );
   add_option( opt_string( "bracketsim_timed_stat", bracketsim.timed_stat ) );
   add_option( opt_string( "bracketsim_school_damage", bracketsim.school_damage ) );
+  add_option( opt_append( "bracketsim_damage_done", bracketsim.damage_done ) );
   add_option( opt_string( "bracketsim_raid_haste", bracketsim.raid_haste ) );
   add_option( opt_string( "bracketsim_ally_armor_shred", bracketsim.ally_armor_shred ) );
   add_option( opt_string( "bracketsim_consumable_ilvl", bracketsim.consumable_ilvl ) );

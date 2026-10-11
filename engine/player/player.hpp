@@ -357,6 +357,10 @@ struct player_t : public actor_t
     std::string school_damage;
     school_e school_damage_school = SCHOOL_NONE;
     double school_damage_pct = 0;
+    // "<percent>/" appended once per buff (11 Oct 2026), e.g. "30/100/" for the Icecrown Citadel buff plus Plague
+    // Stream: +N% damage done, every school, each one multiplying. Player only - an aura on the player, not its pets.
+    std::string damage_done;
+    double damage_done_mult = 1.0;
     buff_t* fire_spell_power_buff = nullptr;
     // "<percent>/<duration seconds>/<period seconds>", e.g. "15/40/300" for
     // Drums of Fury. A raid-wide HASTE percentage, which no stat buff can
