@@ -72,6 +72,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <utility>
+#include "interfaces/sc_js.hpp"
 
 namespace unique_gear
 {
@@ -5380,9 +5381,46 @@ void player_t::create_buffs()
   // Both are refused loudly rather than ignored quietly. A silently dropped
   // option is how `temporary_enchant=howling_rune_3` returned the same dps as
   // `temporary_enchant=made_up_thing` for a whole day.
+  // "<name>:" in front of a BracketSim world-buff option: the buff's name for the report (see bracketsim.school_damage_buff).
+  auto bracketsim_buff_name = []( util::string_view& v ) {
+    std::string name;
+    auto colon = v.find( ':' );
+    if ( colon != util::string_view::npos )
+    {
+      name = std::string( v.substr( 0, colon ) );
+      v = v.substr( colon + 1 );
+      if ( name.empty() || name.find_first_not_of( "abcdefghijklmnopqrstuvwxyz_" ) != std::string::npos )
+        throw std::invalid_argument( fmt::format( "BracketSim buff name '{}': lower case and _ only", name ) );
+    }
+    return name;
+  };
+  auto bracketsim_constant_buff = [ this ]( const std::string& name ) -> buff_t* {
+    if ( name.empty() )
+      return nullptr;
+    auto b = make_buff( this, name )->set_duration( 0_ms )->set_quiet( false );
+    register_combat_begin( b );
+    return b;
+  };
+
+  if ( !is_enemy() && !bracketsim.permanent_stat.empty() )
+  {
+    util::string_view v = bracketsim.permanent_stat;
+    std::string name = bracketsim_buff_name( v );
+    auto parts = util::string_split<util::string_view>( v, "/" );
+    stat_e stat = parts.size() == 2 ? util::parse_stat_type( parts[ 0 ] ) : STAT_NONE;
+    double amount = parts.size() == 2 ? util::to_double( parts[ 1 ] ) : 0;
+    if ( name.empty() || stat == STAT_NONE || amount <= 0 )
+      throw std::invalid_argument( "bracketsim_permanent_stat wants <name>:<stat>/<amount>" );
+    auto b = make_buff<stat_buff_t>( this, name )->add_stat( stat, amount )->set_duration( 0_ms );
+    register_combat_begin( b );
+    sim->print_debug( "{} BracketSim permanent {} +{} ({})", *this, util::stat_type_string( stat ), amount, name );
+  }
+
   if ( !is_enemy() && !bracketsim.creature_damage.empty() )
   {
-    auto parts = util::string_split<util::string_view>( bracketsim.creature_damage, "/" );
+    util::string_view cv = bracketsim.creature_damage;
+    std::string cname = bracketsim_buff_name( cv );
+    auto parts = util::string_split<util::string_view>( cv, "/" );
     if ( parts.size() != 2 )
       throw std::invalid_argument( "bracketsim_creature_damage wants <percent>/<creature type>" );
     double pct = util::to_double( parts[ 0 ] ) / 100.0;
@@ -5391,8 +5429,8 @@ void player_t::create_buffs()
       throw std::invalid_argument( fmt::format( "bracketsim_creature_damage: unknown creature type '{}'",
                                                 parts[ 1 ] ) );
     // Passive: a null buff means composite_versus_multiplier applies it always,
-    // which is what carrying the Journal's buff means.
-    buffs.creature_type_buffs.emplace_back( nullptr, 1u << ( race - 1 ), pct );
+    // which is what carrying the Journal's buff means. A named one rides its permanent buff (up all fight).
+    buffs.creature_type_buffs.emplace_back( bracketsim_constant_buff( cname ), 1u << ( race - 1 ), pct );
     sim->print_debug( "{} BracketSim creature damage +{}% versus {}", *this, pct * 100.0,
                       util::race_type_string( race ) );
   }
@@ -5473,7 +5511,9 @@ void player_t::create_buffs()
   // "+N% damage done of one school" (11 Oct 2026, Fengus' Ferocity: 10% physical damage, read in game).
   if ( !is_enemy() && !bracketsim.school_damage.empty() )
   {
-    auto parts = util::string_split<util::string_view>( bracketsim.school_damage, "/" );
+    util::string_view sv = bracketsim.school_damage;
+    std::string sname = bracketsim_buff_name( sv );
+    auto parts = util::string_split<util::string_view>( sv, "/" );
     if ( parts.size() != 2 )
       throw std::invalid_argument( "bracketsim_school_damage wants <school>/<percent>" );
     school_e school = util::parse_school_type( parts[ 0 ] );
@@ -5482,6 +5522,7 @@ void player_t::create_buffs()
       throw std::invalid_argument( fmt::format( "bracketsim_school_damage: bad value '{}'", bracketsim.school_damage ) );
     bracketsim.school_damage_school = school;
     bracketsim.school_damage_pct = pct;
+    bracketsim.school_damage_buff = bracketsim_constant_buff( sname );
     sim->print_debug( "{} BracketSim {} damage +{}%", *this, util::school_type_string( school ), pct * 100.0 );
   }
 
@@ -6272,7 +6313,8 @@ double player_t::composite_player_multiplier( school_e school ) const
     m *= 1.0 + buffs.entropic_embrace->data().effectN( 1 ).percent();
 
   // BracketSim: bracketsim_school_damage (Fengus' Ferocity).
-  if ( bracketsim.school_damage_pct > 0 && dbc::is_school( school, bracketsim.school_damage_school ) )
+  if ( bracketsim.school_damage_pct > 0 && dbc::is_school( school, bracketsim.school_damage_school ) &&
+       ( !bracketsim.school_damage_buff || bracketsim.school_damage_buff->check() ) )
     m *= 1.0 + bracketsim.school_damage_pct;
 
   // BracketSim: bracketsim_damage_done (Icecrown Citadel buff, Plague Stream).
@@ -7264,6 +7306,12 @@ void merge( player_t& left, player_t& right )
 void player_t::merge( player_t& other )
 {
   collected_data.merge( other );
+
+  bracketsim.armor_hits += other.bracketsim.armor_hits;
+  bracketsim.armor_sum += other.bracketsim.armor_sum;
+  bracketsim.armor_resist_sum += other.bracketsim.armor_resist_sum;
+  if ( other.bracketsim.armor_coeff_seen > 0 )
+    bracketsim.armor_coeff_seen = other.bracketsim.armor_coeff_seen;
 
   for ( resource_e i = RESOURCE_NONE; i < RESOURCE_MAX; ++i )
   {
@@ -9234,6 +9282,16 @@ void player_t::target_mitigation( school_e, result_amount_type dmg_type, action_
 
     if ( !s->action )
       return;
+
+    // BracketSim: every physical hit armor applies to, at whatever armor the target had (0 included).
+    if ( !s->action->player->is_enemy() && !s->action->ignores_armor && s->action->get_school() == SCHOOL_PHYSICAL )
+    {
+      double coeff = s->action->player->current.armor_coeff;
+      bracketsim.armor_hits += 1;
+      bracketsim.armor_sum += s->target_armor;
+      bracketsim.armor_resist_sum += s->target_armor > 0 ? util::calculate_armor_resist( s->target_armor, coeff ) : 0.0;
+      bracketsim.armor_coeff_seen = coeff;
+    }
 
     // Armor
     if ( auto armor = s->target_armor )
@@ -14325,6 +14383,7 @@ void player_t::create_options()
   add_option( opt_string( "bracketsim_creature_damage", bracketsim.creature_damage ) );
   add_option( opt_string( "bracketsim_timed_stat", bracketsim.timed_stat ) );
   add_option( opt_string( "bracketsim_school_damage", bracketsim.school_damage ) );
+  add_option( opt_string( "bracketsim_permanent_stat", bracketsim.permanent_stat ) );
   add_option( opt_append( "bracketsim_damage_done", bracketsim.damage_done ) );
   add_option( opt_string( "bracketsim_raid_haste", bracketsim.raid_haste ) );
   add_option( opt_string( "bracketsim_ally_armor_shred", bracketsim.ally_armor_shred ) );
@@ -17499,4 +17558,17 @@ void player_t::parse_passive_item_effect( const spell_data_t* spell )
 void player_t::register_passive_item_effect_override( const spelleffect_data_t& effect, double value )
 {
   register_passive_effect_override( effect, value );
+}
+
+// BracketSim (11 Oct 2026): the armor a target had when the player and pets hit it - its own armor, the average armor
+// after every reduction (teammate debuffs and your own procs), and the average share of damage armor took away.
+void player_t::output_json_report( js::JsonOutput& root ) const
+{
+  if ( bracketsim.armor_hits <= 0 )
+    return;
+  root[ "bracketsim_armor" ][ "own" ] = initial.stats.armor;
+  root[ "bracketsim_armor" ][ "average" ] = bracketsim.armor_sum / bracketsim.armor_hits;
+  root[ "bracketsim_armor" ][ "reduction_average" ] = bracketsim.armor_resist_sum / bracketsim.armor_hits;
+  root[ "bracketsim_armor" ][ "coefficient" ] = bracketsim.armor_coeff_seen;
+  root[ "bracketsim_armor" ][ "hits" ] = bracketsim.armor_hits;
 }

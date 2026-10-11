@@ -357,6 +357,15 @@ struct player_t : public actor_t
     std::string school_damage;
     school_e school_damage_school = SCHOOL_NONE;
     double school_damage_pct = 0;
+    // 11 Oct 2026: a world buff named in its option ("<name>:...") is also a permanent buff of that name, up from the
+    // pull, and its effect applies only while that buff is up - so the report lists it as a constant buff (the author: every
+    // toggle must be verifiable there). Unnamed options keep the old passive behaviour.
+    buff_t* school_damage_buff = nullptr;
+    // "<name>:<stat>/<amount>", e.g. "slipkiks_savvy:crit_rating/8": a permanent stat buff (Slip'kik's Savvy).
+    std::string permanent_stat;
+    // Armor this unit had when hit (11 Oct 2026, the author: show the boss armor and how much the reductions are worth):
+    // summed over every direct hit from a player or pet that armor applied to, all iterations. JSON "custom".
+    double armor_hits = 0, armor_sum = 0, armor_resist_sum = 0, armor_coeff_seen = 0;
     // "[<name>:]<percent>/" appended once per buff (11 Oct 2026), e.g. "icecrown_citadel_buff:30/plague_stream:100/":
     // +N% damage done, every school, each one multiplying; a named one is also a permanent buff for the report.
     // Player only - an aura on the player, not its pets (WCL: the ICC buff never landed on a pet).
@@ -1572,8 +1581,7 @@ public:
 
   // JSON Report extension. Overridable in class methods. Root element is an object assigned for
   // each JSON player object under "custom" property.
-  virtual void output_json_report( js::JsonOutput& /* root */ ) const
-  { }
+  virtual void output_json_report( js::JsonOutput& root ) const;  // BracketSim: target armor (player.cpp)
 
 private:
   std::vector<unsigned> active_dots;
