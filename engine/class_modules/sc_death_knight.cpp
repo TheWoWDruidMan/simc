@@ -16726,7 +16726,10 @@ void death_knight_t::spell_lookups()
   spell.epidemic_damage                 = conditional_spell_lookup( spec.epidemic->ok(), 212739 );
   spell.outbreak_aoe                    = conditional_spell_lookup( talent.unholy.outbreak.ok(), 196780 );
   spell.festering_scythe                = conditional_spell_lookup( talent.unholy.festering_scythe.ok(), 458128 );
-  spell.dark_transformation_player_buff = conditional_spell_lookup( talent.unholy.dark_transformation.ok(), 1235391 );
+  // BracketSim (11 Oct 2026, audit): a taken talent works at any level - the level-checked lookup blanked this level 32
+  // buff, so at level 30 Dark Transformation was cast and did nothing (no ghoul transformation).
+  spell.dark_transformation_player_buff = talent.unholy.dark_transformation.ok() ? dbc::find_spell( this, 1235391 )
+                                                                                 : spell_data_t::not_found();
   spell.dread_plague                    = conditional_spell_lookup( talent.unholy.outbreak.ok(), 1240996 );
   spell.superstrain_energize            = conditional_spell_lookup( talent.unholy.superstrain.ok(), 1242078 );
   spell.clawing_shadows_buff            = conditional_spell_lookup( talent.unholy.clawing_shadows.ok(), 1241569 );
