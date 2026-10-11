@@ -1088,7 +1088,11 @@ struct crusader_strike_t : public paladin_melee_attack_t
 {
   bool has_crusader_2;
   crusader_strike_t( paladin_t* p, util::string_view options_str )
-    : paladin_melee_attack_t( "crusader_strike", p, p->find_class_spell( "Crusader Strike" ) ),
+    // BracketSim (11 Oct 2026, audit): find_class_spell returns nothing for a Holy Paladin, so its Crusader Strike was
+    // created as spell 0 and never cast. Spell 35395 is learned at level 1 by every paladin (Holy's aura buffs it +42%).
+    : paladin_melee_attack_t( "crusader_strike", p,
+                              p->find_class_spell( "Crusader Strike" )->ok() ? p->find_class_spell( "Crusader Strike" )
+                                                                              : p->find_spell( 35395 ) ),
       has_crusader_2( p->find_specialization_spell( 342348 )->ok() )
   {
     parse_options( options_str );
