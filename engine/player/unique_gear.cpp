@@ -3127,6 +3127,24 @@ static ledger_t* ledger( player_t* t )
   return make_buff<ledger_t>( t );
 }
 
+/*
+ * FLAT AMOUNTS, read off the target's armor in the author's logs (11 Oct 2026, the author: "these are flat values and dont scale"):
+ * Phantom Strike 23 (340 -> 317 on its own, WoWCombatLog-101126_200657; 23 again in 100726_234457 - its tooltip says
+ * 46, the game takes 23), Puncture Armor 90 (268 -> 178, same log), Armor Shatter 110 at 3 stacks (340 -> 304 -> 267
+ * -> 230: 36/37/37). The spell data's item-level scaling gave the same at the item levels these drop at, but a
+ * teammate's or an upgraded copy must not change them.
+ */
+static double flat_amount( util::string_view name )
+{
+  if ( name == "phantom_strike" || name == "ally_phantom_strike" )
+    return 23.0;
+  if ( name == "puncture_armor" || name == "ally_puncture_armor" )
+    return 90.0;
+  if ( name == "armor_shatter" || name == "ally_armor_shatter" )
+    return 110.0 / 3.0;  // per stack
+  return 0.0;
+}
+
 // Get or create a debuff on the target. `amount` is armor removed per stack.
 static buff_t* debuff( player_t* t, util::string_view name, const spell_data_t* s, double amount )
 {
@@ -3177,8 +3195,7 @@ static void weapon( special_effect_t& effect, util::string_view name, double ppm
   effect.weapon_proc  = false;
   effect.proc_flags_ |= PF_MAGIC_SPELL;  // see lands_as_melee_hit
 
-  double amount = std::fabs( effect.item ? effect.driver()->effectN( 1 ).average( effect.item )
-                                         : effect.driver()->effectN( 1 ).average( effect.player ) );
+  double amount = flat_amount( name );
   effect.player->sim->print_debug( "{} {} removes {} armor per stack, {:.4f} per hit", *effect.player, name, amount,
                                    effect.proc_chance_ );
 
@@ -3251,8 +3268,7 @@ static void ally_armor_shred( player_t* p, util::string_view option )
     const spell_data_t* s = p->find_spell( found->spell_id );
     if ( !s->ok() )
       throw std::invalid_argument( fmt::format( "bracketsim_ally_armor_shred: spell {} missing", found->spell_id ) );
-    unsigned scaled = s->max_scaling_level() > 0 ? std::min( ilvl, s->max_scaling_level() ) : ilvl;
-    double amount   = std::fabs( s->effectN( 1 ).average_no_item( p, scaled ) );
+    double amount   = armor_shred::flat_amount( found->name );  // flat (11 Oct 2026); the item level is accepted, not used
     int stacks      = std::max( 1, as<int>( s->max_stacks() ) );
     p->sim->print_debug( "{} teammate {} at item level {}: {} armor x{}", *p, found->option, ilvl, amount, stacks );
 
