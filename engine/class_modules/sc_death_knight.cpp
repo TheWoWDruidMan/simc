@@ -12584,7 +12584,27 @@ struct obliterate_strike_t final : public death_knight_melee_attack_t
       base_multiplier *= 1.0 + p->find_spell( 334583 )->effectN( 2 ).percent();
 
     inexorable_assault = get_action<inexorable_assault_damage_t>( "inexorable_assault", p );
+
+    if ( p->legacy_covenant.deaths_due->ok() )
+    {
+      deaths_due_extra_targets = as<int>( dbc::find_spell( p, 315442 )->effectN( 2 ).base_value() );
+      if ( p->shadowlands_legacy.rampant_transference )
+        deaths_due_extra_targets += as<int>( dbc::find_spell( p, 353882 )->effectN( 3 ).base_value() );
+    }
   }
+
+  // Legacy Death's Due (11 Oct 2026, the author): standing in it, Obliterate hits 1 more target (Death's Due 315442 eff#2 ->
+  // Death and Decay 188290 eff#4, Obliterate chain targets). Rampant Transference's eff#3 adds 20 more to that same
+  // effect in the live data (a player's report), so with it Obliterate hits everything inside.
+  int n_targets() const override
+  {
+    int n = death_knight_melee_attack_t::n_targets();
+    if ( !deaths_due_extra_targets || !p()->in_death_and_decay() )
+      return n;
+    return std::max( n, 1 ) + deaths_due_extra_targets;
+  }
+
+  int deaths_due_extra_targets = 0;
 
   double composite_da_multiplier( const action_state_t* state ) const override
   {
@@ -14210,14 +14230,9 @@ double death_knight_t::resource_gain( resource_e resource_type, double amount, g
     buffs.rune_carved_plates_physical_buff->trigger( as<int>( amount ) );
   }
 
-  // Legacy Shadowlands: Rampant Transference.
-  if ( shadowlands_legacy.rampant_transference && resource_type == RESOURCE_RUNIC_POWER &&
-       in_death_and_decay() )
-  {
-    double bonus_rp = amount * find_spell( 353882 )->effectN( 3 ).percent();
-    actual_amount += player_t::resource_gain( resource_type, bonus_rp,
-                                              gains.legacy_rampant_transference, action );
-  }
+  // Legacy Shadowlands: Rampant Transference's runic power bonus is NOT applied (11 Oct 2026, player report): in the
+  // live game its effect #3 now points at Death and Decay effect #4 (Obliterate chain targets), not the resource
+  // effect (#5), so no extra runic power is gained.
 
   return actual_amount;
 }

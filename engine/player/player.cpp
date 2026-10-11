@@ -5414,10 +5414,10 @@ void player_t::create_buffs()
       ->set_duration( duration )
       ->add_invalidate( CACHE_HASTE );
 
-    bracketsim.timed_stat_times.clear();
+    bracketsim.raid_haste_times.clear();
     for ( timespan_t at = 0_ms; at < sim->max_time * 1.2; at += period )
-      bracketsim.timed_stat_times.push_back( at );
-    register_timed_buff_triggers( bracketsim.raid_haste_buff, bracketsim.timed_stat_times, duration );
+      bracketsim.raid_haste_times.push_back( at );
+    register_timed_buff_triggers( bracketsim.raid_haste_buff, bracketsim.raid_haste_times, duration );
     sim->print_debug( "{} BracketSim raid haste +{}% for {} every {}", *this, pct * 100.0,
                       duration, period );
   }
@@ -5432,7 +5432,10 @@ void player_t::create_buffs()
     if ( parts.size() != 4 )
       throw std::invalid_argument(
         "bracketsim_timed_stat wants <stat>/<amount>/<duration seconds>/<period seconds>" );
-    stat_e stat = util::parse_stat_type( parts[ 0 ] );
+    // fire_spell_power (11 Oct 2026): Flame Cap is FIRE spell power. A plain stat buff gave the 21 to every school;
+    // this one is read only by composite_spell_power for schools with a Fire part.
+    bool fire_only = util::str_compare_ci( parts[ 0 ], "fire_spell_power" );
+    stat_e stat = fire_only ? STAT_SPELL_POWER : util::parse_stat_type( parts[ 0 ] );
     if ( stat == STAT_NONE )
       throw std::invalid_argument( fmt::format( "bracketsim_timed_stat: unknown stat '{}'", parts[ 0 ] ) );
     double amount = util::to_double( parts[ 1 ] );
@@ -5441,9 +5444,20 @@ void player_t::create_buffs()
     if ( amount <= 0 || duration <= 0_ms || period <= 0_ms )
       throw std::invalid_argument( "bracketsim_timed_stat: amount, duration and period must be positive" );
 
-    auto buff = make_buff<stat_buff_t>( this, "bracketsim_timed_stat" )
-      ->add_stat( stat, amount )
-      ->set_duration( duration );
+    buff_t* buff;
+    if ( fire_only )
+    {
+      buff = bracketsim.fire_spell_power_buff = make_buff( this, "bracketsim_fire_spell_power" )
+        ->set_default_value( amount )
+        ->set_duration( duration )
+        ->add_invalidate( CACHE_SPELL_POWER );
+    }
+    else
+    {
+      buff = make_buff<stat_buff_t>( this, "bracketsim_timed_stat" )
+        ->add_stat( stat, amount )
+        ->set_duration( duration );
+    }
 
     // Pressed on cooldown from the pull, which is how a one minute consumable
     // on a three minute cooldown is really used. The vector lives on the player
@@ -5453,7 +5467,22 @@ void player_t::create_buffs()
       bracketsim.timed_stat_times.push_back( at );
     register_timed_buff_triggers( buff, bracketsim.timed_stat_times, duration );
     sim->print_debug( "{} BracketSim timed stat {} +{} for {} every {}", *this,
-                      util::stat_type_string( stat ), amount, duration, period );
+                      fire_only ? "fire_spell_power" : util::stat_type_string( stat ), amount, duration, period );
+  }
+
+  // "+N% damage done of one school" (11 Oct 2026, Fengus' Ferocity: 10% physical damage, read in game).
+  if ( !is_enemy() && !bracketsim.school_damage.empty() )
+  {
+    auto parts = util::string_split<util::string_view>( bracketsim.school_damage, "/" );
+    if ( parts.size() != 2 )
+      throw std::invalid_argument( "bracketsim_school_damage wants <school>/<percent>" );
+    school_e school = util::parse_school_type( parts[ 0 ] );
+    double pct = util::to_double( parts[ 1 ] ) / 100.0;
+    if ( school == SCHOOL_NONE || pct <= 0 )
+      throw std::invalid_argument( fmt::format( "bracketsim_school_damage: bad value '{}'", bracketsim.school_damage ) );
+    bracketsim.school_damage_school = school;
+    bracketsim.school_damage_pct = pct;
+    sim->print_debug( "{} BracketSim {} damage +{}%", *this, util::school_type_string( school ), pct * 100.0 );
   }
 
   // Infinite-Stacking Buffs and De-Buffs for everyone
@@ -6004,11 +6033,16 @@ double player_t::composite_spell_cast_speed() const
   return speed;
 }
 
-double player_t::composite_spell_power( school_e /* school */ ) const
+double player_t::composite_spell_power( school_e school ) const
 {
   double sp = current.stats.spell_power;
 
   sp += current.spell_power_per_intellect * cache.intellect();
+
+  // BracketSim: Flame Cap's fire spell power (bracketsim_timed_stat=fire_spell_power/...).
+  if ( bracketsim.fire_spell_power_buff && bracketsim.fire_spell_power_buff->check() &&
+       dbc::is_school( school, SCHOOL_FIRE ) )
+    sp += bracketsim.fire_spell_power_buff->check_value();
 
   return sp;
 }
@@ -6208,6 +6242,10 @@ double player_t::composite_player_multiplier( school_e school ) const
 
   if ( buffs.entropic_embrace && buffs.entropic_embrace->check() )
     m *= 1.0 + buffs.entropic_embrace->data().effectN( 1 ).percent();
+
+  // BracketSim: bracketsim_school_damage (Fengus' Ferocity).
+  if ( bracketsim.school_damage_pct > 0 && dbc::is_school( school, bracketsim.school_damage_school ) )
+    m *= 1.0 + bracketsim.school_damage_pct;
 
   return m;
 }
@@ -14255,6 +14293,7 @@ void player_t::create_options()
   // BracketSim: real buffs with no spell in this build. See player.hpp.
   add_option( opt_string( "bracketsim_creature_damage", bracketsim.creature_damage ) );
   add_option( opt_string( "bracketsim_timed_stat", bracketsim.timed_stat ) );
+  add_option( opt_string( "bracketsim_school_damage", bracketsim.school_damage ) );
   add_option( opt_string( "bracketsim_raid_haste", bracketsim.raid_haste ) );
   add_option( opt_string( "bracketsim_ally_armor_shred", bracketsim.ally_armor_shred ) );
   add_option( opt_string( "bracketsim_consumable_ilvl", bracketsim.consumable_ilvl ) );

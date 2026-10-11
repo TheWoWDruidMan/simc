@@ -350,8 +350,14 @@ struct player_t : public actor_t
     // "<percent>/<creature type>", e.g. "15/beast". Passive - no buff to check.
     std::string creature_damage;
     // "<stat>/<amount>/<duration seconds>/<period seconds>",
-    // e.g. "spell_power/21/60/180" for Flame Cap.
+    // e.g. "fire_spell_power/21/60/180" for Flame Cap (11 Oct 2026: fire_spell_power counts only for spells with a
+    // Fire part - Fire, Shadowflame, Frostfire... - as the item says).
     std::string timed_stat;
+    // "<school>/<percent>" (11 Oct 2026), e.g. "physical/10" for Fengus' Ferocity: +N% damage done of that school.
+    std::string school_damage;
+    school_e school_damage_school = SCHOOL_NONE;
+    double school_damage_pct = 0;
+    buff_t* fire_spell_power_buff = nullptr;
     // "<percent>/<duration seconds>/<period seconds>", e.g. "15/40/300" for
     // Drums of Fury. A raid-wide HASTE percentage, which no stat buff can
     // express: Bloodlust is a level 48 spell (the engine's own data says so, and
@@ -383,6 +389,8 @@ struct player_t : public actor_t
     // Kept alive for register_timed_buff_triggers, which holds the vector BY
     // REFERENCE. A temporary here would dangle.
     std::vector<timespan_t> timed_stat_times;
+    // Drums had shared timed_stat_times: with Flame Cap picked too, Drums fired on Flame Cap's 3 min schedule (11 Oct 2026).
+    std::vector<timespan_t> raid_haste_times;
   } bracketsim;
 
   // BracketSim legacy compatibility: covenant abilities this actor can actually

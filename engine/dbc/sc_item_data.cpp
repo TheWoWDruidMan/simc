@@ -630,6 +630,11 @@ stat_pair_t item_database::item_enchantment_effect_stats( player_t* player,
     }
   }
 
+  // BracketSim (11 Oct 2026, the author, in game): Crusher (1603) is a flat +5 Attack Power at every level; the scaling data
+  // gave 6 from level 34.
+  if ( enchantment.id == 1603 && enchantment.id_gem == 0 && stat == STAT_ATTACK_POWER )
+    value = 5;
+
   if ( stat != STAT_NONE && value != 0 )
   {
     return { stat, (int)value };
