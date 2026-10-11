@@ -12587,9 +12587,9 @@ struct obliterate_strike_t final : public death_knight_melee_attack_t
 
     if ( p->legacy_covenant.deaths_due->ok() )
     {
-      deaths_due_extra_targets = as<int>( dbc::find_spell( p, 315442 )->effectN( 2 ).base_value() );
+      deaths_due_extra_targets = as<int>( dbc::find_spell( static_cast<const player_t*>( p ), 315442 )->effectN( 2 ).base_value() );
       if ( p->shadowlands_legacy.rampant_transference )
-        deaths_due_extra_targets += as<int>( dbc::find_spell( p, 353882 )->effectN( 3 ).base_value() );
+        deaths_due_extra_targets += as<int>( dbc::find_spell( static_cast<const player_t*>( p ), 353882 )->effectN( 3 ).base_value() );
     }
   }
 
@@ -15186,7 +15186,13 @@ const spell_data_t* death_knight_t::conditional_spell_lookup( bool fn, int id )
   if ( !fn )
     return spell_data_t::not_found();
 
-  return find_spell( id );
+  // BracketSim (11 Oct 2026): the condition is a taken talent, and a taken talent works at any level, so only the
+  // spell's MAXIMUM level is checked here. Called through player_t so the player's own copy of the spell is made (talent
+  // and aura modifiers land on that copy): dbc::find_spell with a death_knight_t* skips it - that lost 15% at level 80.
+  auto s = dbc::find_spell( static_cast<const player_t*>( this ), id );
+  if ( s->id() && ( s->max_aura_level() == 0 || as<int>( s->max_aura_level() ) >= true_level ) )
+    return s;
+  return spell_data_t::not_found();
 }
 
 bool death_knight_t::has_runeforge( runeforges_e rf ) const
@@ -16728,8 +16734,7 @@ void death_knight_t::spell_lookups()
   spell.festering_scythe                = conditional_spell_lookup( talent.unholy.festering_scythe.ok(), 458128 );
   // BracketSim (11 Oct 2026, audit): a taken talent works at any level - the level-checked lookup blanked this level 32
   // buff, so at level 30 Dark Transformation was cast and did nothing (no ghoul transformation).
-  spell.dark_transformation_player_buff = talent.unholy.dark_transformation.ok() ? dbc::find_spell( this, 1235391 )
-                                                                                 : spell_data_t::not_found();
+  spell.dark_transformation_player_buff = conditional_spell_lookup( talent.unholy.dark_transformation.ok(), 1235391 );
   spell.dread_plague                    = conditional_spell_lookup( talent.unholy.outbreak.ok(), 1240996 );
   spell.superstrain_energize            = conditional_spell_lookup( talent.unholy.superstrain.ok(), 1242078 );
   spell.clawing_shadows_buff            = conditional_spell_lookup( talent.unholy.clawing_shadows.ok(), 1241569 );

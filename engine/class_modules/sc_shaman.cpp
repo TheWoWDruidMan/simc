@@ -12671,7 +12671,9 @@ void shaman_t::init_spells()
     case SHAMAN_ENHANCEMENT: spell.ascendance = find_spell( 114051 ); break;
     // BracketSim, 8 Oct 2026: 114052 is a level 50 spell; the level-checked find_spell() blanked it below 50, so a
     // Restoration Shaman who took the Ascendance talent could never cast it (and never got Preeminence's haste).
-    case SHAMAN_RESTORATION: spell.ascendance = dbc::find_spell( this, 114052 ); break;
+    // 11 Oct 2026: through player_t, so the player's own copy of the spell is made (a shaman_t* skips that copy and
+    // talent/aura modifiers on it are lost).
+    case SHAMAN_RESTORATION: spell.ascendance = dbc::find_spell( static_cast<const player_t*>( this ), 114052 ); break;
     default:                 break;
   }
 
