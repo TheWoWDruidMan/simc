@@ -250,6 +250,11 @@ static bool lands_as_melee_hit( const action_state_t* s, bool weapon_proc )
   const spell_data_t& d = s->action->data();
   if ( s->proc_type() == PROC1_MAGIC_SPELL && !d.flags( static_cast<spell_attribute>( 41u ) ) )
     return false;
+  // Flame Shock (188389) carries attribute 41 but is NOT a hit for these procs (11 Oct 2026, the author's level 30
+  // Enhancement dummy log, jar worn): 0 motes from the 3 casts with no other hit near them, 0 from 22 ticks.
+  // Howling Blast (same attribute, Frost DK, same log) does count: 4 motes from 4 isolated casts.
+  if ( d.id() == 188389 )
+    return false;
   if ( weapon_proc && d.equipped_class() == ITEM_CLASS_ARMOR )
     return false;
   return true;
@@ -3343,7 +3348,25 @@ struct tiny_abomination_cb_t final : public dbc_proc_callback_t
    */
   static bool counts( const action_state_t* s )
   {
-    return lands_as_melee_hit( s, false );
+    return lands_as_melee_hit( s, false ) || frost_two_hand_cast( s );
+  }
+
+  /*
+   * FROST STRIKE AND OBLITERATE WITH A TWO-HAND WEAPON GIVE ONE MOTE MORE THAN THEIR STRIKES (11 Oct 2026, the author's level
+   * 30 Frost DK dummy log, 2H + jar): Frost Strike 2 motes a cast (one damage strike, 325464), Obliterate 3 (two
+   * strikes, 325461 + 1264084), every cast. Both casts also trigger the dual-wield strikes (222026 / 222024), which
+   * deal nothing with a 2H - the likely extra. Rogue casts built the same way (Mutilate) give none, so it is these two
+   * only, and only with a 2H; the jar only (Shadowmourne in the same log rolled about twice per Obliterate, not three).
+   */
+  static bool frost_two_hand_cast( const action_state_t* s )
+  {
+    if ( !s || !s->action || s->result_amount > 0 )
+      return false;
+    const unsigned id = s->action->data().id();
+    if ( id != 49143 && id != 49020 )
+      return false;
+    const player_t* p = s->action->player;
+    return p && p->main_hand_weapon.group() == WEAPON_2H;
   }
 
   void execute( const spell_data_t*, player_t* target, action_state_t* state ) override
@@ -3392,7 +3415,25 @@ void item::tiny_abomination_in_a_jar( special_effect_t& effect )
   motes->set_chance( 1.0 );
   effect.custom_buff = motes;
 
-  listen_for_bleed_landings( effect, new tiny_abomination_cb_t( effect, motes ) );
+  auto* cb = new tiny_abomination_cb_t( effect, motes );
+  listen_for_bleed_landings( effect, cb );
+
+  // The two-hand Frost Strike / Obliterate cast deals no damage, so like the bleeds it only "lands" (see
+  // tiny_abomination_cb_t::frost_two_hand_cast): its own landing listener, which hands nothing else on.
+  struct frost_cast_landing_cb_t final : public dbc_proc_callback_t
+  {
+    dbc_proc_callback_t* main;
+    frost_cast_landing_cb_t( const special_effect_t& e, dbc_proc_callback_t* m ) : dbc_proc_callback_t( e.player, e ), main( m ) {}
+    void trigger( const proc_data_t& d, player_t* t, action_state_t* s, proc_trigger_type_e type ) override
+    {
+      if ( tiny_abomination_cb_t::frost_two_hand_cast( s ) )
+        main->trigger( d, t, s, type );
+    }
+  };
+  auto* landed = new special_effect_t( effect );
+  landed->proc_flags_  = PF_MELEE_ABILITY;
+  landed->proc_flags2_ = PF2_LANDED;
+  new frost_cast_landing_cb_t( *landed, cb );
 }
 
 // Blazefury Medallion

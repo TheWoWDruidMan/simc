@@ -5486,16 +5486,29 @@ void player_t::create_buffs()
   }
 
   // "+N% damage done, every school" (11 Oct 2026: Icecrown Citadel buff 30%, Plague Stream 100%). The option appends,
-  // so each buff adds its own "<percent>/" and they multiply.
+  // so each buff adds its own "[<name>:]<percent>/" and they multiply. A named entry is also a permanent buff of that
+  // name, up from the pull, so the report lists it among the constant buffs at 100% (the author: it must be verifiable).
   bracketsim.damage_done_mult = 1.0;
   if ( !is_enemy() && !bracketsim.damage_done.empty() )
   {
     for ( auto part : util::string_split<util::string_view>( bracketsim.damage_done, "/" ) )
     {
+      util::string_view name;
+      auto colon = part.find( ':' );
+      if ( colon != util::string_view::npos )
+      {
+        name = part.substr( 0, colon );
+        part = part.substr( colon + 1 );
+      }
       double pct = util::to_double( part ) / 100.0;
-      if ( pct <= 0 )
+      if ( pct <= 0 || name.find_first_not_of( "abcdefghijklmnopqrstuvwxyz_" ) != util::string_view::npos )
         throw std::invalid_argument( fmt::format( "bracketsim_damage_done: bad value '{}'", bracketsim.damage_done ) );
       bracketsim.damage_done_mult *= 1.0 + pct;
+      if ( !name.empty() )
+      {
+        auto b = make_buff( this, std::string( name ) )->set_duration( 0_ms )->set_default_value( pct )->set_quiet( false );
+        register_combat_begin( b );
+      }
     }
     sim->print_debug( "{} BracketSim damage done x{}", *this, bracketsim.damage_done_mult );
   }

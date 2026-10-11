@@ -357,8 +357,9 @@ struct player_t : public actor_t
     std::string school_damage;
     school_e school_damage_school = SCHOOL_NONE;
     double school_damage_pct = 0;
-    // "<percent>/" appended once per buff (11 Oct 2026), e.g. "30/100/" for the Icecrown Citadel buff plus Plague
-    // Stream: +N% damage done, every school, each one multiplying. Player only - an aura on the player, not its pets.
+    // "[<name>:]<percent>/" appended once per buff (11 Oct 2026), e.g. "icecrown_citadel_buff:30/plague_stream:100/":
+    // +N% damage done, every school, each one multiplying; a named one is also a permanent buff for the report.
+    // Player only - an aura on the player, not its pets (WCL: the ICC buff never landed on a pet).
     std::string damage_done;
     double damage_done_mult = 1.0;
     buff_t* fire_spell_power_buff = nullptr;
