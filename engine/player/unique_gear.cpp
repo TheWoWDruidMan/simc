@@ -95,6 +95,7 @@ namespace item
   void world_breaker( special_effect_t& );
   void variable_pulse_lightning_capacitor( special_effect_t& );
   void eskhandars_right_claw( special_effect_t& );
+  void landslide_dh( special_effect_t& );
   void thunderfury( special_effect_t& );
   void bonereavers_edge( special_effect_t& );
   void sulfuras( special_effect_t& );
@@ -299,6 +300,7 @@ struct chance_on_hit_cb_t : public dbc_proc_callback_t
 {
   const weapon_t* hand;
   bool weapon_rule = true;  // shield attacks excluded; Shadowmourne (an aura) clears it
+  bool demon_blades = false;  // Landslide on a Demon Hunter: Demon Blades rolls it too (item::landslide_dh)
 
   chance_on_hit_cb_t( const special_effect_t& effect )
     : dbc_proc_callback_t( effect.item, effect ),
@@ -330,7 +332,8 @@ struct chance_on_hit_cb_t : public dbc_proc_callback_t
      */
     if ( type == proc_trigger_type_e::TRIGGER_ACTION_PROC && state && state->action && listener->type == DEMON_HUNTER &&
          state->action->player == listener && state->action->data().class_family() == 107 &&
-         state->action->data().flags( static_cast<spell_attribute>( 41u ) ) )
+         ( state->action->data().flags( static_cast<spell_attribute>( 41u ) ) ||
+           ( demon_blades && state->action->data().id() == 203796 ) ) )
       type = proc_trigger_type_e::TRIGGER_ACTION;
 
     dbc_proc_callback_t::trigger( data, target, state, type );
@@ -1844,6 +1847,29 @@ void item::eskhandars_right_claw( special_effect_t& effect )
   // 4.35% a hit, this weapon's own 1 PPM at 2.6 sec (4.33%); its own hand's hits alone would need 6.8%.
   auto cb = static_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) );
   cb->hand = nullptr;
+}
+
+/*
+ * LANDSLIDE (enchant 4099, buff 74245) ON A DEMON HUNTER - 12 Oct 2026, the Havoc log in chance_on_hit_cb_t (Landslide
+ * main hand, Gale-Force off hand - the author). 45 procs. Its OWN HAND only: 0 procs from 92 off-hand ability hits with no other
+ * hit within 40 ms, 17 from 225 such main-hand hits. Demon Blades rolls it too, as poison hits do for a rogue
+ * (sc_rogue.cpp): with Demon Blades the 796 main-hand rolls read 5.65%, and the swing timestamps (a swing and its Demon
+ * Blades) procced it 17 times from 207 - two rolls each; one roll would give ~10. The generic 1 PPM enchant (weapon proc)
+ * rolled only main-hand auto attacks, Chaos Strike and Annihilation here: ~17 procs. 5.65% at 2.6 sec = 1.30 PPM, old style.
+ * Every other class keeps the generic "1PPM": this runs from the generic builder (initialize_special_effect_2), in place of
+ * its plain callback, for a Demon Hunter only. The effect keeps everything the generic path parsed (buff, name, stat).
+ */
+void item::landslide_dh( special_effect_t& effect )
+{
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  const weapon_t* w   = effect.item ? effect.item->weapon() : nullptr;
+  const double speed  = ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 2.6;
+  effect.proc_chance_ = chance_on_hit_from_ppm( 1.30, speed );
+  effect.ppm_         = 0;
+
+  auto cb = static_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) );
+  cb->demon_blades = true;
 }
 
 // Shadowmourne, item 49623.
@@ -6534,6 +6560,13 @@ void unique_gear::initialize_special_effect_2( special_effect_t* effect )
     // special effect registry, if they want.
     effect->player->init_special_effect( *effect );
 
+    // BracketSim: Landslide on a Demon Hunter follows its log (item::landslide_dh).
+    if ( effect->spell_id == 74245 && effect->item && effect->player->type == DEMON_HUNTER )
+    {
+      item::landslide_dh( *effect );
+      return;
+    }
+
     if ( effect -> item )
     {
       new dbc_proc_callback_t( effect -> item, *effect );
@@ -7863,7 +7896,7 @@ void unique_gear::register_special_effects()
   /* Cataclysm */
   register_special_effect(  94747, enchants::hurricane_spell            );
   register_special_effect(  74221, "1PPM"                               ); /* Hurricane Weapon */
-  register_special_effect(  74245, "1PPM"                               ); /* Landslide (rogue poison rolls: sc_rogue.cpp) */
+  register_special_effect(  74245, "1PPM"                               ); /* Landslide (rogue poison rolls: sc_rogue.cpp; Demon Hunter: item::landslide_dh) */
 
   /* Mists of Pandaria */
   register_special_effect( 118333, enchants::dancing_steel              );
