@@ -8087,6 +8087,11 @@ struct recklessness_t : public warrior_spell_t
     harmful    = false;
     target     = p;
 
+    // BracketSim (12 Oct 2026): Recklessness (1719) is a Fury talent only; Arms and Protection got the bare spell and
+    // could press it from an action list. Legacy Signet of Tormented Kings triggers the buff directly, not this action.
+    if ( p->specialization() != WARRIOR_FURY )
+      background = true;
+
     if ( p->talents.fury.reckless_abandon->ok() )
     {
       energize_amount   = p->talents.fury.reckless_abandon->effectN( 1 ).base_value() / 10.0;

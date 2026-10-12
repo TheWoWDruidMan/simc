@@ -1102,7 +1102,10 @@ struct crusader_strike_t : public paladin_melee_attack_t
       base_aoe_multiplier *= 1.0 - p->talents.blessed_champion->effectN( 3 ).percent();
     }
 
-    if ( p->talents.crusading_strikes->ok() || p->talents.templar_strikes->ok() )
+    // BracketSim (12 Oct 2026): Hammer of the Righteous and Blessed Hammer REPLACE Crusader Strike (talent data
+    // replace=35395); the spell-35395 fallback above let a Protection Paladin press both.
+    if ( p->talents.crusading_strikes->ok() || p->talents.templar_strikes->ok() ||
+         p->talents.hammer_of_the_righteous->ok() || p->talents.blessed_hammer->ok() )
     {
       background = true;
     }
