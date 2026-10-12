@@ -189,6 +189,15 @@ void dbc_proc_callback_t::trigger( const proc_data_t& source_data, player_t* tar
       assert( state );
       if ( !state->action->weapon || ( state->action->weapon && state->action->weapon != weapon ) )
         return;
+
+      // BracketSim, 12 Oct 2026 (the author approved): an old-style PPM weapon enchant (Landslide, Mongoose, Berserking,
+      // Hurricane...) rolls on a landed HIT, not on a cast that deals nothing. Audit of the 320 public lists: the parent
+      // cast of a multi-hit ability rolled as well as its hits - Rampage, Raging Blow, Execute and Whirlwind (Fury, ~31% of
+      // its Landslide rolls with Rend landing), Stormstrike (Enhancement, ~14%), Chaos Strike/Annihilation/Blade
+      // Dance/Death Sweep (Havoc) - and so did bleed landings (Rend, Garrote, Rupture), which a weapon proc does not take:
+      // Crusader read 0.049 a hit on Protection, not the 0.064 counting Rend landings would give.
+      if ( ppm > 0 && state->result_amount <= 0 )
+        return;
     }
 
     // Don't allow procs to proc itself

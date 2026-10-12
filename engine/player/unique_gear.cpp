@@ -95,7 +95,7 @@ namespace item
   void world_breaker( special_effect_t& );
   void variable_pulse_lightning_capacitor( special_effect_t& );
   void eskhandars_right_claw( special_effect_t& );
-  void landslide_dh( special_effect_t& );
+  void landslide_dh( special_effect_t&, double ppm );
   void thunderfury( special_effect_t& );
   void bonereavers_edge( special_effect_t& );
   void sulfuras( special_effect_t& );
@@ -1859,13 +1859,13 @@ void item::eskhandars_right_claw( special_effect_t& effect )
  * Every other class keeps the generic "1PPM": this runs from the generic builder (initialize_special_effect_2), in place of
  * its plain callback, for a Demon Hunter only. The effect keeps everything the generic path parsed (buff, name, stat).
  */
-void item::landslide_dh( special_effect_t& effect )
+void item::landslide_dh( special_effect_t& effect, double ppm )
 {
   effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
   effect.proc_flags2_ = PF2_ALL_HIT;
   const weapon_t* w   = effect.item ? effect.item->weapon() : nullptr;
   const double speed  = ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 2.6;
-  effect.proc_chance_ = chance_on_hit_from_ppm( 1.30, speed );
+  effect.proc_chance_ = chance_on_hit_from_ppm( ppm, speed );
   effect.ppm_         = 0;
 
   auto cb = static_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) );
@@ -6560,10 +6560,12 @@ void unique_gear::initialize_special_effect_2( special_effect_t* effect )
     // special effect registry, if they want.
     effect->player->init_special_effect( *effect );
 
-    // BracketSim: Landslide on a Demon Hunter follows its log (item::landslide_dh).
-    if ( effect->spell_id == 74245 && effect->item && effect->player->type == DEMON_HUNTER )
+    // BracketSim: Landslide on a Demon Hunter follows its log (item::landslide_dh). Mongoose takes the same rule - its own
+    // hand's hits, Blade Dance/Death Sweep/Felblade hits and Demon Blades (the author, 12 Oct 2026) - at its own 1 PPM; the 1.30
+    // PPM was measured for Landslide only.
+    if ( effect->item && effect->player->type == DEMON_HUNTER && ( effect->spell_id == 74245 || effect->spell_id == 28093 ) )
     {
-      item::landslide_dh( *effect );
+      item::landslide_dh( *effect, effect->spell_id == 74245 ? 1.30 : 1.0 );
       return;
     }
 
