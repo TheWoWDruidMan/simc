@@ -1477,12 +1477,15 @@ void item::heartrazor( special_effect_t& effect )
 /*
  * The Night Blade (31331): "Your attacks have a chance to allow you to gain N critical strike for 10 sec. This effect
  * stacks up to 3 times." (The Dark of Night, 38307 - the author, 12 Oct 2026, Wowhead). Its bonus data lists 38307 as a historical
- * chance-on-hit effect, which only runs because item.cpp is_restored_chance_on_hit lists it. NO LOG FOR THE RATE YET: it rolls as The Untamed Blade was measured
- * (1 PPM on every landed melee hit, either hand, poisons not rolling - Heartrazor's rule from the same log).
+ * chance-on-hit effect, which only runs because item.cpp is_restored_chance_on_hit lists it.
+ * RATE: wowsims/tbc sim/common/melee_items.go - procChance = 2 * 1.8 / 60 (2 PPM). wowsims rolls it on its own hand only,
+ * but for this era of weapon the game rolls on every landed melee hit, either hand: logs read Heartrazor 37 procs where
+ * wowsims' own-hand 1 PPM gives ~14 (it is 4.05% on every hit), and The Untamed Blade the same (8 Oct). So 2 PPM, every
+ * hit, either hand (the author chose this, 12 Oct 2026); no log of this dagger yet.
  */
 void item::night_blade( special_effect_t& effect )
 {
-  weapon_stat_proc( effect, "the_dark_of_night", 1.0, 1.8, true );
+  weapon_stat_proc( effect, "the_dark_of_night", 2.0, 1.8, true );
 }
 
 // 8 Oct 2026: The Untamed Blade rolls on every melee hit, either hand, at its own 1 PPM x 3.4 sec rate. A level 30 Fury
