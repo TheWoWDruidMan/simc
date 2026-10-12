@@ -88,6 +88,7 @@ namespace item
   void sepulchers_savior_use( special_effect_t& );
   void jackhammer( special_effect_t& );
   void heartrazor( special_effect_t& );
+  void night_blade( special_effect_t& );
   void untamed_blade( special_effect_t& );
   void blackout_truncheon( special_effect_t& );
   void despair( special_effect_t& );
@@ -1462,9 +1463,26 @@ static void weapon_stat_proc( special_effect_t& effect, const std::string& name,
     cb->hand = nullptr;
 }
 
+/*
+ * 12 Oct 2026, an Assassination dummy log (Heartrazor main hand, Heartpierce off hand, 303.5 s, WarcraftLogs
+ * RYxbPkBLXqAV6Ndp): 37 Heartrazor procs from 914 landed weapon hits - 4.05% a hit, either hand. Hits that also landed a
+ * Deadly Poison procced it at the same rate as clean ones (3.45% vs 3.76%), so poisons do not roll it. Main hand only it
+ * would need 7.9% a hit; the sim had 17.6 procs (44% uptime) against 37 (60.5%) in game. 1.35 PPM x 1.8 sec = 4.05%.
+ */
 void item::heartrazor( special_effect_t& effect )
 {
-  weapon_stat_proc( effect, "heartrazor", 1.0, 1.8 );
+  weapon_stat_proc( effect, "heartrazor", 1.35, 1.8, true );
+}
+
+/*
+ * The Night Blade (31331): "Your attacks have a chance to allow you to gain N critical strike for 10 sec. This effect
+ * stacks up to 3 times." (The Dark of Night, 38307 - the author, 12 Oct 2026, Wowhead). Its bonus data lists 38307 as a historical
+ * chance-on-hit effect, which only runs because item.cpp is_restored_chance_on_hit lists it. NO LOG FOR THE RATE YET: it rolls as The Untamed Blade was measured
+ * (1 PPM on every landed melee hit, either hand, poisons not rolling - Heartrazor's rule from the same log).
+ */
+void item::night_blade( special_effect_t& effect )
+{
+  weapon_stat_proc( effect, "the_dark_of_night", 1.0, 1.8, true );
 }
 
 // 8 Oct 2026: The Untamed Blade rolls on every melee hit, either hand, at its own 1 PPM x 3.4 sec rate. A level 30 Fury
@@ -4817,10 +4835,27 @@ void item::heartpierce( special_effect_t& effect )
     return;
   }
 
-  effect.ppm_ = 1.0;
+  /*
+   * 12 Oct 2026, the Assassination dummy log above (Heartpierce off hand): 56 Invigorations (9 applied, 47 refreshed)
+   * from 914 landed weapon hits and 472 Deadly Poison hits. Weapon hits that also landed a poison procced it 2.14x as
+   * often as clean hits (8.51% vs 3.97%), so each poison hit is a roll of its own: 56 / 1,386 = 4.04% a roll. The sim
+   * gave ~35 at 1 PPM. The item's trigger spell is Blessing of Light (Strength - the tank weapon's proc); the log has
+   * no Blessing of Light on the rogue, so no buff is made from it: Invigoration is the whole effect.
+   */
+  effect.ppm_ = 0;
+  effect.proc_chance_ = 0.0404;
+  effect.disable_buff();
   effect.execute_action = new invigorate_proc_t( effect.item -> player, effect.item -> player -> find_spell( spell_id ) );
 
   new heartpierce_callback_t( effect );
+
+  player_t* p = effect.item -> player;
+  action_t* invigorate = effect.execute_action;
+  const double chance = effect.proc_chance_;
+  p -> bracketsim.poison_hit_listeners.push_back( [ p, invigorate, chance ]( player_t*, const weapon_t* ) {
+    if ( p -> rng().roll( chance ) )
+      invigorate -> execute();
+  } );
 }
 
 struct felmouth_frenzy_driver_t : public spell_t
@@ -7664,6 +7699,7 @@ void unique_gear::register_special_effects()
   register_special_effect( 71545,  item::tiny_abomination_in_a_jar       );
   register_special_effect( 71892,  item::heartpierce                    );
   register_special_effect( 71880,  item::heartpierce                    );
+  register_special_effect( 38307,  item::night_blade                    ); /* The Night Blade - item.cpp is_restored_chance_on_hit */
   register_special_effect( 72413,  "10%"                                ); /* ICC Melee Ring */
   register_special_effect( 96976,  item::matrix_restabilizer            ); /* Matrix Restabilizer */
   register_special_effect( 107824, "1Tick_108016Trigger_20Dur"          ); /* Kiril, Fury of Beasts */
@@ -7776,7 +7812,7 @@ void unique_gear::register_special_effects()
   /* Cataclysm */
   register_special_effect(  94747, enchants::hurricane_spell            );
   register_special_effect(  74221, "1PPM"                               ); /* Hurricane Weapon */
-  register_special_effect(  74245, "1PPM"                               ); /* Landslide */
+  register_special_effect(  74245, "1PPM"                               ); /* Landslide (rogue poison rolls: sc_rogue.cpp) */
 
   /* Mists of Pandaria */
   register_special_effect( 118333, enchants::dancing_steel              );

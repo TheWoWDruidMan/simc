@@ -2264,7 +2264,8 @@ static bool is_restored_chance_on_hit( unsigned spell_id )
     case 109841: // Gurthalak, heroic    78478
     case 109839: // Gurthalak, LFR       78487
     // 23 September 2026 - rates cited in unique_gear.cpp (wowsims tbc / classic).
-    case 36041:  // Heartrazor           29962, 1.0 PPM
+    case 36041:  // Heartrazor           29962, 1.35 PPM either hand (12 Oct 2026 log)
+    case 38307:  // The Night Blade      31331, The Dark of Night crit, 3 stacks (12 Oct 2026, the author)
     case 23719:  // The Untamed Blade    19334, Untamed Fury, 1.0 PPM
     case 36111:  // World Breaker        30090, 3.7/60 per hit, spent by the next attack
     case 33489:  // Blackout Truncheon   27901, Blinding Speed, 0.8 PPM

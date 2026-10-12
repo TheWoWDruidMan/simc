@@ -405,6 +405,12 @@ struct player_t : public actor_t
     std::vector<timespan_t> timed_stat_times;
     // Drums had shared timed_stat_times: with Flame Cap picked too, Drums fired on Flame Cap's 3 min schedule (11 Oct 2026).
     std::vector<timespan_t> raid_haste_times;
+    // Rogue lethal-poison hits that roll weapon procs (12 Oct 2026, an Assassination dummy log: weapon hits that also
+    // landed a Deadly Poison hit procced Heartpierce 2.14x and Landslide ~1.5x as often as clean hits, Heartrazor and
+    // the RPPM procs ~1x). The rogue module sets the hand whose hit applied the poison and calls each listener when
+    // the poison's direct hit lands; only effects that register here roll on poisons.
+    const weapon_t* poison_source_weapon = nullptr;
+    std::vector<std::function<void( player_t* target, const weapon_t* hand )>> poison_hit_listeners;
   } bracketsim;
 
   // BracketSim legacy compatibility: covenant abilities this actor can actually

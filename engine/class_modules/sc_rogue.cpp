@@ -3328,6 +3328,15 @@ struct deadly_poison_t : public rogue_poison_t
       rogue_poison_t( name, p, s, true, true )
     {
     }
+
+    // BracketSim (12 Oct 2026): weapon procs that roll on poison hits listen here (player_t::bracketsim).
+    void impact( action_state_t* s ) override
+    {
+      rogue_poison_t::impact( s );
+      if ( result_is_hit( s->result ) )
+        for ( auto& listener : p()->bracketsim.poison_hit_listeners )
+          listener( s->target, p()->bracketsim.poison_source_weapon );
+    }
   };
 
   struct deadly_poison_dot_t : public rogue_poison_t
@@ -3378,6 +3387,15 @@ struct instant_poison_t : public rogue_poison_t
     instant_poison_dd_t( util::string_view name, rogue_t* p, const spell_data_t* s ) :
       rogue_poison_t( name, p, s, true, true )
     {
+    }
+
+    // BracketSim (12 Oct 2026): weapon procs that roll on poison hits listen here (player_t::bracketsim).
+    void impact( action_state_t* s ) override
+    {
+      rogue_poison_t::impact( s );
+      if ( result_is_hit( s->result ) )
+        for ( auto& listener : p()->bracketsim.poison_hit_listeners )
+          listener( s->target, p()->bracketsim.poison_source_weapon );
     }
   };
 
@@ -9255,6 +9273,8 @@ void actions::rogue_action_t<Base>::trigger_poisons( const action_state_t* state
     }
   };
 
+  // BracketSim (12 Oct 2026): the hand whose hit applies the poison, for weapon procs that roll on poison hits.
+  p()->bracketsim.poison_source_weapon = state->action ? state->action->weapon : nullptr;
   trigger_lethal_poison( p()->active.lethal_poison );
   trigger_lethal_poison( p()->active.lethal_poison_dtb );
 
@@ -13531,6 +13551,24 @@ void rogue_t::init_finished()
   weapon_data[ WEAPON_OFF_HAND ].initialize();
 
   player_t::init_finished();
+
+  // BracketSim (12 Oct 2026): Landslide (enchant buff 74245, 1 PPM on its weapon's hits) also rolls on the lethal-poison
+  // hits that weapon's hits apply. An Assassination dummy log (WarcraftLogs RYxbPkBLXqAV6Ndp, Landslide main hand):
+  // weapon hits that also landed a Deadly Poison procced it ~1.5x as often as clean hits - a poison from the other hand
+  // is no extra roll - and its 23 procs are 1.08 PPM over main-hand hits plus main-hand poisons. Other classes unchanged.
+  const std::pair<const weapon_t*, const char*> hands[] = { { &main_hand_weapon, "landslide" },
+                                                            { &off_hand_weapon, "landslide_oh" } };
+  for ( const auto& [ w, name ] : hands )
+  {
+    buff_t* landslide = buff_t::find( this, name );
+    if ( !landslide || w->type == WEAPON_NONE || w->swing_time <= timespan_t::zero() )
+      continue;
+    const double chance = w->swing_time.total_seconds() / 60.0;  // old-style 1 PPM: weapon speed / 60 a roll
+    bracketsim.poison_hit_listeners.push_back( [ this, landslide, w, chance ]( player_t*, const weapon_t* hand ) {
+      if ( hand == w && rng().roll( chance ) )
+        landslide->trigger();
+    } );
+  }
 }
 
 // rogue_t::reset ===========================================================
