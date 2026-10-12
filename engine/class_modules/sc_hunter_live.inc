@@ -6862,7 +6862,10 @@ struct raptor_strike_base_t : public melee_focus_spender_t
           -p()->legacy_azerite.wilderness_survival.spell()->effectN( 1 ).time_value() );
     }
 
-    p()->buffs.mongoose_fury->trigger();
+    // BracketSim (12 Oct 2026): Raptor Strike (186270/265189) has only its damage effect; the Mongoose Fury talent
+    // (1252708, a proc aura) is what applies the buff. Untalented characters kept it up ~98% of the fight.
+    if ( p()->talents.mongoose_fury.ok() )
+      p()->buffs.mongoose_fury->trigger();
 
     // BracketSim legacy compatibility: Flame Infusion (conduit 252). Shadowlands
     // hung this off Raptor Strike and Mongoose Bite's impact; Midnight folded

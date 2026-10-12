@@ -6139,7 +6139,9 @@ struct raptor_strike_base_t : public melee_focus_spender_t
   {
     melee_focus_spender_t::execute();
 
-    p()->buffs.mongoose_fury->trigger();
+    // BracketSim (12 Oct 2026): only the Mongoose Fury talent (1252708) applies the buff; Raptor Strike alone does not.
+    if ( p()->talents.mongoose_fury.ok() )
+      p()->buffs.mongoose_fury->trigger();
   }
 
   void impact( action_state_t* state ) override
