@@ -1469,23 +1469,35 @@ static void weapon_stat_proc( special_effect_t& effect, const std::string& name,
  * Deadly Poison procced it at the same rate as clean ones (3.45% vs 3.76%), so poisons do not roll it. Main hand only it
  * would need 7.9% a hit; the sim had 17.6 procs (44% uptime) against 37 (60.5%) in game. 1.35 PPM x 1.8 sec = 4.05%.
  */
+// 12 Oct 2026, second log (the author's a test character, Heartrazor OFF hand, 120.6 s): 6 procs from 306 landed weapon hits, all on
+// hits without a poison. Both logs pooled: 43 procs / 1,220 hits = 3.52% a hit, either hand (1.17 PPM x 1.8 sec).
 void item::heartrazor( special_effect_t& effect )
 {
-  weapon_stat_proc( effect, "heartrazor", 1.35, 1.8, true );
+  weapon_stat_proc( effect, "heartrazor", 1.17, 1.8, true );
 }
 
 /*
  * The Night Blade (31331): "Your attacks have a chance to allow you to gain N critical strike for 10 sec. This effect
  * stacks up to 3 times." (The Dark of Night, 38307 - the author, 12 Oct 2026, Wowhead). Its bonus data lists 38307 as a historical
  * chance-on-hit effect, which only runs because item.cpp is_restored_chance_on_hit lists it.
- * RATE: wowsims/tbc sim/common/melee_items.go - procChance = 2 * 1.8 / 60 (2 PPM). wowsims rolls it on its own hand only,
- * but for this era of weapon the game rolls on every landed melee hit, either hand: logs read Heartrazor 37 procs where
- * wowsims' own-hand 1 PPM gives ~14 (it is 4.05% on every hit), and The Untamed Blade the same (8 Oct). So 2 PPM, every
- * hit, either hand (the author chose this, 12 Oct 2026); no log of this dagger yet.
+ * RATE MEASURED 12 Oct 2026 (the author's level 30 Assassination dummy log, Night Blade main hand, 120.6 s): 12 procs (4
+ * applied, 4 stacked, 4 refreshed at 3) from 306 landed weapon hits and 164 Deadly Poison hits. 9 of the 10 procs that
+ * follow a weapon hit followed one that also landed a poison (5.9% of those hits vs 0.7% of clean ones), so poison hits
+ * roll it, as for Heartpierce: 12 / 470 = 2.55% a roll, every weapon hit either hand and every poison hit. (wowsims/tbc
+ * has 2 PPM own hand; 6% on every hit would have given ~18 procs.)
  */
 void item::night_blade( special_effect_t& effect )
 {
-  weapon_stat_proc( effect, "the_dark_of_night", 2.0, 1.8, true );
+  weapon_stat_proc( effect, "the_dark_of_night", 0.85, 1.8, true );  // 0.85 PPM x 1.8 sec = 2.55% a hit
+
+  buff_t* buff = effect.custom_buff;
+  player_t* p = effect.player;
+  const double chance = effect.proc_chance_;
+  if ( buff && p )
+    p->bracketsim.poison_hit_listeners.push_back( [ p, buff, chance ]( player_t*, const weapon_t* ) {
+      if ( p->rng().roll( chance ) )
+        buff->trigger();
+    } );
 }
 
 // 8 Oct 2026: The Untamed Blade rolls on every melee hit, either hand, at its own 1 PPM x 3.4 sec rate. A level 30 Fury
@@ -4783,13 +4795,31 @@ void item::heartpierce( special_effect_t& effect )
 {
   struct invigorate_proc_t : public spell_t
   {
+    // Display only: in game Invigoration is a buff on the player, so the report lists it with its uptime. The energy
+    // still comes from this spell's ticks; the buff has no ticks or effects of its own.
+    buff_t* shown;
+
     invigorate_proc_t( player_t* player, const spell_data_t* d ) :
-      spell_t( "invigoration", player, d )
+      spell_t( "invigoration", player, d ), shown( nullptr )
     {
       may_miss = may_crit = harmful = may_dodge = may_parry = callbacks = false;
       tick_may_crit = hasted_ticks = false;
       dual = quiet = background = true;
       target = player;
+      shown = make_buff( player, "invigoration_aura", d )
+                ->set_name_reporting( "Invigoration" )
+                ->set_chance( 1.0 )
+                ->set_proc_callbacks( false )
+                ->set_max_stack( 1 )
+                ->set_period( timespan_t::zero() )
+                ->set_tick_behavior( buff_tick_behavior::NONE )
+                ->set_refresh_behavior( buff_refresh_behavior::DURATION );
+    }
+
+    void execute() override
+    {
+      spell_t::execute();
+      shown->execute();  // not trigger(): its aura delay draws from the RNG and would shift every later roll
     }
   };
 
