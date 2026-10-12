@@ -318,6 +318,21 @@ struct chance_on_hit_cb_t : public dbc_proc_callback_t
       return;
     }
 
+    /*
+     * 12 Oct 2026, a level 30 Havoc dummy log (player report via the author; WarcraftLogs bBn9cJd2f6PjDmvg, 299.8 s, Eskhandar's
+     * Right Claw + Dragonspine Trophy): Blade Dance, Death Sweep and Felblade hits proc these items in game - procs with no
+     * other hit within 30 ms of them, e.g. Dragonspine 3 times on a lone Felblade. The engine runs those hits as background
+     * child actions, which it files as procs, and a chance-on-hit item cannot proc from a proc: only auto attacks, Chaos
+     * Strike and Annihilation rolled (243 rolls a fight for Right Claw against ~700 landed weapon hits). A Demon Hunter
+     * hit from its own ability that starts auto-attack (attribute 41) rolls as the ability it is. Demon Blades lacks the
+     * attribute and stays out: it lands on every landed swing, and with it counted Right Claw would read 3.1% a roll
+     * against its own 4.33%; without it the log reads 4.35%.
+     */
+    if ( type == proc_trigger_type_e::TRIGGER_ACTION_PROC && state && state->action && listener->type == DEMON_HUNTER &&
+         state->action->player == listener && state->action->data().class_family() == 107 &&
+         state->action->data().flags( static_cast<spell_attribute>( 41u ) ) )
+      type = proc_trigger_type_e::TRIGGER_ACTION;
+
     dbc_proc_callback_t::trigger( data, target, state, type );
   }
 };
@@ -1825,7 +1840,10 @@ void item::eskhandars_right_claw( special_effect_t& effect )
   buff->set_chance( 1.0 );
   effect.custom_buff = buff;
 
-  chance_on_hit( effect );
+  // EITHER HAND (12 Oct 2026, the Havoc log in chance_on_hit_cb_t): 33 procs from 758 landed weapon hits of both hands =
+  // 4.35% a hit, this weapon's own 1 PPM at 2.6 sec (4.33%); its own hand's hits alone would need 6.8%.
+  auto cb = static_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) );
+  cb->hand = nullptr;
 }
 
 // Shadowmourne, item 49623.
