@@ -155,9 +155,40 @@ void dbc_proc_callback_t::deactivate_with_buff( buff_t* buff, bool init )
   } );
 }
 
+/*
+ * BracketSim, 13 Oct 2026: these abilities' damage lands as background child actions, which the engine files as procs,
+ * so an old item or enchant proc (anything but real PPM) never rolled on them. Raid logs, a level 30 Windwalker with
+ * Eskhandar's Right Claw and Dragonspine Trophy (4-11 Oct, hits with no other hit within 40 ms): Rising Sun Kick 185099
+ * gave 14 Right Claw procs from 247 hits, Blackout Kick 228649 17/485, Glory of the Dawn 2/74; Dragonspine on Rising
+ * Sun Kick 3/169. The other classes' child hits here follow the same rule (no logs yet). Dual Threat is left out: it
+ * replaces a swing, like Demon Blades. Demon Hunters: chance_on_hit_cb_t in unique_gear.cpp.
+ */
+static bool ability_child_hit( unsigned id )
+{
+  switch ( id )
+  {
+    case 185099: case 228649: case 392959: case 452130:                 // Rising Sun Kick, Blackout Kick, Glory of the Dawn, Flurry of Xuen
+    case 224266: case 339538: case 383921: case 24275: case 1279408:    // Templar's Verdict, Highlord's Judgment, Hammer of Wrath
+    case 195592:                                                        // Crash Lightning
+    case 282449: case 426592: case 1269217: case 1269336: case 1269209: case 1269214:  // Secret Technique, Goremaw's Bite, Shadowstrike, Backstab, Gloomblade
+    case 1242373:                                                       // Stomp
+    case 156287:                                                        // Ravager
+    case 274838:                                                        // Feral Frenzy
+      return true;
+    default:
+      return false;
+  }
+}
+
 void dbc_proc_callback_t::trigger( const proc_data_t& source_data, player_t* target, action_state_t* state,
                                    proc_trigger_type_e type )
 {
+  if ( type == proc_trigger_type_e::TRIGGER_ACTION_PROC && !rppm && state && state->action &&
+       state->action->player == listener &&
+       ( effect.source == SPECIAL_EFFECT_SOURCE_ITEM || effect.source == SPECIAL_EFFECT_SOURCE_ENCHANT ) &&
+       ability_child_hit( state->action->data().id() ) )
+    type = proc_trigger_type_e::TRIGGER_ACTION;
+
   // BracketSim, 4 Oct 2026: a proc on damage TAKEN that harms (Brand of Ceaseless Ire, All-Devouring Nucleus) is
   // aimed at whoever hit you. The incoming path hands in the victim - the listener itself - so the "no harming your
   // own side" check below threw every such proc away: on a tank hit by the boss they never fired, upstream too.
