@@ -900,11 +900,13 @@ void enchants::crusader( special_effect_t& effect )
   // of 6% on a 3.6 second weapon.
   {
     const weapon_t* w = effect.item ? effect.item->weapon() : nullptr;
-    // 13 Oct 2026: 1.15 PPM, not 1. the author's raid logs (11/12 Oct, gear read from COMBATANT_INFO), per hit with no other
-    // hit within 40 ms, multi-target hits counted per target: two Protection warriors on a 2.6 sec one-hander 4.85%
-    // (9,437 hits; 1 PPM = 4.33%), three Fury on two 3.6 sec two-handers 7.30% (2,541 hits; 1 PPM = 6.00%) - 1.12 and
-    // 1.22 PPM. Swings and abilities read the same; Shield Slam, Devastator and Consecration ticks never roll it.
-    effect.proc_chance_ = 1.15 * ( ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 2.6 ) / 60.0;
+    // 13 Oct 2026, measured: ten of the author's raid logs (14 Sep - 12 Oct, gear read from COMBATANT_INFO), 33 player-raids,
+    // 19,094 Crusader procs; per hit with no other hit within 40 ms, several targets counted per target. One-handers
+    // (2.6 sec; Protection warriors and paladins): 4.17% a hit over 39,792 hits = 0.96 PPM. Fury on two 3.6 sec
+    // two-handers: 6.68% over 47,007 hits = 1.11 PPM. Shield Slam, Devastator and Consecration ticks never roll it.
+    const bool two_hander = w && w->group() == WEAPON_2H;
+    effect.proc_chance_ = ( two_hander ? 1.11 : 0.96 )
+                          * ( ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 2.6 ) / 60.0;
     effect.ppm_         = 0;
   }
   /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
