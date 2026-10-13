@@ -95,6 +95,7 @@ namespace item
   void world_breaker( special_effect_t& );
   void variable_pulse_lightning_capacitor( special_effect_t& );
   void eskhandars_right_claw( special_effect_t& );
+  void bryntroll( special_effect_t& );
   void landslide_dh( special_effect_t&, double ppm );
   void thunderfury( special_effect_t& );
   void bonereavers_edge( special_effect_t& );
@@ -899,7 +900,11 @@ void enchants::crusader( special_effect_t& effect )
   // of 6% on a 3.6 second weapon.
   {
     const weapon_t* w = effect.item ? effect.item->weapon() : nullptr;
-    effect.proc_chance_ = ( ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 2.6 ) / 60.0;
+    // 13 Oct 2026: 1.15 PPM, not 1. the author's raid logs (11/12 Oct, gear read from COMBATANT_INFO), per hit with no other
+    // hit within 40 ms, multi-target hits counted per target: two Protection warriors on a 2.6 sec one-hander 4.85%
+    // (9,437 hits; 1 PPM = 4.33%), three Fury on two 3.6 sec two-handers 7.30% (2,541 hits; 1 PPM = 6.00%) - 1.12 and
+    // 1.22 PPM. Swings and abilities read the same; Shield Slam, Devastator and Consecration ticks never roll it.
+    effect.proc_chance_ = 1.15 * ( ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 2.6 ) / 60.0;
     effect.ppm_         = 0;
   }
   /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
@@ -1870,6 +1875,33 @@ void item::landslide_dh( special_effect_t& effect, double ppm )
 
   auto cb = static_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) );
   cb->demon_blades = true;
+}
+
+/*
+ * BRYNTROLL, THE BONE ARBITER (50415 / heroic 50709): "Chance on hit to steal N life from target enemy" - Drain Life
+ * 71838 / 71839, a type-2 (chance on hit) item effect with no driver, so it never ran (item.cpp is_restored_chance_on_hit
+ * now lists it). 13 Oct 2026, a level 30 Fury dummy log (the author; Bryntroll in both hands, 60.8 s): 60 Drain Life hits of
+ * ~62 from 302 landed weapon hits. wowsims/wotlk has 2 PPM on its own hand's hits, which gives ~36 here; both weapons
+ * rolling every hit gives ~68 - so EITHER HAND, as for Heartrazor and Eskhandar's Right Claw: 60 / 604 rolls = 9.9%
+ * (1.65 PPM at 3.6 sec). One action, one callback per weapon.
+ */
+void item::bryntroll( special_effect_t& effect )
+{
+  effect.name_str     = "bryntroll_drain_life";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  const weapon_t* w   = effect.item ? effect.item->weapon() : nullptr;
+  const double speed  = ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 3.6;
+  effect.proc_chance_ = chance_on_hit_from_ppm( 1.65, speed );
+  effect.ppm_         = 0;
+
+  action_t* a = effect.player->find_action( effect.name_str );
+  if ( !a )
+    a = create_proc_action<generic_proc_t>( effect.name_str, effect, effect.driver() );
+  effect.execute_action = a;
+
+  auto cb = static_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) );
+  cb->hand = nullptr;
 }
 
 // Shadowmourne, item 49623.
@@ -7786,6 +7818,8 @@ void unique_gear::register_special_effects()
   register_special_effect( 71892,  item::heartpierce                    );
   register_special_effect( 71880,  item::heartpierce                    );
   register_special_effect( 38307,  item::night_blade                    ); /* The Night Blade - item.cpp is_restored_chance_on_hit */
+  register_special_effect( 71838,  item::bryntroll                      ); /* Bryntroll, the Bone Arbiter */
+  register_special_effect( 71839,  item::bryntroll                      ); /* Bryntroll, the Bone Arbiter (heroic) */
   register_special_effect( 72413,  "10%"                                ); /* ICC Melee Ring */
   register_special_effect( 96976,  item::matrix_restabilizer            ); /* Matrix Restabilizer */
   register_special_effect( 107824, "1Tick_108016Trigger_20Dur"          ); /* Kiril, Fury of Beasts */
