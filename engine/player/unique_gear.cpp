@@ -302,6 +302,7 @@ struct chance_on_hit_cb_t : public dbc_proc_callback_t
   const weapon_t* hand;
   bool weapon_rule = true;  // shield attacks excluded; Shadowmourne (an aura) clears it
   bool demon_blades = false;  // Landslide on a Demon Hunter: Demon Blades rolls it too (item::landslide_dh)
+  bool melee_range_only = false;  // Crusader: never from the ranged attacks below
 
   chance_on_hit_cb_t( const special_effect_t& effect )
     : dbc_proc_callback_t( effect.item, effect ),
@@ -312,6 +313,25 @@ struct chance_on_hit_cb_t : public dbc_proc_callback_t
   void trigger( const proc_data_t& data, player_t* target, action_state_t* state,
                 proc_trigger_type_e type ) override
   {
+    /*
+     * CRUSADER IS NEVER ROLLED BY A RANGED ATTACK (13 Oct 2026). the author's WarcraftLogs raids, Midnight, hits with no other
+     * hit within 40 ms: Judgment 0 procs from 416 (Retribution/Holy 20271) and 0 from 484 (Protection 275779), Hammer of
+     * Wrath 0 from 331 (24275 / 1279408), Avenger's Shield 0 from 525, Heroic Throw 0 from 42 - all 30-yard attacks - where
+     * Final Verdict, Divine Storm, Blessed Hammer, Crusader Strike and Blade of Justice roll it at ~5% a hit. Dragonspine
+     * Trophy does proc from Judgment (6/101) and Hammer of Wrath (4/43): its trigger takes ranged hits, so this is
+     * Crusader's alone.
+     */
+    if ( melee_range_only && state && state->action )
+    {
+      switch ( state->action->data().id() )
+      {
+        case 20271: case 275779: case 24275: case 1279408: case 31935: case 57755:
+          return;
+        default:
+          break;
+      }
+    }
+
     if ( !lands_as_melee_hit( state, weapon_rule ) )
       return;
 
@@ -912,7 +932,7 @@ void enchants::crusader( special_effect_t& effect )
   /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
   effect.custom_buff  = buff;
 
-  chance_on_hit( effect );
+  static_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) )->melee_range_only = true;
 }
 
 void enchants::meta_gem_effect( special_effect_t& effect )
