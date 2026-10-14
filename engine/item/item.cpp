@@ -2276,6 +2276,23 @@ static bool is_restored_chance_on_hit( unsigned spell_id )
     case 9806:   // Phantom Blade        7961, Phantom Strike
     case 144260: // Vibroblade           9485, Puncture Armor
     case 16928:  // Annihilator          12798, Armor Shatter
+    // 14 Oct 2026 - rates from wowsims classic / tbc, see legacy_coh_spell in unique_gear.cpp.
+    case 21151:  // Gutgore Ripper       17071
+    case 69180:  // Rusted Gutgore Ripper 49437
+    case 69181:  // Tarnished Gutgore Ripper 49465
+    case 69211:  // Empowered Deathbringer 49297
+    case 69212:  // Raging Deathbringer  49500
+    case 144241: // Shadowstrike         17074
+    case 144231: // Reclaimed Shadowstrike 49302
+    case 21170:  // Reinforced Shadowstrike 49496
+    case 22639:  // Eskhandar's Left Claw 18202
+    case 23267:  // Perdition's Blade    18816
+    case 21140:  // Drake Talon Cleaver  19353
+    case 26415:  // Kalimdor's Revenge   21679
+    case 34696:  // Glaive of the Pit    28774
+    case 35131:  // The Bladefist        29348
+    case 36070:  // Rod of the Sun King  29996
+    case 40291:  // Syphon of the Nathrezim 32262
       return true;
     default:
       return false;

@@ -1607,6 +1607,169 @@ struct world_breaker_cb_t : public dbc_proc_callback_t
   }
 };
 
+// BracketSim (14 Oct 2026): sixteen more CHANCE_ON_HIT weapons the Loot Finder offers. Their ItemEffect is the old
+// chance-on-hit type, so upstream never built them (see is_restored_chance_on_hit in item.cpp) - they equipped and did
+// nothing. The proc spells are all in this client with item-level scaling, so the AMOUNTS are the game's; the RATES are
+// wowsims', cited per item, as for Chillpike and The Untamed Blade (help page: a rate is taken from wowsims when the game
+// data lacks it, never made up). Revenger and Shard of Azzinoth have no rate anywhere and stay unmodelled.
+//   wowsims/classic sim/common/item_effects.go: Gutgore Ripper 1.0, Deathbringer 1.0, Shadowstrike 2.2, Eskhandar's Left
+//     Claw 1.0, Perdition's Blade 2.8, Drake Talon Cleaver 1.0, Kalimdor's Revenge 1.25 PPM. The 3.2 Onyxia remakes
+//     (Rusted/Tarnished Gutgore Ripper, Empowered/Raging Deathbringer, Reclaimed/Reinforced Shadowstrike) are the same
+//     weapons with their own spell ids and get the originals' rates.
+//   wowsims/tbc sim/common/melee_items.go: Glaive of the Pit 3.7/60 a hit, The Bladefist 2.7/60 a hit, Rod of the Sun
+//     King 2.7/60 a hit (10 Energy or 5 Rage), Syphon of the Nathrezim 1.0 PPM (6 sec of melee hits that drain).
+static void legacy_coh_spell( special_effect_t& effect, const std::string& name, double ppm, double fallback_speed,
+                              double chance_per_hit = 0 )
+{
+  effect.name_str     = name;
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  const weapon_t* w   = effect.item ? effect.item->weapon() : nullptr;
+  const double speed  = ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : fallback_speed;
+  effect.proc_chance_ = chance_per_hit > 0 ? chance_per_hit : chance_on_hit_from_ppm( ppm, speed );
+  effect.ppm_         = 0;
+
+  action_t* a = effect.player->find_action( effect.name_str );
+  if ( !a )
+    a = create_proc_action<generic_proc_t>( effect.name_str, effect, effect.driver() );
+  effect.execute_action = a;
+  chance_on_hit( effect );
+}
+
+// Its second effect lowers the TARGET's stats; the generic builder hung it on the wearer as a -All-stats buff
+// (2,955 -> 2,932 on a level 30 Fury), so no buff - the bolt is the whole effect for a damage sim.
+static void gutgore_ripper( special_effect_t& e )     { e.disable_buff(); legacy_coh_spell( e, "gutgore_ripper", 1.0, 1.8 ); }
+static void deathbringer_bolt( special_effect_t& e )  { legacy_coh_spell( e, "deathbringer_shadow_bolt", 1.0, 2.5 ); }
+static void shadowstrike_drain( special_effect_t& e ) { legacy_coh_spell( e, "shadowstrike_drain_life", 2.2, 3.6 ); }
+static void eskhandars_rake( special_effect_t& e )    { legacy_coh_spell( e, "eskhandars_rake", 1.0, 2.6 ); }
+static void perditions_blade( special_effect_t& e )   { legacy_coh_spell( e, "perditions_blade_firebolt", 2.8, 1.8 ); }
+static void drake_talon_cleaver( special_effect_t& e ){ legacy_coh_spell( e, "fatal_wound", 1.0, 3.4 ); }
+static void kalimdors_revenge( special_effect_t& e )  { legacy_coh_spell( e, "kalimdors_revenge_shock", 1.25, 3.6 ); }
+static void glaive_of_the_pit( special_effect_t& e )  { legacy_coh_spell( e, "glaive_of_the_pit_drain_life", 0, 3.7, 3.7 / 60.0 ); }
+
+static void the_bladefist( special_effect_t& effect )
+{
+  effect.name_str     = "the_bladefist";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  effect.proc_chance_ = 2.7 / 60.0;
+  effect.ppm_         = 0;
+  if ( !already_built( effect ) )
+  {
+    auto buff = make_buff<stat_buff_t>( effect.player, effect.name_str, effect.driver(), effect.item );
+    buff->set_chance( 1.0 );
+    effect.custom_buff = buff;
+  }
+  chance_on_hit( effect );
+}
+
+struct sun_king_cb_t : public chance_on_hit_cb_t
+{
+  gain_t* gain;
+  sun_king_cb_t( const special_effect_t& e ) : chance_on_hit_cb_t( e ), gain( e.player->get_gain( "rod_of_the_sun_king" ) ) {}
+  void execute( const spell_data_t*, player_t*, action_state_t* ) override
+  {
+    if ( listener->primary_resource() == RESOURCE_ENERGY )
+      listener->resource_gain( RESOURCE_ENERGY, 10, gain );
+    else if ( listener->primary_resource() == RESOURCE_RAGE )
+      listener->resource_gain( RESOURCE_RAGE, 5, gain );
+  }
+};
+
+static void rod_of_the_sun_king( special_effect_t& effect )
+{
+  // Rage and Energy users only (wowsims: HasRageBar / HasEnergyBar); anyone else wears a stat stick.
+  const resource_e r = effect.player->primary_resource();
+  if ( r != RESOURCE_ENERGY && r != RESOURCE_RAGE )
+    return;
+  effect.name_str     = "rod_of_the_sun_king";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY | PF_MAGIC_SPELL;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  effect.proc_chance_ = 2.7 / 60.0;
+  effect.ppm_         = 0;
+  effect.weapon_proc  = false;
+  effect.disable_action();
+  effect.disable_buff();
+  new sun_king_cb_t( effect );
+}
+
+struct siphon_drain_cb_t : public dbc_proc_callback_t
+{
+  buff_t* buff;
+  action_t* drain;
+  siphon_drain_cb_t( const special_effect_t& e, buff_t* b, action_t* a ) : dbc_proc_callback_t( e.player, e ), buff( b ), drain( a ) {}
+  void execute( const spell_data_t*, player_t*, action_state_t* s ) override
+  {
+    if ( buff->check() && s && s->target )
+      drain->execute_on_target( s->target );
+  }
+};
+
+static void syphon_of_the_nathrezim( special_effect_t& effect )
+{
+  effect.name_str     = "siphon_essence";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  const weapon_t* w   = effect.item ? effect.item->weapon() : nullptr;
+  effect.proc_chance_ = chance_on_hit_from_ppm( 1.0, ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 2.6 );
+  effect.ppm_         = 0;
+  if ( already_built( effect ) )
+  {
+    chance_on_hit( effect );
+    return;
+  }
+  auto buff = make_buff( effect.player, effect.name_str, effect.driver(), effect.item );
+  buff->set_chance( 1.0 );
+  effect.custom_buff = buff;
+  effect.disable_action();
+  chance_on_hit( effect );
+
+  // While Siphon Essence is up, every landed melee hit drains (40293).
+  auto drain_effect          = new special_effect_t( effect.player );
+  drain_effect->name_str     = "siphon_essence_drain";
+  drain_effect->item         = effect.item;
+  drain_effect->proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  drain_effect->proc_flags2_ = PF2_ALL_HIT;
+  drain_effect->proc_chance_ = 1.0;
+  drain_effect->ppm_         = 0;
+  drain_effect->disable_action();
+  drain_effect->disable_buff();
+  effect.player->special_effects.push_back( drain_effect );
+  action_t* drain = create_proc_action<generic_proc_t>( "siphon_essence_drain", *drain_effect, effect.player->find_spell( 40293 ) );
+  new siphon_drain_cb_t( *drain_effect, buff, drain );
+}
+
+// BracketSim (14 Oct 2026): Ampoule of Pure Void (151312), "Use: Void energy pools at your feet for 10 sec, dealing
+// (N * 10) Shadow damage to targets standing within the area. You are healed for 300% of the damage dealt. (90 sec)".
+// The use driver (250765) only makes an area trigger, so nothing ever hit. The pool's damage is Pool of Pure Void
+// (250766): its first effect per tick, ten ticks (its second effect, and the tooltip's *10), one a second, everything
+// within 5 yards - a target dummy stands in it. Item-level scaling from the game data; the healing is not damage.
+struct pool_of_pure_void_t : public generic_proc_t
+{
+  pool_of_pure_void_t( const special_effect_t& e ) : generic_proc_t( e, "pool_of_pure_void", e.player->find_spell( 250766 ) )
+  {
+    const auto& eff = data().effectN( 1 );
+    base_td        = eff.average( e.item );
+    base_dd_min = base_dd_max = 0;
+    dot_duration   = timespan_t::from_seconds( data().effectN( 2 ).base_value() );
+    base_tick_time = 1_s;
+    hasted_ticks   = false;
+    tick_may_crit  = true;
+    aoe            = -1;
+    radius         = eff.radius_max();
+    school         = SCHOOL_SHADOW;
+  }
+};
+
+static void ampoule_of_pure_void( special_effect_t& effect )
+{
+  effect.type = SPECIAL_EFFECT_USE;  // a custom handler leaves it _CUSTOM, which use_item cannot find
+  action_t* a = effect.player->find_action( "pool_of_pure_void" );
+  if ( !a )
+    a = create_proc_action<pool_of_pure_void_t>( "pool_of_pure_void", effect );
+  effect.execute_action = a;
+}
+
 void item::world_breaker( special_effect_t& effect )
 {
   effect.name_str     = "world_breaker";
@@ -7797,6 +7960,24 @@ void unique_gear::register_special_effects()
   register_special_effect( 36111,   item::world_breaker ); /* World Breaker - 3.7/60 per hit, spent by the next attack (wowsims tbc) */
   register_special_effect( 33489,   item::blackout_truncheon ); /* Blackout Truncheon - Blinding Speed, 0.8 PPM (wowsims tbc) */
   register_special_effect( 34580,   item::despair ); /* Despair - Impale, 0.5 PPM (wowsims tbc) */
+  // 14 Oct 2026: the rest of the Loot Finder's CHANCE_ON_HIT weapons with a rate in wowsims (see legacy_coh_spell).
+  register_special_effect( 21151,  gutgore_ripper );       /* Gutgore Ripper 17071 - 1.0 PPM (wowsims classic) */
+  register_special_effect( 69180,  gutgore_ripper );       /* Rusted Gutgore Ripper 49437 */
+  register_special_effect( 69181,  gutgore_ripper );       /* Tarnished Gutgore Ripper 49465 */
+  register_special_effect( 69211,  deathbringer_bolt );    /* Empowered Deathbringer 49297 - 1.0 PPM (Deathbringer, wowsims classic) */
+  register_special_effect( 69212,  deathbringer_bolt );    /* Raging Deathbringer 49500 */
+  register_special_effect( 144241, shadowstrike_drain );   /* Shadowstrike 17074 - 2.2 PPM (wowsims classic) */
+  register_special_effect( 144231, shadowstrike_drain );   /* Reclaimed Shadowstrike 49302 */
+  register_special_effect( 21170,  shadowstrike_drain );   /* Reinforced Shadowstrike 49496 */
+  register_special_effect( 22639,  eskhandars_rake );      /* Eskhandar's Left Claw 18202 - 1.0 PPM (wowsims classic) */
+  register_special_effect( 23267,  perditions_blade );     /* Perdition's Blade 18816 - 2.8 PPM (wowsims classic) */
+  register_special_effect( 21140,  drake_talon_cleaver );  /* Drake Talon Cleaver 19353 - 1.0 PPM (wowsims classic) */
+  register_special_effect( 26415,  kalimdors_revenge );    /* Kalimdor's Revenge 21679 - 1.25 PPM (wowsims classic) */
+  register_special_effect( 34696,  glaive_of_the_pit );    /* Glaive of the Pit 28774 - 3.7/60 a hit (wowsims tbc) */
+  register_special_effect( 35131,  the_bladefist );        /* The Bladefist 29348 - 2.7/60 a hit (wowsims tbc) */
+  register_special_effect( 36070,  rod_of_the_sun_king );  /* Rod of the Sun King 29996 - 2.7/60 a hit (wowsims tbc) */
+  register_special_effect( 40291,  syphon_of_the_nathrezim ); /* Syphon of the Nathrezim 32262 - 1.0 PPM (wowsims tbc) */
+  register_special_effect( 250765, ampoule_of_pure_void );    /* Ampoule of Pure Void 151312 - use: 10 sec Shadow pool */
   register_special_effect( 96887,   item::variable_pulse_lightning_capacitor ); /* VPLC - wowsims cata */
   register_special_effect( 97119,   item::variable_pulse_lightning_capacitor ); /* VPLC (heroic) - wowsims cata */
   register_special_effect( 469933,  item::molten_ironfoe ); /* Molten Ironfoe - Molten Strike */

@@ -345,8 +345,16 @@ stat_buff_t* special_effect_t::initialize_stat_buff() const
       return debug_cast<stat_buff_t*>( other );
   }
 
+  /*
+   * MYSTICAL SKYFIRE DIAMOND (14 Oct 2026). Focus (18803) "Scales with Casting Item's Level", and for a meta gem the
+   * casting item is the helm it sits in: the author's Midnight raid logs (12 wearers, 4-11 Oct, ~680 Focus procs) give the
+   * cast-time speed-up of +190 rating on an item level 33 helm and ~+225 on 42-44 helms, against the engine's flat 184
+   * (player level 30). Gem procs otherwise keep scaling by player level - only this gem is proven.
+   */
+  const bool gem_by_helm = source == SPECIAL_EFFECT_SOURCE_GEM && item && spell_data->id() == 18803;
   stat_buff_t* buff =
-      make_buff<stat_buff_t>( player, buff_name, spell_data, source == SPECIAL_EFFECT_SOURCE_ITEM ? item : nullptr );
+      make_buff<stat_buff_t>( player, buff_name, spell_data,
+                              source == SPECIAL_EFFECT_SOURCE_ITEM || gem_by_helm ? item : nullptr );
 
   // Setup user option overrides. Note that if there are no user set overrides,
   // the buff will automagically deduce correct options from the spell data,

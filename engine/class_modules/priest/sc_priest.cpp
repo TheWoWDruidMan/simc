@@ -3831,6 +3831,7 @@ void priest_t::init_spells()
   // which says the same thing for every covenant rather than only Necrolord.
   shadowlands_legacy.pallid_command             = legacy_unity( 7729, "necrolord" );
   shadowlands_legacy.talbadars_stratagem        = legacy( 7162 );
+  shadowlands_legacy.harmonious_apparatus       = legacy( 6977 );
   shadowlands_legacy.the_penitent_one           = legacy( 6976 );
   shadowlands_legacy.shadowflame_prism          = legacy( 6982 );
   shadowlands_legacy.divine_image               = legacy( 6973 );

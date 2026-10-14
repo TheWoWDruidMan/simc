@@ -4575,7 +4575,9 @@ void player_t::create_actions()
       }
       return false;
     };
-    for ( auto slot : { SLOT_MAIN_HAND, SLOT_OFF_HAND } )
+    // 14 Oct 2026 (the author: "yeah do" it): on-use RINGS too - no action list presses a ring (Mark of the Dragon Lord's
+    // Versatility worked and was never used). A use with no buff or action (a teleport) builds nothing and is never pressed.
+    for ( auto slot : { SLOT_MAIN_HAND, SLOT_OFF_HAND, SLOT_FINGER_1, SLOT_FINGER_2 } )
     {
       const auto& it = items[ slot ];
       if ( !it.active() || !it.has_use_special_effect() )

@@ -364,6 +364,14 @@ struct holy_fire_t final : public priest_spell_t
 
       priest().do_holy_word_cdr( priest().cooldowns.holy_word_chastise, chastise_cdr );
     }
+
+    // BracketSim legacy compatibility: Harmonious Apparatus (bonus 6977). A separate aura from Voice of Harmony, so a
+    // character with both gets both.
+    if ( priest().talents.holy.holy_word_chastise.enabled() && priest().shadowlands_legacy.harmonious_apparatus )
+    {
+      priest().do_holy_word_cdr( priest().cooldowns.holy_word_chastise,
+                                 timespan_t::from_seconds( priest().find_spell( 336314 )->effectN( 1 ).base_value() ) );
+    }
   }
 
   void impact( action_state_t* s ) override
@@ -513,6 +521,13 @@ void priest_t::do_holy_word_cdr( cooldown_t* cd, timespan_t amount, bool affecte
   if ( affected_by_naaru && talents.holy.light_of_the_naaru.enabled() )
   {
     amount *= 1 + talents.holy.light_of_the_naaru->effectN( 1 ).percent();
+  }
+
+  // BracketSim legacy compatibility: Holy Oration (conduit 116, 14 Oct 2026) - "spells that reduce the cooldowns of your
+  // Holy Words reduce them by N% more", the same family Light of the Naaru scales.
+  if ( affected_by_naaru && legacy_conduits.has( 116 ) )
+  {
+    amount *= 1 + legacy_conduits.percent( 116 );
   }
 
   if ( sim->debug )

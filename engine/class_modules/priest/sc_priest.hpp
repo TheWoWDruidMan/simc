@@ -344,6 +344,9 @@ public:
     // already gated on exactly the same three dots, and a live combat log shows
     // the legendary's buff landing 1ms after every Shadow Word: Madness cast.
     bool talbadars_stratagem = false;
+    // Harmonious Apparatus (14 Oct 2026): Holy Fire takes 336314's 4 sec off Holy Word: Chastise - a Holy Word reduction,
+    // so Apotheosis and Light of the Naaru scale it. (Its Circle of Healing / Prayer of Mending halves are healing.)
+    bool harmonious_apparatus = false;
     // Power Word: Radiance has a 60% chance to make the next Penance free and
     // fire 3 extra bolts. Shadowlands SimulationCraft built the Penance half
     // and left the trigger unhooked - its own header says so - so the trigger
