@@ -6044,6 +6044,12 @@ struct consume_base_t : public shattered_souls_trigger_t<voidfall_building_trigg
     }
   }
 
+  // BracketSim (14 Oct 2026): Consume and Devour are castable while moving (this file says so for fragment pick-up,
+  // above), but action_t::usable_moving() refuses anything with a cast time, so neither started while moving -
+  // Heavy Movement at 40 cast Devour 45 times instead of 102. Standing still is unchanged.
+  bool usable_moving() const override
+  { return true; }
+
   // Override GCD as hastes reduction to GCD is currently applying twice. 2026/08/05 YY/MM/DD - Sael
   timespan_t gcd() const override
   {
