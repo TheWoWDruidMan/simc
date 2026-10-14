@@ -8126,6 +8126,12 @@ void unique_gear::register_special_effects()
 
   /* The Burning Crusade */
   register_special_effect(  28093, "1PPM"                               ); /* Mongoose */
+  // 15 Oct 2026: old weapon enchants whose driver lost its proc rate in this client ("No RPPM / PPM / Proc chance" -
+  // they never fired). Rates from wowsims: classic enchant_effects.go (Fiery Weapon 6.0, Lifestealing 6.66), wotlk
+  // enchant_effects.go (Icebreaker 4.0). Icy Chill (20005) and Unholy Weapon (20006) have no published rate - left out.
+  register_special_effect(  13897, "6PPM"                               ); /* Fiery Weapon */
+  register_special_effect(  20004, "6.66PPM"                            ); /* Lifestealing */
+  register_special_effect(  44525, "4PPM"                               ); /* Icebreaker */
 
   /* Wrath of the Lich King */
   register_special_effect(  59620, "1PPM"                               ); /* Berserking */
