@@ -1,4 +1,4 @@
-SimulationCraft 1210-01 for World of Warcraft 12.1.5.70077 PTR
+SimulationCraft 1210-01 for World of Warcraft 12.1.5.70340 PTR
 Name             : Chi Torpedo (id=115008) [Spell Family (53)] 
 Talent Entry     : Generic [tree=class, row=5, col=6, max_rank=1, req_points=8, select_idx=200, replace="Roll" (id=109132)]
 Class            : Monk, Evoker
@@ -7877,7 +7877,8 @@ Proc Flags       : White Melee Taken, Yellow Melee Taken, White Ranged Taken, Ye
 Affecting Spells : Close as Clutchmates (396043 effects: #1, #2), Mastery: Timewalker (406380 effect#2)
 Triggered By     : Breath of Eons (403755), Breath of Eons (442204)
 Family Flags     : 56, 67, 71
-Attributes       : Aura Is Debuff (26), Can Proc From Procs (122), Do Not Display Range (126), Taps immediately (215), No Target Duration Mod (225), Aura Points On Client (268), Only Proc From Class Abilities (415), Allow Class Ability Procs (416), Nameplate Enemy Debuffs (426), Do Not Consume Aura Stack On Proc (428)
+Attributes       : Aura Is Debuff (26), Can Proc From Procs (122), Do Not Display Range (126), Aura Expires Offline (130), Taps immediately (215), No Target Duration Mod (225), Aura Points On Client (268), Only Proc From Class Abilities (415), Allow Class Ability Procs (416), Nameplate Enemy Debuffs (426), Do Not Consume Aura Stack On Proc (428)
+Aura Interrupt   : Leave World (19), Enter World (22), Disconnect (42), Enter Instance (43)
 Effects          :
 #1 (id=1074514)  : Apply Aura (6) | Periodic Dummy (226): every 1 seconds
                    Base Value: 15 | Scaled Value: 15 | PvP Coefficient: 1.5 | Radius: 3 - 6 yards | Target: Front in Area (78) -> at Enemy in Area (16)
@@ -7944,7 +7945,8 @@ Labels           : 16: Class Spells
                  : 292
                  : 1216: Evoker Spells
                  : 1467: Bronze Evoker Spells
-Attributes       : Aura Is Debuff (26), Can Proc From Procs (122), Do Not Display Range (126), Aura Icon Only For Caster (Limit 10) (212), Taps immediately (215), Aura Points On Client (268), Only Proc From Class Abilities (415), Allow Class Ability Procs (416), Do Not Consume Aura Stack On Proc (428)
+Attributes       : Aura Is Debuff (26), Can Proc From Procs (122), Do Not Display Range (126), Aura Expires Offline (130), Aura Icon Only For Caster (Limit 10) (212), Taps immediately (215), Aura Points On Client (268), Only Proc From Class Abilities (415), Allow Class Ability Procs (416), Do Not Consume Aura Stack On Proc (428)
+Aura Interrupt   : Leave World (19), Enter World (22), Disconnect (42), Enter Instance (43)
 Effects          :
 #1 (id=1074767)  : Apply Aura (6) | Dummy (4) | Attributes: Aura Points Stack (9)
                    Base Value: 0 | Scaled Value: 0 | Target: Targeted Enemy (6)
@@ -8089,7 +8091,8 @@ Labels           : 16: Class Spells
                  : 292
                  : 1216: Evoker Spells
                  : 1467: Bronze Evoker Spells
-Attributes       : Aura Is Debuff (26), Can Proc From Procs (122), Do Not Display Range (126), Aura Icon Only For Caster (Limit 10) (212), Taps immediately (215), Aura Points On Client (268), Only Proc From Class Abilities (415), Allow Class Ability Procs (416), Do Not Consume Aura Stack On Proc (428)
+Attributes       : Aura Is Debuff (26), Can Proc From Procs (122), Do Not Display Range (126), Aura Expires Offline (130), Aura Icon Only For Caster (Limit 10) (212), Taps immediately (215), Aura Points On Client (268), Only Proc From Class Abilities (415), Allow Class Ability Procs (416), Do Not Consume Aura Stack On Proc (428)
+Aura Interrupt   : Leave World (19), Enter World (22), Disconnect (42), Enter Instance (43)
 Effects          :
 #1 (id=1075265)  : Apply Aura (6) | Dummy (4) | Attributes: Aura Points Stack (9)
                    Base Value: 0 | Scaled Value: 0 | Target: Targeted Enemy (6)
@@ -8106,7 +8109,8 @@ Labels           : 16: Class Spells
                  : 292
                  : 1216: Evoker Spells
                  : 1467: Bronze Evoker Spells
-Attributes       : Aura Is Debuff (26), Can Proc From Procs (122), Do Not Display Range (126), Aura Icon Only For Caster (Limit 10) (212), Taps immediately (215), Aura Points On Client (268), Only Proc From Class Abilities (415), Allow Class Ability Procs (416), Do Not Consume Aura Stack On Proc (428)
+Attributes       : Aura Is Debuff (26), Can Proc From Procs (122), Do Not Display Range (126), Aura Expires Offline (130), Aura Icon Only For Caster (Limit 10) (212), Taps immediately (215), Aura Points On Client (268), Only Proc From Class Abilities (415), Allow Class Ability Procs (416), Do Not Consume Aura Stack On Proc (428)
+Aura Interrupt   : Leave World (19), Enter World (22), Disconnect (42), Enter Instance (43)
 Effects          :
 #1 (id=1075267)  : Apply Aura (6) | Dummy (4) | Attributes: Aura Points Stack (9)
                    Base Value: 0 | Scaled Value: 0 | Target: Targeted Enemy (6)
@@ -8123,7 +8127,8 @@ Labels           : 16: Class Spells
                  : 292
                  : 1216: Evoker Spells
                  : 1467: Bronze Evoker Spells
-Attributes       : Aura Is Debuff (26), Can Proc From Procs (122), Do Not Display Range (126), Aura Icon Only For Caster (Limit 10) (212), Taps immediately (215), Aura Points On Client (268), Only Proc From Class Abilities (415), Allow Class Ability Procs (416), Do Not Consume Aura Stack On Proc (428)
+Attributes       : Aura Is Debuff (26), Can Proc From Procs (122), Do Not Display Range (126), Aura Expires Offline (130), Aura Icon Only For Caster (Limit 10) (212), Taps immediately (215), Aura Points On Client (268), Only Proc From Class Abilities (415), Allow Class Ability Procs (416), Do Not Consume Aura Stack On Proc (428)
+Aura Interrupt   : Leave World (19), Enter World (22), Disconnect (42), Enter Instance (43)
 Effects          :
 #1 (id=1075269)  : Apply Aura (6) | Dummy (4) | Attributes: Aura Points Stack (9)
                    Base Value: 0 | Scaled Value: 0 | Target: Targeted Enemy (6)
@@ -11095,7 +11100,6 @@ Effects          :
                    Base Value: 4000 | Scaled Value: 4000 | Target: Self (1)
 #6 (id=1278179)  : Apply Aura (6) | Dummy (4)
                    Base Value: 290 | Scaled Value: 290 | PvP Coefficient: 0.7 | Target: Self (1)
-Hotfixed         : Base Value (240 -> 290)
 #7 (id=1317269)  : Apply Aura (6) | Dummy (4)
                    Base Value: 115 | Scaled Value: 115 | Target: Self (1)
 Description      : $?c1[Disintegrate consumes ${$s2/1000}.1 sec of Fire Breath from enemies it damages, detonating it for $s4% of the amount consumed.
@@ -12654,11 +12658,11 @@ Labels           : 16: Class Spells
 Attributes       : Is Ability (4), Passive (6), Do Not Display (Spellbook, Aura Icon, Combat Log) (7), Do Not Log (8), Allow Class Ability Procs (416)
 Effects          :
 #1 (id=1264707)  : Apply Aura (6) | Modify Percent PVP Multiplier (647): Direct Amount (0)
-                   Base Value: 30 | Scaled Value: 30 | Target: Self (1)
+                   Base Value: 40 | Scaled Value: 40 | Target: Self (1)
                    Affected Spells: Deep Breath (353759), Disintegrate (356995), Fire Breath (357209), Pyre (357212), Eternity Surge (359077), Living Flame (361500), Azure Strike (362969), Firestorm (369374), Eruption (395160), Upheaval (396288), Eruption (424428), Eruption (438653), Melt Armor (441172), Fire Breath (444249), Firestorm (456657), Disintegrate (1236949), Pyre (1236970), Eruption (1259172), Unravel (1264379), Shattering Star (1265804), Azure Sweep (1265872), Twin Flame (1265980), Unbound Flame (1292322)
                    Family Flags: 0
 #2 (id=1266465)  : Apply Aura (6) | Modify Percent PVP Multiplier (647): Periodic Amount (1)
-                   Base Value: 30 | Scaled Value: 30 | Misc Value: 1 | Target: Self (1)
+                   Base Value: 40 | Scaled Value: 40 | Misc Value: 1 | Target: Self (1)
                    Affected Spells: Deep Breath (353759), Disintegrate (356995), Fire Breath (357209), Pyre (357212), Eternity Surge (359077), Living Flame (361500), Azure Strike (362969), Firestorm (369374), Eruption (395160), Upheaval (396288), Eruption (424428), Eruption (438653), Melt Armor (441172), Fire Breath (444249), Firestorm (456657), Disintegrate (1236949), Pyre (1236970), Eruption (1259172), Unravel (1264379), Shattering Star (1265804), Azure Sweep (1265872), Twin Flame (1265980), Unbound Flame (1292322)
                    Family Flags: 0
 #3 (id=1266466)  : Apply Aura (6) | Apply Percent Modifier w/ Label (218): Spell Direct Amount (0)

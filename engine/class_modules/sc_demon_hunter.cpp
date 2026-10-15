@@ -1288,7 +1288,7 @@ public:
     attack_t* screaming_brutality_slash_proc_throw_glaive          = nullptr;
     attack_t* essence_break_proc                                   = nullptr;
     spell_t* glaive_tempest                                        = nullptr;
-    spell_t* collective_anguish          = nullptr;
+    spell_t* collective_anguish                                    = nullptr;
 
     // Vengeance
     spell_t* infernal_armor = nullptr;
@@ -3272,7 +3272,7 @@ struct mass_acceleration_trigger_t : public BASE
     switch ( BASE::dh()->specialization() )
     {
       case DEMON_HUNTER_DEVOURER:
-        BASE::dh()->cooldown.reap->reset( false );
+        BASE::dh()->cooldown.reap->reset( false, -1 );
         break;
       case DEMON_HUNTER_VENGEANCE:
         BASE::dh()->cooldown.spirit_bomb->reset( true );
@@ -3822,11 +3822,6 @@ struct consume_soul_t : public demon_hunter_heal_t
       }
     }
 
-    // Warblade's hunger currently applies an additional stack on first buff application
-    if ( !dh()->buff.warblades_hunger->up() )
-    {
-      dh()->buff.warblades_hunger->trigger();
-    }
     dh()->buff.warblades_hunger->trigger();
 
     if ( type == soul_fragment::GREATER_DEMON )
@@ -4234,48 +4229,32 @@ struct eye_beam_base_t : public student_of_suffering_trigger_t<final_breath_trig
 
 struct abyssal_gaze_t : public demonsurge_trigger_t<demonsurge_ability::ABYSSAL_GAZE, eye_beam_base_t>
 {
-  abyssal_gaze_t( demon_hunter_t* p ) : base_t( "abyssal_gaze", p, p->hero_spec.abyssal_gaze, "" )
+  abyssal_gaze_t( demon_hunter_t* p, util::string_view o ) : base_t( "abyssal_gaze", p, p->hero_spec.abyssal_gaze, o )
   {
+  }
+
+  bool ready() override
+  {
+    if ( !eye_beam_base_t::ready() )
+      return false;
+
+    return dh()->buff.metamorphosis->check();
   }
 };
 
 struct eye_beam_t : public eye_beam_base_t
 {
-  abyssal_gaze_t* abyssal_gaze;
-  double abyssal_gaze_cost;
-
   eye_beam_t( demon_hunter_t* p, util::string_view options_str )
-    : eye_beam_base_t( "eye_beam", p, p->talent.havoc.eye_beam, options_str ),
-      abyssal_gaze( nullptr ),
-      abyssal_gaze_cost( 0 )
+    : eye_beam_base_t( "eye_beam", p, p->talent.havoc.eye_beam, options_str )
   {
-    if ( p->talent.scarred.demonic_intensity->ok() )
-    {
-      abyssal_gaze      = new abyssal_gaze_t( p );
-      abyssal_gaze_cost = abyssal_gaze->data().cost( POWER_FURY );
-      add_child( abyssal_gaze );
-    }
   }
 
-  double cost() const override
+  bool ready() override
   {
-    if ( dh()->buff.demonsurge_demonic_intensity->check() )
-    {
-      return abyssal_gaze_cost;
-    }
-    return eye_beam_base_t::cost();
-  }
+    if ( !eye_beam_base_t::ready() )
+      return false;
 
-  void execute() override
-  {
-    if ( dh()->buff.demonsurge_demonic_intensity->check() )
-    {
-      abyssal_gaze->execute_on_target( target );
-      stats->add_execute( time_to_execute, target );
-      return;
-    }
-
-    eye_beam_base_t::execute();
+    return !( dh()->buff.metamorphosis->check() && dh()->talent.scarred.demonic_intensity->ok() );
   }
 };
 
@@ -5794,8 +5773,7 @@ struct sigil_of_spite_t : public demon_hunter_spell_t
 
 struct the_hunt_dot_t : public demon_hunter_spell_t
 {
-  the_hunt_dot_t( util::string_view n, demon_hunter_t* p )
-    : demon_hunter_spell_t( n, p, p->spec.the_hunt_dot )
+  the_hunt_dot_t( util::string_view n, demon_hunter_t* p ) : demon_hunter_spell_t( n, p, p->spec.the_hunt_dot )
   {
     dual         = true;
     aoe          = as<int>( p->spec.the_hunt->effectN( 2 ).trigger()->effectN( 1 ).base_value() );
@@ -5846,11 +5824,9 @@ struct the_hunt_base_t
 
       if ( s->chain_target == 0 && dh()->specialization() == DEMON_HUNTER_DEVOURER &&
            dh()->talent.scarred.violent_transformation->ok() )
-      {
         // only resets one charge of Soul Immo
-        if ( sim->dbc->wowv() < wowv_t( 12, 1, 5 ) )
-          dh()->cooldown.soul_immolation->reset( false, 1 );
-      }
+        // 10/06/2026 still refunds one charge on 12.1.5 even though developer notes say it should not
+        dh()->cooldown.soul_immolation->reset( false, 1 );
     }
   };
 
@@ -7414,6 +7390,10 @@ struct blade_dance_base_t
       if ( last_attack )
         m *= 1.0 + dh()->legacy_conduits.percent( 151 );
 
+      // 10/13/2026 the last attack of Blade Dance double dips the Eternal Hunt bonus.
+      if ( dh()->talent.havoc.eternal_hunt_3->ok() && last_attack )
+        m *= 1.0 + dh()->talent.havoc.eternal_hunt_3->effectN( 1 ).percent();
+
       return m;
     }
 
@@ -7468,6 +7448,10 @@ struct blade_dance_base_t
 
       if ( last_attack )
         m *= 1.0 + dh()->legacy_conduits.percent( 151 );
+
+      // 10/13/2026 the last attack of Blade Dance double dips the Eternal Hunt bonus.
+      if ( dh()->talent.havoc.eternal_hunt_3->ok() && last_attack )
+        m *= 1.0 + dh()->talent.havoc.eternal_hunt_3->effectN( 1 ).percent();
 
       return m;
     }
@@ -9633,7 +9617,6 @@ struct metamorphosis_buff_t : public demon_hunter_buff_t<buff_t>
       case DEMON_HUNTER_HAVOC:
         demon_hunter_buff_t::set_default_value_from_effect_type( A_HASTE_ALL );
         add_invalidate( CACHE_HASTE );
-        add_invalidate( CACHE_LEECH );
         break;
       case DEMON_HUNTER_VENGEANCE:
         demon_hunter_buff_t::set_default_value_from_effect_type( A_INCREASE_HEALTH_PCT );
@@ -10448,6 +10431,8 @@ action_t* demon_hunter_t::create_action( util::string_view name, util::string_vi
     return new disrupt_t( this, options_str );
   if ( name == "eye_beam" )
     return new eye_beam_t( this, options_str );
+  if ( name == "abyssal_gaze" )
+    return new abyssal_gaze_t( this, options_str );
   if ( name == "fel_devastation" )
     return new fel_devastation_t( this, options_str );
   if ( name == "fiery_brand" )
@@ -10950,7 +10935,7 @@ void demon_hunter_t::create_buffs()
 
   buff.glaive_flurry    = make_buff( this, "glaive_flurry", hero_spec.glaive_flurry );
   buff.rending_strike   = make_buff( this, "rending_strike", hero_spec.rending_strike );
-  buff.warblades_hunger = make_buff( this, "warblades_hunger", hero_spec.warblades_hunger_buff )->set_max_stack( 6 );
+  buff.warblades_hunger = make_buff( this, "warblades_hunger", hero_spec.warblades_hunger_buff );
   buff.thrill_of_the_fight_haste =
       make_buff( this, "thrill_of_the_fight_haste", hero_spec.thrill_of_the_fight_haste_buff )
           ->set_default_value_from_effect_type( A_HASTE_ALL )
@@ -13733,7 +13718,6 @@ void demon_hunter_t::parse_player_effects()
   }
 
   // Aldrachi Reaver
-  parse_effects( buff.thrill_of_the_fight_haste );
 
   // Annihilator
   parse_effects( buff.voidfall_building );

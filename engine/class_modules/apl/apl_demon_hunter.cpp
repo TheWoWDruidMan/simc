@@ -323,6 +323,7 @@ void havoc( player_t* p )
   default_->add_action( "annihilation,if=debuff.essence_break.up|action.annihilation.demonsurge_available" );
   default_->add_action( "throw_glaive,if=active_enemies>1&talent.burning_wound&!talent.screaming_brutality&active_dot.burning_wound<(spell_targets>?3)&!variable.tab_target_burning_wound" );
   default_->add_action( "immolation_aura,if=talent.a_fire_inside&talent.burning_wound&(charges=2|full_recharge_time<gcd.max*2)" );
+  default_->add_action( "abyssal_gaze,if=!action.death_sweep.demonsurge_available&!action.annihilation.demonsurge_available" );
   default_->add_action( "eye_beam" );
   default_->add_action( "immolation_aura,,if=action.immolation_aura.demonsurge_available&buff.demonsurge.remains<gcd.max" );
   default_->add_action( "felblade,if=buff.inertia_trigger.up" );

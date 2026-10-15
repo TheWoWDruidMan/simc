@@ -3227,6 +3227,10 @@ void item::thunderfury( special_effect_t& effect )
   // At 2.6 seconds that is 26% per hit rather than 4.3% - the sword procs six
   // times as often as this port has been simulating it since 10 September 2026,
   // which matches its reputation in game far better than 1.0 did.
+  //
+  // 15 Oct 2026, checked against raid logs (boss fights, white swings with no other hit within 40 ms): Protection
+  // paladins (sword and shield) 529 procs from 1955 = 27.1% a swing, as this gives - the item is a 2.6 sec one-hander in
+  // this client. Brewmasters wielding TWO read 14.0%: only the main-hand copy procs, as already_built() makes it here.
   effect.proc_chance_ = chance_on_hit_from_ppm( 6.0, 2.6 );
   effect.ppm_         = 0;
   /* the hand rule now lives in chance_on_hit_cb_t, which also lets abilities roll */
