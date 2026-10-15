@@ -11697,6 +11697,11 @@ void demon_hunter_t::init_spells()
   spec.devour                   = find_spell( 1217610, DEMON_HUNTER_DEVOURER );
   spec.devour_energize          = find_spell( 1288123, DEMON_HUNTER_DEVOURER );
   spec.voidblade                = find_spell( 1245414, DEMON_HUNTER_DEVOURER );
+  // BracketSim (15 Oct 2026): Voidblade's damage spell is level 50 in the data, but only the Voidblade TALENT casts it, and
+  // a taken talent works at any level. 12.1.5 moved The Hunt above the 8-point gate, so a level 30 Devourer can take it; the
+  // melee list then pressed Voidblade and the whole sim stopped ("could not find spell data for Action voidblade_damage").
+  if ( !spec.voidblade->ok() && specialization() == DEMON_HUNTER_DEVOURER )
+    spec.voidblade = dbc::find_spell( this, 1245414 );
   spec.soul_immolation_energize = find_spell( 1242475, DEMON_HUNTER_DEVOURER );
   spec.reap                     = find_spell( 1226019, DEMON_HUNTER_DEVOURER );
   spec.reap_damage              = find_spell( 1225823, DEMON_HUNTER_DEVOURER );
