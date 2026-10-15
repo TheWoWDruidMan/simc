@@ -1770,6 +1770,94 @@ static void ampoule_of_pure_void( special_effect_t& effect )
   effect.execute_action = a;
 }
 
+// BracketSim (15 Oct 2026): HELPERS MEASURED FROM RAID LOGS. Book of the Dead's Skeleton, Dragon's Call's Emerald Dragon
+// Whelp and Vanquished Clutches of Yogg-Saron's tentacles are creatures whose damage is not in the game data, so they
+// were never modelled. the author's WarcraftLogs uploads (level 30 raids, 2024-2026) record them directly: per summon the
+// median number of hits, the swing interval, the mean hit (crits included) and the crit rate (scratchpad
+// special/wcl/summon.mjs, summon-gaps.mjs). Each summon lands those hits on its own, so overlapping summons add up as in
+// game; the hit is the logged post-mitigation amount, so no armor, and the player's own damage buffs do not apply.
+// Level 30 only - the bracket the logs were recorded at.
+struct log_pet_hit_t : public generic_proc_t
+{
+  double crit;
+  log_pet_hit_t( const special_effect_t& e, util::string_view n, double noncrit, double crit_ )
+    : generic_proc_t( e, n, spell_data_t::nil() ), crit( crit_ )
+  {
+    background = proc = true;
+    callbacks = false;
+    may_crit = true;
+    may_miss = may_dodge = may_parry = may_block = false;
+    school = SCHOOL_PHYSICAL;
+    base_dd_min = base_dd_max = noncrit;
+  }
+  double composite_crit_chance() const override { return crit; }
+  double composite_da_multiplier( const action_state_t* ) const override { return 1.0; }
+  double composite_target_multiplier( player_t* ) const override { return 1.0; }
+  double composite_target_armor( const action_state_t* ) const override { return 0; }
+};
+
+struct log_pet_summon_t : public generic_proc_t
+{
+  action_t* hit;
+  int hits;
+  timespan_t swing;
+  log_pet_summon_t( const special_effect_t& e, util::string_view n, action_t* h, int hits_, timespan_t swing_ )
+    : generic_proc_t( e, n, spell_data_t::nil() ), hit( h ), hits( hits_ ), swing( swing_ )
+  {
+    background = true;
+    harmful = may_miss = may_crit = callbacks = false;
+    trigger_gcd = 0_ms;
+  }
+  void execute() override
+  {
+    generic_proc_t::execute();
+    player_t* t = target;
+    for ( int i = 1; i <= hits; i++ )
+      make_event( *sim, swing * i, [ this, t ]() { if ( !t->is_sleeping() ) hit->execute_on_target( t ); } );
+  }
+};
+
+// mean hit / (1 + crit) = the non-crit hit (crits double).
+static action_t* log_pet( special_effect_t& e, util::string_view name, double mean, double crit, int hits, double swing )
+{
+  if ( action_t* a = e.player->find_action( name ) )
+    return a;
+  auto hit = new log_pet_hit_t( e, fmt::format( "{}_hit", name ), mean / ( 1.0 + crit ), crit );
+  return new log_pet_summon_t( e, name, hit, hits, timespan_t::from_seconds( swing ) );
+}
+
+// Dragon's Call (10847): the driver's own 1.5 RPPM (haste); whelp 4 hits, 3.24 s apart, mean 66, 23.5% crit (2 wearers,
+// 14 summons, 51 hits). Book of the Dead (13353): no rate in the game data - 0.51 summons a minute in the logs (6
+// wearers, 30 summons), as RPPM; Skeleton 24 hits, 1.62 s apart, mean 71, 14.2% crit (670 hits). Clutches (46312): the
+// use, 2 min; tentacle 7 hits, 1.91 s apart, mean 326 over its three kinds, 14.5% crit (10 wearers, 48 summons).
+static void dragons_call( special_effect_t& e )
+{
+  if ( e.player->true_level > 30 ) { e.type = SPECIAL_EFFECT_NONE; return; }
+  e.execute_action = log_pet( e, "emerald_dragon_whelp", 66, 0.235, 4, 3.24 );
+  e.disable_buff();
+  new dbc_proc_callback_t( e.player, e );
+}
+
+static void book_of_the_dead( special_effect_t& e )
+{
+  if ( e.player->true_level > 30 ) { e.type = SPECIAL_EFFECT_NONE; return; }
+  e.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY | PF_RANGED | PF_RANGED_ABILITY | PF_MAGIC_SPELL | PF_NONE_HARMFUL;
+  e.proc_flags2_ = PF2_ALL_HIT;
+  e.ppm_         = -0.51;  // negative = real PPM
+  e.rppm_scale_  = RPPM_NONE;
+  e.proc_chance_ = 1.0;
+  e.execute_action = log_pet( e, "summoned_skeleton", 71, 0.142, 24, 1.62 );
+  e.disable_buff();
+  new dbc_proc_callback_t( e.player, e );
+}
+
+static void vanquished_clutches( special_effect_t& e )
+{
+  if ( e.player->true_level > 30 ) { e.type = SPECIAL_EFFECT_NONE; return; }
+  e.type = SPECIAL_EFFECT_USE;  // a custom handler leaves it _CUSTOM, which use_item cannot find
+  e.execute_action = log_pet( e, "vanquished_tentacle", 326, 0.145, 7, 1.91 );
+}
+
 void item::world_breaker( special_effect_t& effect )
 {
   effect.name_str     = "world_breaker";
@@ -8129,9 +8217,14 @@ void unique_gear::register_special_effects()
   // 15 Oct 2026: old weapon enchants whose driver lost its proc rate in this client ("No RPPM / PPM / Proc chance" -
   // they never fired). Rates from wowsims: classic enchant_effects.go (Fiery Weapon 6.0, Lifestealing 6.66), wotlk
   // enchant_effects.go (Icebreaker 4.0). Icy Chill (20005) and Unholy Weapon (20006) have no published rate - left out.
+  // Checked against raid logs: procs per hit (abilities included) 0.27 Lifestealing, 0.25 Fiery Weapon - as these rates give.
   register_special_effect(  13897, "6PPM"                               ); /* Fiery Weapon */
   register_special_effect(  20004, "6.66PPM"                            ); /* Lifestealing */
   register_special_effect(  44525, "4PPM"                               ); /* Icebreaker */
+  // 15 Oct 2026: helpers measured from raid logs (log_pet in this file).
+  register_special_effect( 250093, dragons_call );         /* Dragon's Call 10847 */
+  register_special_effect( 250092, book_of_the_dead );     /* Book of the Dead 13353 */
+  register_special_effect( 282131, vanquished_clutches );  /* Vanquished Clutches of Yogg-Saron 46312 */
 
   /* Wrath of the Lich King */
   register_special_effect(  59620, "1PPM"                               ); /* Berserking */
