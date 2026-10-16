@@ -4110,6 +4110,10 @@ struct eye_beam_base_t : public student_of_suffering_trigger_t<final_breath_trig
     channeled           = true;
     tick_on_application = false;
     cooldown            = p->cooldown.eye_beam;
+    // BracketSim: Eye Beam and Abyssal Gaze share category 1582 (30 s). The shared cooldown only got its duration from an
+    // `eye_beam` action, so a rotation without one cast Abyssal Gaze with NO cooldown (perpetual Metamorphosis via Demonic).
+    if ( cooldown->duration <= 0_ms )
+      cooldown->duration = data().cooldown();
 
     // 6/6/2020 - Override the lag handling for Eye Beam so that it doesn't use channeled ready behavior
     //            In-game tests have shown it is possible to cast after faster than the 250ms channel_lag using a
