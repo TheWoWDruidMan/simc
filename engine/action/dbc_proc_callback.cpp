@@ -278,6 +278,18 @@ void dbc_proc_callback_t::trigger( const proc_data_t& source_data, player_t* tar
          !( state && state->action && state->action->name_str == "void_ray_tick" ) )
       return;
 
+    // BracketSim, 17 October 2026: Solace of the Defeated (drivers 67752 heroic, 67698 normal) on a Balance druid. A
+    // level-30 combat log (one target, 300 s) shows Energized stacking from Sunfire, Moonfire and Starsurge hits only:
+    // 142 Wrath casts, Shooting Stars, Sunseeker Mushroom and the treants added none. Wrath and the Mushroom carry Allow
+    // Class Ability Procs (416) like the spells that do proc, so the data cannot tell them apart; the log can.
+    if ( listener->specialization() == DRUID_BALANCE && ( effect.spell_id == 67752 || effect.spell_id == 67698 ) &&
+         state && state->action )
+    {
+      const unsigned id = state->action->data().id();
+      if ( id == 190984 || id == 1280212 || id == 1280213 )
+        return;
+    }
+
     // Additional trigger condition to check before performing proc chance process.
     if ( trigger_type == trigger_fn_type::CONDITION &&
          !( *trigger_fn )( this, source_data.spell, target, state, type ) )
