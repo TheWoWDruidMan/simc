@@ -274,7 +274,10 @@ void dbc_proc_callback_t::trigger( const proc_data_t& source_data, player_t* tar
     // them apart, but the live game does: Solace of the Fallen "stacks only off void ray (non meta void ray
     // specifically)" (Fate, level-30 BiS compendium) and does not proc for a Devourer otherwise (the author). Until a log
     // says more, such an effect procs for a Devourer only from the non-Metamorphosis Void Ray tick.
+    // 19 October 2026: not the Void Elf racial Entropic Embrace (255669, ~1 proc a minute). The rule came from Solace
+    // reports only; the racial procs from every Devourer ability, as upstream and every other class.
     if ( proc_data.can_only_proc_from_class_abilities && listener->specialization() == DEMON_HUNTER_DEVOURER &&
+         effect.spell_id != 255669 &&
          !( state && state->action && state->action->name_str == "void_ray_tick" ) )
       return;
 
