@@ -5455,7 +5455,10 @@ void player_t::create_buffs()
       ->add_invalidate( CACHE_HASTE );
 
     bracketsim.raid_haste_times.clear();
-    for ( timespan_t at = 0_ms; at < sim->max_time * 1.2; at += period )
+    // BracketSim (19 Oct 2026, player report): bloodlust_time= in seconds moves Drums as it moves Bloodlust; it then
+    // repeats every period from there. A negative bloodlust_time (seconds before the end) stays at the pull.
+    timespan_t first = sim->bloodlust_time > 0_ms ? sim->bloodlust_time : 0_ms;
+    for ( timespan_t at = first; at < sim->max_time * 1.2; at += period )
       bracketsim.raid_haste_times.push_back( at );
     register_timed_buff_triggers( bracketsim.raid_haste_buff, bracketsim.raid_haste_times, duration );
     sim->print_debug( "{} BracketSim raid haste +{}% for {} every {}", *this, pct * 100.0,
