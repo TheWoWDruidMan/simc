@@ -1,5 +1,5 @@
-// Racial abilities, wow build 12.1.5.70340
-static constexpr std::array<racial_spell_entry_t, 181> __ptr_racial_spell_data { {
+// Racial abilities, wow build 12.1.7.70424
+static constexpr std::array<racial_spell_entry_t, 184> __ptr_racial_spell_data { {
   { 0x0000000000000001, 0x00003fff,  458619, "No Place Like Home"                 },
   { 0x0000000000000001, 0x00003fff,   20598, "The Human Spirit"                   },
   { 0x0000000000000001, 0x00003fff,   59752, "Will to Survive"                    },
@@ -96,6 +96,7 @@ static constexpr std::array<racial_spell_entry_t, 181> __ptr_racial_spell_data {
   { 0x0000000000018000, 0x00001000,  403216, "Aerial Halt"                        },
   { 0x0000000000018000, 0x00003fff,  365575, "Awakened"                           },
   { 0x0000000000018000, 0x00001000, 1289789, "Battle Visage"                      },
+  { 0x0000000000018000, 0x00004000, 1253989, "Chosen Identity"                    },
   { 0x0000000000018000, 0x00001000,  360022, "Chosen Identity"                    },
   { 0x0000000000018000, 0x0000019d,  360022, "Chosen Identity"                    },
   { 0x0000000000018000, 0x00003fff,  366489, "Discerning Eye"                     },
@@ -108,6 +109,8 @@ static constexpr std::array<racial_spell_entry_t, 181> __ptr_racial_spell_data {
   { 0x0000000000018000, 0x00001000,  376744, "Skyward Ascent"                     },
   { 0x0000000000018000, 0x00001000,  369536, "Soar"                               },
   { 0x0000000000018000, 0x00001000,  376743, "Surge Forward"                      },
+  { 0x0000000000018000, 0x00004000, 1253995, "Visage"                             },
+  { 0x0000000000018000, 0x00004000, 1254008, "Visage"                             },
   { 0x0000000000018000, 0x00003fff,  368437, "Visage"                             },
   { 0x0000000000018000, 0x00001000,  351239, "Visage"                             },
   { 0x0000000000018000, 0x0000019d,  351239, "Visage"                             },
@@ -118,12 +121,12 @@ static constexpr std::array<racial_spell_entry_t, 181> __ptr_racial_spell_data {
   { 0x0000000000060000, 0x00003fff,  461063, "Quiet Contemplation"                },
   { 0x0000000000060000, 0x00003fff,  436340, "Titan-Wrought Frame"                },
   { 0x0000000000060000, 0x00003fff,  448924, "Wide-Eyed Wonder"                   },
-  { 0x0000000000180000, 0x00000000, 1238623, "Lash Out"                           },
-  { 0x0000000000180000, 0x00000000, 1238648, "One With Nature"                    },
-  { 0x0000000000180000, 0x00000000, 1260715, "Rootwalker"                         },
-  { 0x0000000000180000, 0x00000000, 1238686, "Rootwalking"                        },
-  { 0x0000000000180000, 0x00000000, 1238677, "Subterranean Predator"              },
-  { 0x0000000000180000, 0x00000000, 1237885, "Thorn Bloom"                        },
+  { 0x0000000000180000, 0x00003fff, 1238623, "Lash Out"                           },
+  { 0x0000000000180000, 0x00003fff, 1238648, "One With Nature"                    },
+  { 0x0000000000180000, 0x00003fff, 1260715, "Rootwalker"                         },
+  { 0x0000000000180000, 0x00003fff, 1238686, "Rootwalking"                        },
+  { 0x0000000000180000, 0x00003fff, 1238677, "Subterranean Predator"              },
+  { 0x0000000000180000, 0x00003fff, 1237885, "Thorn Bloom"                        },
   { 0x0000000000200000, 0x000007df,   68976, "Aberration"                         },
   { 0x0000000000200000, 0x00000020,   68976, "Aberration"                         },
   { 0x0000000000200000, 0x00004000,   94293, "Altered Form"                       },
