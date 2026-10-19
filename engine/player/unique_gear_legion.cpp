@@ -303,9 +303,11 @@ void enchants::mark_of_the_hidden_satyr( special_effect_t& effect )
       // for attack power calculations. Weird
 
       // Hardcoded somewhere in the bowels of the server
+      // BracketSim 2026-10-19: 316 non-crit hits from a level 60 combat log measure 0.255 x AP x (1 + vers)
+      // (p10-p90 0.225-0.292); 0.653 hit about 2.5x too hard. Spell power scaled by the same ratio (unmeasured).
       ap_type = attack_power_type::NO_WEAPON;
-      attack_power_mod.direct = 0.653;
-      spell_power_mod.direct = 0.522;
+      attack_power_mod.direct = 0.255;
+      spell_power_mod.direct = 0.522 * 0.255 / 0.653;
     }
 
     double amount_delta_modifier( const action_state_t* ) const override
