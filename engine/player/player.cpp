@@ -5464,6 +5464,12 @@ void player_t::create_buffs()
     sim->print_debug( "{} BracketSim raid haste +{}% for {} every {}", *this, pct * 100.0,
                       duration, period );
   }
+  // BracketSim (20 Oct 2026, bug report): buff.bracketsim_raid_haste errored ("Buff not found") in a sim without Drums.
+  // The buff now always exists; without Drums it is never triggered, so .up reads 0 and .down 1.
+  else if ( !is_enemy() && !bracketsim.raid_haste_buff )
+  {
+    bracketsim.raid_haste_buff = make_buff( this, "bracketsim_raid_haste" )->set_quiet( true );
+  }
 
   // A teammate's armor-shred weapon, debuff up all fight (8 Oct 2026). Refused loudly on a bad value, like the others.
   if ( !is_enemy() && !bracketsim.ally_armor_shred.empty() )
@@ -13154,6 +13160,12 @@ std::unique_ptr<expr_t> player_t::create_expression( util::string_view expressio
         throw sc_invalid_apl_argument( fmt::format( "Invalid PvP rule check '{}.{}'.", splits[ 1 ], splits[ 2 ] ) );
       }
 
+      // BracketSim (20 Oct 2026, bug report): buff.bloodlust with Drums of Fury standing in for Bloodlust reads the
+      // Drums (bracketsim_raid_haste), so a rotation's "use it in Bloodlust" lines fire with Drums too.
+      if ( splits[ 1 ] == "bloodlust" && !sim->overrides.bloodlust && !bracketsim.raid_haste.empty() &&
+           bracketsim.raid_haste_buff )
+        return buff_t::create_expression( splits[ 1 ], splits[ 2 ], *bracketsim.raid_haste_buff );
+
       // buff.buff_name.buff_property
       get_target_data( this );
       buff_t* buff = buff_t::find_expressable( buff_list, splits[ 1 ], this );
@@ -13162,7 +13174,12 @@ std::unique_ptr<expr_t> player_t::create_expression( util::string_view expressio
       if ( buff )
         return buff_t::create_expression( splits[ 1 ], splits[ 2 ], *buff );
 
-      throw sc_invalid_apl_argument( fmt::format( "Buff '{}' not found.", splits[ 1 ] ) );
+      // BracketSim (20 Oct 2026, bug report): a line checking a trinket's (or any item's) buff errored when that item
+      // was not worn - one line broke every Best Gear setup without the trinket. A buff that does not exist now reads
+      // as one that is never up: .down = 1, every other property 0, with a Trivial warning naming it.
+      sim->error( error_level_e::TRIVIAL, "{} buff '{}' not found (an item not worn?): '{}' reads as never up.", *this,
+                  splits[ 1 ], expression_str );
+      return expr_t::create_constant( expression_str, splits[ 2 ] == "down" ? 1.0 : 0.0 );
     }
     else if ( splits[ 0 ] == "cooldown" )
     {
@@ -13617,6 +13634,19 @@ double player_t::compute_incoming_magic_damage( timespan_t interval ) const
 
 double player_t::calculate_time_to_bloodlust() const
 {
+  // BracketSim (20 Oct 2026, bug report): with Drums of Fury standing in for Bloodlust (bracketsim_raid_haste, below
+  // level 48 or Bloodlust off), time_to_bloodlust counts down to the next Drums - 0 while they are up - instead of
+  // reading "never".
+  if ( !sim->overrides.bloodlust && !bracketsim.raid_haste.empty() && bracketsim.raid_haste_buff )
+  {
+    if ( bracketsim.raid_haste_buff->check() )
+      return 0;
+    for ( timespan_t at : bracketsim.raid_haste_times )
+      if ( at >= sim->current_time() )
+        return ( at - sim->current_time() ).total_seconds();
+    return 3 * sim->expected_iteration_time.total_seconds();
+  }
+
   // only bother if the sim is automatically casting bloodlust. Otherwise error out
   if ( sim->overrides.bloodlust )
   {

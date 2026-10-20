@@ -2577,10 +2577,17 @@ namespace nibelung
  */
 static constexpr double SMITE_MIN      = 823.0;
 static constexpr double SMITE_MAX      = 920.0;
-// 1.62s: the MEDIAN gap between Smites across 32 casts in the Warcraft Logs
-// report. The old 1950ms came from wowsims' comment about "sixteen casts in
-// thirty seconds"; the real Val'kyr manages about eighteen.
-static constexpr timespan_t SMITE_CD   = timespan_t::from_millis( 1620 );
+// 3.75s (20 Oct 2026): the AVERAGE gap over a Val'kyr's whole 30 seconds, not the
+// median between back-to-back Smites. Two level-30 Augmentation dummy logs
+// (311s and 309s, Living Flame and Azure Strike fillers): 64 Smites from
+// 392 harmful casts - at Nibelung's 2% that is 7.8 Val'kyr, about 8 Smites each,
+// and the logs' own Smite clusters (14, 7, 7 | 7, ~11 over two, ~18 over two) say
+// the same. The real Val'kyr Smites about every 2s, then idles 5-13s; the median
+// (1.62s, the Shadow Priest raid log) only saw the busy part, so the engine cast
+// ~17 per Val'kyr - about twice the game (Val'kyr ~350 DPS simmed vs 67-86 logged
+// on the same level-30 Aug). Per-Smite damage and the 2% proc chance both matched
+// the logs and are unchanged. 30s / 3.75s = 8 Smites per Val'kyr.
+static constexpr timespan_t SMITE_CD   = timespan_t::from_millis( 3750 );
 static constexpr timespan_t VALKYR_TIME = timespan_t::from_seconds( 30 );
 
 struct valkyr_smite_t final : public spell_t
