@@ -2577,17 +2577,18 @@ namespace nibelung
  */
 static constexpr double SMITE_MIN      = 823.0;
 static constexpr double SMITE_MAX      = 920.0;
-// 3.75s (20 Oct 2026): the AVERAGE gap over a Val'kyr's whole 30 seconds, not the
-// median between back-to-back Smites. Two level-30 Augmentation dummy logs
-// (311s and 309s, Living Flame and Azure Strike fillers): 64 Smites from
-// 392 harmful casts - at Nibelung's 2% that is 7.8 Val'kyr, about 8 Smites each,
-// and the logs' own Smite clusters (14, 7, 7 | 7, ~11 over two, ~18 over two) say
-// the same. The real Val'kyr Smites about every 2s, then idles 5-13s; the median
-// (1.62s, the Shadow Priest raid log) only saw the busy part, so the engine cast
-// ~17 per Val'kyr - about twice the game (Val'kyr ~350 DPS simmed vs 67-86 logged
-// on the same level-30 Aug). Per-Smite damage and the 2% proc chance both matched
-// the logs and are unchanged. 30s / 3.75s = 8 Smites per Val'kyr.
-static constexpr timespan_t SMITE_CD   = timespan_t::from_millis( 3750 );
+// THE SMITE RATE DEPENDS ON THE OWNER (20 Oct 2026, three level-30 dummy logs).
+//   Devastation (321s): a whole Val'kyr life of 16 Smites, one every 2.0s, no
+//     pauses (202.4s -> 232.4s) - SMITE_CD 2.0s, about 15-16 per Val'kyr. (The old
+//     1.62s was the median gap in a Shadow Priest raid log, a little fast.)
+//   Augmentation (311s, 309s): 64 Smites from 392 harmful casts - at the 2% proc
+//     chance 7.8 Val'kyr, about 8 Smites each, with 5-13s pauses inside each life.
+//     An Aug spends much of the fight targeting allies (Prescience, Blistering
+//     Scales, ...) and the Val'kyr attacks only its owner's enemy target, so it
+//     idles - SMITE_CD_AUGMENTATION 3.75s, 30s / 3.75s = 8 per Val'kyr.
+// Per-Smite damage and the 2% proc chance matched all three logs and are unchanged.
+static constexpr timespan_t SMITE_CD   = timespan_t::from_millis( 2000 );
+static constexpr timespan_t SMITE_CD_AUGMENTATION = timespan_t::from_millis( 3750 );
 static constexpr timespan_t VALKYR_TIME = timespan_t::from_seconds( 30 );
 
 struct valkyr_smite_t final : public spell_t
@@ -2597,7 +2598,8 @@ struct valkyr_smite_t final : public spell_t
     school               = SCHOOL_HOLY;
     base_dd_min          = SMITE_MIN;
     base_dd_max          = SMITE_MAX;
-    cooldown->duration   = SMITE_CD;
+    cooldown->duration   = p->owner && p->owner->specialization() == EVOKER_AUGMENTATION ? SMITE_CD_AUGMENTATION
+                                                                                         : SMITE_CD;
     base_execute_time    = 0_ms;
     // Cannot MISS - that is what the spell page says, and it is all it says.
     may_miss = false;
