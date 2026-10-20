@@ -373,6 +373,8 @@ struct simplified_player_t : public player_t
     int item_level      = 328;
     std::string variant = "default";
     double skill         = 1.0;
+    bool legacy          = false;  // BracketSim: below 90, flat main-stat buffs scale to this stand-in's Int
+    double int_scale     = 1.0;    // BracketSim: Int multiplier, to match the bracket's median main stat
   } option;
 
   std::map<std::string, bob_settings_t> bob_settings = {
@@ -703,13 +705,15 @@ struct simplified_player_t : public player_t
         break;
       case bob_buff_type_e::BUFF_FLAT_PRIMARY:
         b->add_stack_change_callback( [ this ]( buff_t* b, int, int _new ) {
+          // BracketSim: the values are top-level (a level 90 stand-in has ~3370 Int before raid buffs).
+          double v = b->default_value * ( option.legacy ? initial.stats.get_stat( STAT_INTELLECT ) / 3370.0 : 1.0 );
           if ( _new )
           {
-            stat_gain( STAT_INTELLECT, b->default_value );
+            stat_gain( STAT_INTELLECT, v );
           }
           else
           {
-            stat_loss( STAT_INTELLECT, b->default_value );
+            stat_loss( STAT_INTELLECT, v );
           }
         } );
         break;
@@ -972,6 +976,14 @@ struct simplified_player_t : public player_t
   double composite_mastery_value() const override
   {
     return cache.mastery() * 0.0125;
+  }
+
+  double composite_attribute_multiplier( attribute_e attr ) const override
+  {
+    double m = player_t::composite_attribute_multiplier( attr );
+    if ( attr == ATTR_INTELLECT )
+      m *= option.int_scale;
+    return m;
   }
 
   void init_base_stats() override
@@ -1260,6 +1272,8 @@ struct simplified_player_t : public player_t
     add_option( opt_string( "variant", option.variant ) );
     add_option( opt_int( "item_level", option.item_level, 0, 4096 ) );
     add_option( opt_float( "skill", option.skill, 0, 100 ) );
+    add_option( opt_bool( "legacy", option.legacy ) );
+    add_option( opt_float( "int_scale", option.int_scale, 0.01, 10 ) );
   }
 
   void arise() override
@@ -1345,7 +1359,17 @@ struct evoker_t : public player_t
     bool force_raid                                            = false;
     std::string shifting_sands_target_if_str                   = "";
     bool sands_shuffle_list                                    = true;
+    // BracketSim: credit the Aug with its support damage; level-matched stand-ins below 90 (-1 = built-in table)
+    bool support_credit                                        = true;
+    bool legacy_allies                                         = true;
+    int legacy_ally_ilevel                                     = -1;
+    double legacy_ally_skill                                   = -1;
+    double legacy_ally_int_scale                               = -1;
   } option;
+
+  // BracketSim support lines: Ebon Might, Shifting Sands, Prescience
+  action_t* support_lines[ 3 ] = { nullptr, nullptr, nullptr };
+  void credit_support( player_t* ally, result_amount_type rt, action_state_t* s );
 
   // Action pointers
   struct actions_t
@@ -7476,6 +7500,43 @@ struct unbound_flame_t : public evoker_spell_t
   }
 };
 
+// BracketSim: a support line on the Aug's report. credit() records damage the Aug caused through an ally's hit
+// (counted in the Aug's DPS like any of its own lines); it never hits the target.
+inline void bracketsim_credit( player_t* p, stats_t* st, double amount, player_t* t )
+{
+  if ( !st || amount <= 0 )
+    return;
+  st->add_result( amount, amount, result_amount_type::DMG_DIRECT, RESULT_HIT, BLOCK_RESULT_UNBLOCKED, t );
+  sim_t* sim = p->sim;
+  bool dungeon = sim->fight_style == FIGHT_STYLE_DUNGEON_SLICE || sim->fight_style == FIGHT_STYLE_DUNGEON_ROUTE;
+  if ( dungeon ? ( t->is_boss() || ( sim->merge_enemy_priority_dmg && t == p->target ) )
+               : ( t == sim->target || ( sim->merge_enemy_priority_dmg && t->is_boss() ) ) )
+    p->priority_iteration_dmg += amount;
+}
+
+struct support_credit_t : public spell_t
+{
+  support_credit_t( player_t* p, std::string_view n, unsigned id ) : spell_t( n, p, p->find_spell( id ) )
+  {
+    background = true;
+    may_crit = may_miss = may_dodge = may_parry = may_block = false;
+    callbacks = false;
+    if ( school == SCHOOL_NONE )
+      school = SCHOOL_ARCANE;
+  }
+
+  void init() override
+  {
+    spell_t::init();
+    stats->type = STATS_DMG;
+  }
+
+  void credit( double amount, player_t* t )
+  {
+    bracketsim_credit( player, stats, amount, t );
+  }
+};
+
 struct fate_mirror_damage_t : public evoker_external_action_t<spell_t>
 {
 protected:
@@ -9570,6 +9631,36 @@ void evoker_t::create_permanent_actors()
       }
     }
 
+    // BracketSim: below 90 the stand-ins are matched to the bracket's DPS test characters (median DPS and main
+    // stat at each level, 20 Oct 2026). Ebon Might's total is the same past 2 allies, so 3 damage dealers suffice.
+    bool legacy = level() < 90 && option.legacy_allies;
+    int legacy_ilvl = 0;
+    double legacy_skill = 0;
+    double legacy_int_scale = 1.0;
+    if ( legacy )
+    {
+      if ( !close_as_clutchmates )
+        bobs = { { "Bob Arcane", "arcane" }, { "Bob BM", "bm" }, { "Bob Flat1", "default" }, { "Bob BDK", "bdk" } };
+      // { level, item level, skill } - nearest row at or below the character's level
+      // { level, item level, skill, Int scale }
+      static const std::array<std::tuple<int, int, double, double>, 8> table = { {
+          { 30, 8, 0.2252, 0.9522 }, { 35, 8, 0.3082, 0.8292 }, { 40, 8, 0.3256, 0.8741 }, { 45, 8, 0.4326, 0.8176 },
+          { 50, 8, 0.3965, 1.0 }, { 60, 9, 0.8095, 1.0 }, { 70, 14, 0.7666, 1.0 }, { 80, 108, 0.9519, 1.0 } } };
+      for ( auto& [ lvl, il, sk, is ] : table )
+        if ( level() >= lvl )
+        {
+          legacy_ilvl      = il;
+          legacy_skill     = sk;
+          legacy_int_scale = is;
+        }
+      if ( option.legacy_ally_ilevel >= 0 )
+        legacy_ilvl = option.legacy_ally_ilevel;
+      if ( option.legacy_ally_skill >= 0 )
+        legacy_skill = option.legacy_ally_skill;
+      if ( option.legacy_ally_int_scale > 0 )
+        legacy_int_scale = option.legacy_ally_int_scale;
+    }
+
     for ( auto& pair : bobs )
     {
       simplified_player_t* p = dynamic_cast<simplified_player_t*>( module->create_player( sim, pair.first ) );
@@ -9592,6 +9683,14 @@ void evoker_t::create_permanent_actors()
         {
           p->option.item_level = 170;
         }
+      }
+
+      if ( legacy )
+      {
+        p->option.legacy     = true;
+        p->option.item_level = legacy_ilvl;
+        p->option.skill      = legacy_skill;
+        p->option.int_scale  = legacy_int_scale;
       }
     }
   }
@@ -9938,6 +10037,79 @@ void evoker_t::init_finished()
         buff.unrelenting_siege->expire();
       }
     } );
+  }
+
+  if ( support_lines[ 0 ] )
+  {
+    for ( auto ally : sim->player_no_pet_list )
+    {
+      if ( ally == this )
+        continue;
+      auto hook = [ this, ally ]( result_amount_type rt, action_state_t* s ) {
+        credit_support( ally, rt, s );
+        return assessor::CONTINUE;
+      };
+      ally->assessor_out_damage.add( assessor::TARGET_DAMAGE + 2, hook );
+      for ( auto pet : ally->pet_list )
+        pet->assessor_out_damage.add( assessor::TARGET_DAMAGE + 2, hook );
+    }
+  }
+}
+
+// BracketSim support credit (20 Oct 2026). The share of an ally's hit caused by this Aug's buffs:
+//   Ebon Might      hit x (main stat it gave / the ally's main stat now)
+//   Shifting Sands  hit x (its Versatility / (1 + the ally's Versatility))
+//   Prescience      hit x (its crit chance / (1 + the hit's crit chance)), the ally's own hits
+// Evoker effects that run as the ally's damage (Blistering Scales, Infernos Blessing, Fate Mirror, Bombardments,
+// Breath of Eons) move whole to the Aug's line of the same name. A stand-in's flat proc does not scale with Int.
+void evoker_t::credit_support( player_t* ally, result_amount_type rt, action_state_t* s )
+{
+  if ( ( rt != result_amount_type::DMG_DIRECT && rt != result_amount_type::DMG_OVER_TIME ) || !s->action ||
+       s->result_amount <= 0 )
+    return;
+  auto td = find_target_data( ally );
+  if ( !td )
+    return;
+  double amt = s->result_amount;
+
+  if ( auto es = dynamic_cast<const evoker_action_state_t<external_action_data>*>( s ) )
+  {
+    if ( es->evoker == this )
+      spells::bracketsim_credit( this, get_stats( s->action->name_str ), amt, s->target );
+    return;
+  }
+
+  if ( td->buffs.ebon_might->check() && s->action->name_str != "simple_proc" )
+  {
+    auto sb = debug_cast<stat_buff_t*>( td->buffs.ebon_might );
+    if ( !sb->stats.empty() )
+    {
+      stat_e st = ally->convert_hybrid_stat( sb->stats[ 0 ].stat );
+      if ( st == STAT_STRENGTH || st == STAT_AGILITY || st == STAT_INTELLECT )
+      {
+        auto at      = static_cast<attribute_e>( st );
+        double given = sb->stats[ 0 ].current_value * ally->composite_attribute_multiplier( at );
+        double total = ally->cache.get_attribute( at );
+        if ( total > 0 && given > 0 )
+          debug_cast<spells::support_credit_t*>( support_lines[ 0 ] )->credit( amt * std::min( 1.0, given / total ), s->target );
+      }
+    }
+  }
+
+  if ( td->buffs.shifting_sands->check() )
+  {
+    double v = td->buffs.shifting_sands->check_value();
+    if ( v > 0 )
+      debug_cast<spells::support_credit_t*>( support_lines[ 1 ] )
+          ->credit( amt * v / ( 1.0 + ally->cache.damage_versatility() ), s->target );
+  }
+
+  if ( td->buffs.prescience->check() && s->action->may_crit && s->action->player == ally )
+  {
+    double c = td->buffs.prescience->check_value();
+    if ( c > 0 )
+      debug_cast<spells::support_credit_t*>( support_lines[ 2 ] )
+          ->credit( amt * c / ( 1.0 + std::clamp( s->composite_crit_chance(), 0.0, 1.0 ) ), s->target );
   }
 }
 
@@ -10448,6 +10620,13 @@ void evoker_t::create_actions()
   using namespace spells;
   using namespace heals;
 
+  if ( specialization() == EVOKER_AUGMENTATION && option.support_credit )
+  {
+    support_lines[ 0 ] = new support_credit_t( this, "ebon_might_support", 395152 );
+    support_lines[ 1 ] = new support_credit_t( this, "shifting_sands_support", 413984 );
+    support_lines[ 2 ] = new support_credit_t( this, "prescience_support", 410089 );
+  }
+
   if ( sets->has_set_bonus( EVOKER_DEVASTATION, DF2, B2 ) )
     action.obsidian_shards = get_secondary_action<obsidian_shards_t>( "obsidian_shards" );
 
@@ -10900,6 +11079,11 @@ void evoker_t::create_options()
   add_option( opt_bool( "evoker.force_raid", option.force_raid ) );
   add_option( opt_string( "evoker.shifting_sands_target_if_str", option.shifting_sands_target_if_str ) );
   add_option( opt_bool( "evoker.sands_shuffle_list", option.sands_shuffle_list ) );
+  add_option( opt_bool( "evoker.support_credit", option.support_credit ) );
+  add_option( opt_bool( "evoker.legacy_allies", option.legacy_allies ) );
+  add_option( opt_int( "evoker.legacy_ally_ilevel", option.legacy_ally_ilevel, -1, 4096 ) );
+  add_option( opt_float( "evoker.legacy_ally_skill", option.legacy_ally_skill, -1, 100 ) );
+  add_option( opt_float( "evoker.legacy_ally_int_scale", option.legacy_ally_int_scale, -1, 10 ) );
 }
 
 void evoker_t::analyze( sim_t& sim )
