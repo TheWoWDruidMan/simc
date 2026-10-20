@@ -1361,6 +1361,10 @@ struct evoker_t : public player_t
     bool sands_shuffle_list                                    = true;
     // BracketSim: credit the Aug with its support damage; level-matched stand-ins below 90 (-1 = built-in table)
     bool support_credit                                        = true;
+    // BracketSim (20 Oct 2026, the author: a "max support" mode that buffs others "even at the cost of his own dps"):
+    // the Aug's DPS is its support alone (the support lines), so Best Gear, the Loot Finder and the gear search rank by
+    // what its buffs add to the group. Its own spells, pets and evoker effects still run but do not score.
+    bool support_only                                          = false;
     bool legacy_allies                                         = true;
     int legacy_ally_ilevel                                     = -1;
     double legacy_ally_skill                                   = -1;
@@ -1877,6 +1881,10 @@ struct evoker_t : public player_t
   // void combat_end() override;
   void analyze( sim_t& ) override;
   void reset() override;
+  void datacollection_end() override;
+  // BracketSim support_only: this iteration's support damage (all targets / priority targets).
+  double bracketsim_support_iteration_dmg          = 0;
+  double bracketsim_support_priority_iteration_dmg = 0;
   void copy_from( player_t* ) override;
   void merge( player_t& ) override;
   std::string default_potion() const override;
@@ -7502,16 +7510,19 @@ struct unbound_flame_t : public evoker_spell_t
 
 // BracketSim: a support line on the Aug's report. credit() records damage the Aug caused through an ally's hit
 // (counted in the Aug's DPS like any of its own lines); it never hits the target.
-inline void bracketsim_credit( player_t* p, stats_t* st, double amount, player_t* t )
+// Returns whether the hit counts as priority damage (the sim's main target).
+inline bool bracketsim_credit( player_t* p, stats_t* st, double amount, player_t* t )
 {
   if ( !st || amount <= 0 )
-    return;
+    return false;
   st->add_result( amount, amount, result_amount_type::DMG_DIRECT, RESULT_HIT, BLOCK_RESULT_UNBLOCKED, t );
   sim_t* sim = p->sim;
   bool dungeon = sim->fight_style == FIGHT_STYLE_DUNGEON_SLICE || sim->fight_style == FIGHT_STYLE_DUNGEON_ROUTE;
-  if ( dungeon ? ( t->is_boss() || ( sim->merge_enemy_priority_dmg && t == p->target ) )
-               : ( t == sim->target || ( sim->merge_enemy_priority_dmg && t->is_boss() ) ) )
+  bool priority = dungeon ? ( t->is_boss() || ( sim->merge_enemy_priority_dmg && t == p->target ) )
+                          : ( t == sim->target || ( sim->merge_enemy_priority_dmg && t->is_boss() ) );
+  if ( priority )
     p->priority_iteration_dmg += amount;
+  return priority;
 }
 
 struct support_credit_t : public spell_t
@@ -7533,7 +7544,13 @@ struct support_credit_t : public spell_t
 
   void credit( double amount, player_t* t )
   {
-    bracketsim_credit( player, stats, amount, t );
+    if ( amount <= 0 )
+      return;
+    bool priority = bracketsim_credit( player, stats, amount, t );
+    auto e = debug_cast<evoker_t*>( player );
+    e->bracketsim_support_iteration_dmg += amount;
+    if ( priority )
+      e->bracketsim_support_priority_iteration_dmg += amount;
   }
 };
 
@@ -11080,6 +11097,7 @@ void evoker_t::create_options()
   add_option( opt_string( "evoker.shifting_sands_target_if_str", option.shifting_sands_target_if_str ) );
   add_option( opt_bool( "evoker.sands_shuffle_list", option.sands_shuffle_list ) );
   add_option( opt_bool( "evoker.support_credit", option.support_credit ) );
+  add_option( opt_bool( "evoker.support_only", option.support_only ) );
   add_option( opt_bool( "evoker.legacy_allies", option.legacy_allies ) );
   add_option( opt_int( "evoker.legacy_ally_ilevel", option.legacy_ally_ilevel, -1, 4096 ) );
   add_option( opt_float( "evoker.legacy_ally_skill", option.legacy_ally_skill, -1, 100 ) );
@@ -11150,9 +11168,40 @@ void evoker_t::combat_begin()
   }
 }
 
+// BracketSim support_only (20 Oct 2026): the iteration's DPS is the support credited this iteration, nothing else - the
+// Aug's own hits, its pets (Nibelung's Val'kyr) and its own evoker effects are left out of the score. The stats rows
+// still record everything, so a report shows what it did; only the DPS number it is ranked by changes.
+// The player's iteration damage is assembled in player_t::datacollection_end from its own damage stats (support lines
+// included) plus its pets' iteration damage, so the own and pet parts are subtracted up front: what is left is support.
+// Priority damage is counted live as hits land, so it is set to the support's priority part less the pets'.
+void evoker_t::datacollection_end()
+{
+  if ( option.support_only && specialization() == EVOKER_AUGMENTATION && requires_data_collection() )
+  {
+    double own = 0;
+    for ( auto* st : stats_list )
+      if ( st->type == STATS_DMG )
+        own += st->iteration_actual_amount();
+    own -= bracketsim_support_iteration_dmg;
+    double pets = 0, pets_priority = 0;
+    for ( auto* pet : pet_list )
+    {
+      for ( auto* st : pet->stats_list )
+        if ( st->type == STATS_DMG )
+          pets += st->iteration_actual_amount();
+      pets_priority += pet->priority_iteration_dmg;
+    }
+    iteration_dmg          = -( own + pets );
+    priority_iteration_dmg = bracketsim_support_priority_iteration_dmg - pets_priority;
+  }
+  player_t::datacollection_end();
+}
+
 void evoker_t::reset()
 {
   player_t::reset();
+  bracketsim_support_iteration_dmg          = 0;
+  bracketsim_support_priority_iteration_dmg = 0;
 
   // clear runtime variables
   allies_with_my_ebon.clear_without_callbacks();

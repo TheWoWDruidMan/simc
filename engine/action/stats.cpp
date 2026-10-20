@@ -228,6 +228,16 @@ void stats_t::datacollection_begin()
 
 // stats_t::datacollection_end ==============================================
 
+double stats_t::iteration_actual_amount() const
+{
+  double v = 0;
+  for ( const auto& r : direct_results )
+    v += r.iteration_actual_amount;
+  for ( const auto& r : tick_results )
+    v += r.iteration_actual_amount;
+  return v;
+}
+
 void stats_t::datacollection_end()
 {
   double iaa = 0;

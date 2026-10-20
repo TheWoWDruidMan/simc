@@ -52,6 +52,8 @@ public:
   timespan_t last_execute;
   extended_sample_data_t actual_amount, total_amount, portion_aps, portion_apse;
   std::vector<stats_t*> children;
+  // BracketSim (20 Oct 2026): this iteration's actual amount so far, before datacollection_end adds it to the player.
+  double iteration_actual_amount() const;
 
   struct stats_results_t
   {
