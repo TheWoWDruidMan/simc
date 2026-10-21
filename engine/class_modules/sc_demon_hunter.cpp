@@ -11586,7 +11586,9 @@ void demon_hunter_t::init_spells()
   };
 
   shadowlands_legacy.blazing_slaughter           = legacy_unity( 7698, "night_fae" );
-  shadowlands_legacy.burning_wound               = legacy( 7219 );
+  // Burning Wound procs from Demon's Bite, which only Havoc has (Vengeance's Fracture and Devourer's Consume replace
+  // it). On another spec its target debuff was never built and Immolation Aura's damage read crashed (21 Oct 2026).
+  shadowlands_legacy.burning_wound               = specialization() == DEMON_HUNTER_HAVOC && legacy( 7219 );
   shadowlands_legacy.chaos_theory                = legacy( 7050 );
   shadowlands_legacy.collective_anguish          = legacy( 7041 );
   shadowlands_legacy.darker_nature               = legacy( 7218 );
