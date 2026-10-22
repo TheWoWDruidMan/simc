@@ -95,6 +95,7 @@ enum trait_e : unsigned
   REFINED_PALATE      = 336243,  // Venthyr  / Theotar the Mad Duke (7 Oct 2026)
   PARTY_FAVORS        = 351750,  // Venthyr  / Theotar the Mad Duke (7 Oct 2026)
   PUSTULE_ERUPTION    = 351094,  // Necrolord/ Emeni        (7 Oct 2026)
+  BRONS_CALL_TO_ACTION = 333950, // Kyrian   / Forgelite Prime Mikanikos (22 Oct 2026)
 
   /*
    * VOLATILE SOLVENT, and how a spell the client no longer exports was recovered
@@ -267,6 +268,7 @@ struct effects_t
   shuffled_rng_t* newfound_doubt = nullptr;   // built at init, as class modules do (a mid-fight build crashed)
   buff_t* party_favors[ 4 ]     = {};        // the Mad Duke's Teas this actor may drink (one per fight)
   buff_t* trembling_pustules    = nullptr;   // Pustule Eruption: pustules from Fleshcraft
+  buff_t* brons_call            = nullptr;   // Bron's Call to Action: casts counted towards Bron
   unsigned party_favor_count    = 0;
 
   bool has( unsigned id ) const

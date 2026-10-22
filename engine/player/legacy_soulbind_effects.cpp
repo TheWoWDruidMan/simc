@@ -12,6 +12,9 @@
 #include "dbc/dbc.hpp"
 #include "item/item.hpp"
 #include "player/player.hpp"
+#include "player/pet.hpp"
+#include "action/attack.hpp"
+#include "action/heal.hpp"
 #include "sim/cooldown.hpp"
 #include "sim/event.hpp"
 #include "sim/proc_rng.hpp"
@@ -179,6 +182,169 @@ struct spiked_burrs_t : public spell_t
   }
 };
 
+/*
+ * BRON'S CALL TO ACTION (22 Oct 2026; until now an uncoded damage trait). "After using 75 damaging or healing spells and
+ * abilities, your next spell or ability summons Bron, who knocks enemies back on arrival and then attacks and heals your
+ * targets for 30 sec." Every spell is gone from Midnight's export; the numbers are the Shadowlands DBC on this machine and
+ * Shadowlands SimulationCraft's model (soulbinds.cpp brons_call_to_action), ported as it was:
+ *   counter 332514: 74 stacks, the next cast at 74 summons Bron (333961: 30 sec, npc 171396);
+ *   Bron's power: 2 x your spell power and 0.5 x your attack power;
+ *   Anima Cannon 332525: Arcane, 1 sec cast, every 8 sec - 0.605 x the higher of Bron's attack and spell power;
+ *   Smash 341163/341165: 2.5 sec cast, every 15 sec, Arcane to all within 3 yards - the higher of 1.1 x Bron's attack
+ *   power and 0.275 x his spell power;
+ *   Vitalizing Bolt 332526: a heal on you, 1.5 sec cast, every 4 sec (it fills Bron's time between the attacks);
+ *   a 2 sec melee swing. "Not in spell data" coefficients are Shadowlands SimulationCraft's, from logs.
+ */
+struct bron_pet_t : public pet_t
+{
+  // The higher of Bron's attack power x ap_mod and spell power x sp_mod, as Shadowlands SimulationCraft did.
+  template <typename BASE>
+  struct bron_power_t : public BASE
+  {
+    double ap_mod, sp_mod;
+    bron_power_t( std::string_view name, pet_t* p, double ap, double sp ) : BASE( name, p ), ap_mod( ap ), sp_mod( sp )
+    {
+      BASE::spell_power_mod.direct  = 1.0;
+      BASE::attack_power_mod.direct = 0.0;
+    }
+    double composite_total_spell_power() const override
+    {
+      return std::max( BASE::composite_total_attack_power() * ap_mod, BASE::composite_total_spell_power() * sp_mod );
+    }
+  };
+
+  struct anima_cannon_t : public bron_power_t<spell_t>
+  {
+    anima_cannon_t( pet_t* p, std::string_view options ) : bron_power_t<spell_t>( "anima_cannon", p, 0.605, 0.605 )
+    {
+      parse_options( options );
+      id = 332525;
+      school = SCHOOL_ARCANE;
+      base_execute_time = 1_s; trigger_gcd = 0_ms;  // no GCD in the data
+      may_crit = true;
+      interrupt_auto_attack = false;
+      travel_speed = 20.0;
+    }
+  };
+
+  struct smash_damage_t : public bron_power_t<spell_t>
+  {
+    smash_damage_t( pet_t* p ) : bron_power_t<spell_t>( "smash_damage", p, 1.1, 0.275 )
+    {
+      id = 341165;
+      school = SCHOOL_ARCANE;
+      background = may_crit = true;
+      aoe = -1;
+      radius = 3.0;
+    }
+  };
+
+  struct smash_t : public spell_t
+  {
+    smash_t( pet_t* p, std::string_view options ) : spell_t( "smash", p )
+    {
+      parse_options( options );
+      id = 341163;
+      school = SCHOOL_PHYSICAL;
+      base_execute_time = 2500_ms; trigger_gcd = 0_ms;  // no GCD in the data
+      impact_action = new smash_damage_t( p );
+      impact_action->stats = stats;
+    }
+  };
+
+  struct vitalizing_bolt_t : public bron_power_t<heal_t>
+  {
+    vitalizing_bolt_t( pet_t* p, std::string_view options ) : bron_power_t<heal_t>( "vitalizing_bolt", p, 2.3, 0.575 )
+    {
+      parse_options( options );
+      id = 332526;
+      school = SCHOOL_ARCANE;
+      base_execute_time = 1500_ms; trigger_gcd = 0_ms;  // no GCD in the data
+      interrupt_auto_attack = false;
+    }
+    void execute() override
+    {
+      target = debug_cast<pet_t*>( player )->owner;
+      heal_t::execute();
+    }
+  };
+
+  struct melee_t : public melee_attack_t
+  {
+    melee_t( pet_t* p ) : melee_attack_t( "melee", p )
+    {
+      background = repeating = may_crit = may_glance = true;
+      school = SCHOOL_PHYSICAL;
+      weapon = &p->main_hand_weapon;
+      weapon_multiplier = 1.0;
+      base_execute_time = weapon->swing_time;
+    }
+  };
+
+  struct auto_attack_t : public melee_attack_t
+  {
+    auto_attack_t( pet_t* p ) : melee_attack_t( "auto_attack", p )
+    {
+      player->main_hand_attack = new melee_t( p );
+      trigger_gcd = 0_ms;
+    }
+    bool ready() override { return !player->main_hand_attack->execute_event; }
+    void execute() override { player->main_hand_attack->schedule_execute(); }
+  };
+
+  bron_pet_t( player_t* owner ) : pet_t( owner->sim, owner, "bron" )
+  {
+    npc_id = 171396;
+    main_hand_weapon.type = WEAPON_BEAST;
+    main_hand_weapon.swing_time = 2_s;
+    owner_coeff.sp_from_sp = 2.0;
+    owner_coeff.ap_from_ap = 0.5;
+  }
+
+  void init_action_list() override
+  {
+    // Line cooldowns recreate the in-game timings (the spells carry no cooldowns), as Shadowlands SimulationCraft did.
+    action_list_str = "auto_attack/vitalizing_bolt,line_cd=4/anima_cannon,line_cd=8/smash,line_cd=15";
+    pet_t::init_action_list();
+  }
+
+  action_t* create_action( std::string_view name, std::string_view options ) override
+  {
+    if ( name == "auto_attack" ) return new auto_attack_t( this );
+    if ( name == "vitalizing_bolt" ) return new vitalizing_bolt_t( this, options );
+    if ( name == "anima_cannon" ) return new anima_cannon_t( this, options );
+    if ( name == "smash" ) return new smash_t( this, options );
+    return pet_t::create_action( name, options );
+  }
+};
+
+// Each damaging or healing cast you make (not a proc, not while Bron is out) adds a stack; the cast at 74 summons him.
+struct brons_call_cb_t : public dbc_proc_callback_t
+{
+  buff_t* counter;
+  pet_t* bron;
+
+  brons_call_cb_t( player_t* p, const special_effect_t& e, buff_t* c, pet_t* b ) : dbc_proc_callback_t( p, e ), counter( c ), bron( b ) {}
+
+  void trigger( const proc_data_t& data, player_t* target, action_state_t* state, proc_trigger_type_e type ) override
+  {
+    if ( !bron->is_sleeping() || !state || !state->action || state->action->background || state->action->player != listener )
+      return;
+    dbc_proc_callback_t::trigger( data, target, state, type );
+  }
+
+  void execute( const spell_data_t*, player_t*, action_state_t* ) override
+  {
+    if ( counter->at_max_stacks() )
+    {
+      counter->expire();
+      bron->summon( 30_s );
+    }
+    else
+      counter->trigger();
+  }
+};
+
 stat_pct_buff_type primary_pct_buff_type( const player_t* p )
 {
   switch ( p->convert_hybrid_stat( STAT_STR_AGI_INT ) )
@@ -222,6 +388,22 @@ void effects_t::create_buffs( player_t* p )
     burrs->rppm_scale_  = RPPM_NONE;
     burrs->execute_action = spiked_burrs;
     new dbc_proc_callback_t( p, *burrs );
+  }
+
+  if ( has( BRONS_CALL_TO_ACTION ) && p->is_player() )
+  {
+    brons_call = make_buff( p, "brons_call_to_action" )->set_max_stack( 74 )->set_duration( 0_ms )
+                     ->set_constant_behavior( buff_constant_behavior::NEVER_CONSTANT );
+    pet_t* bron = p->find_pet( "bron" );
+    if ( !bron )
+      bron = new bron_pet_t( p );
+    auto call = new special_effect_t( p );
+    call->name_str     = "brons_call_to_action";
+    call->type         = SPECIAL_EFFECT_EQUIP;
+    call->proc_flags_  = PF_ALL_DAMAGE | PF_ALL_HEAL | PF_PERIODIC;
+    call->proc_flags2_ = PF2_CAST_DAMAGE | PF2_CAST_HEAL;
+    call->proc_chance_ = 1.0;
+    new brons_call_cb_t( p, *call, brons_call, bron );
   }
 
   if ( has( PUSTULE_ERUPTION ) )

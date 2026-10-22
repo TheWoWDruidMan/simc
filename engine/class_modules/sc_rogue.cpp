@@ -11974,7 +11974,9 @@ void rogue_t::init_spells()
   spell.echoing_reprimand_buff = talent.rogue.echoing_reprimand->ok() ? find_spell( 470671 ) : spell_data_t::not_found();
   spell.echoing_reprimand_damage = talent.rogue.echoing_reprimand->ok() ? find_spell( 470672 ) : spell_data_t::not_found();
   spell.leeching_poison_buff = talent.rogue.leeching_poison->ok() ? find_spell( 108211 ) : spell_data_t::not_found();
-  spell.recuperator_heal = talent.rogue.recuperator->ok() ? find_spell( 426605 ) : spell_data_t::not_found();
+  // BracketSim: the conduit Recuperator (231) builds the heal without the talent (slice_and_dice_t), so it needs the
+  // spell too - without it a level 60 rogue with the conduit and no talent failed to start (22 Oct 2026).
+  spell.recuperator_heal = talent.rogue.recuperator->ok() || legacy_conduits.has( 231 ) ? find_spell( 426605 ) : spell_data_t::not_found();
   spell.shadowstep_buff = spec.shadowstep->ok() ? find_spell( 36554 ) : spell_data_t::not_found();
   spell.subterfuge_buff = talent.rogue.subterfuge->ok() ? find_spell( 115192 ) : spell_data_t::not_found();
   spell.thistle_tea = talent.rogue.thistle_tea_auto->ok() ? talent.rogue.thistle_tea_auto->effectN( 1 ).trigger() :
