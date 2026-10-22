@@ -2658,6 +2658,12 @@ bool action_t::cost_affordable()
 // options
 bool action_t::ready()
 {
+  // BracketSim (22 Oct 2026): an ability whose spell this character does not have (a talent left out of a talent string
+  // from before a tree change - a Retribution list pressing Divine Storm) is never ready, rather than stopping the whole
+  // sim in execute() with "could not find spell data". A sim that ran before never reached this.
+  if ( &data() == spell_data_t::not_found() )
+    return false;
+
   // Check conditions that do NOT pertain to the target before cycle_targets
   if ( !cooldown->is_ready() )
     return false;

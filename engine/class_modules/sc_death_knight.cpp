@@ -15531,6 +15531,12 @@ void death_knight_t::create_actions()
 
   else if ( specialization() == DEATH_KNIGHT_FROST )
   {
+    // BracketSim: Hyperpyrexia without Frost Strike (an Armory talent string from before a tree change, 22 Oct 2026)
+    // crashed the first Glacial Advance - its damage action was only made inside the Frost Strike block below.
+    if ( talent.frost.hyperpyrexia.ok() && !talent.frost.frost_strike.ok() )
+    {
+      background_actions.hyperpyrexia_damage = get_action<hyperpyrexia_damage_t>( "hyperpyrexia", this );
+    }
     if ( talent.frost.breath_of_sindragosa.ok() )
     {
       background_actions.breath_of_sindragosa_tick =

@@ -3055,8 +3055,10 @@ static void parse_traits_hash( const std::string& talents_str, player_t* player 
         if ( _tree == talent_tree::SELECTION )
         {
           throwaway = true;
-          do_error( fmt::format( "Hero tree selection node {} entry {} is not for the player's spec, ignoring.", id,
-                                 trait->id_trait_node_entry ) );
+          // BracketSim: said and ignored, as the message always claimed - it threw and refused the character (an
+          // Armory hero-tree pick from before a tree change, 22 Oct 2026 audit).
+          player->sim->error( error_level_e::TRIVIAL, "{} hero tree selection node {} entry {} is not for this spec; ignored.",
+                              *player, id, trait->id_trait_node_entry );
         }
         else
         {
@@ -3076,24 +3078,27 @@ static void parse_traits_hash( const std::string& talents_str, player_t* player 
       {
         if ( get_bit( 1 ) )  // partially ranked normal trait
         {
-          if ( trait->node_type != NODE_TIERED && node.size() > 1 )
-          {
-            do_error( fmt::format( "Non-choice node {} has multiple entries.", id ) );
-            return;
-          }
-
+          // BracketSim (22 Oct 2026 audit: Armory strings from before a tree change refused 14 characters): the rank is
+          // always read so the rest of the string stays in step; a node that has since changed shape is left out, and a
+          // rank the node no longer has is held to its new maximum - each with a Trivial warning, never a refusal.
           rank = get_bit( rank_bits );
 
-          if ( rank > max_rank )
+          if ( trait->node_type != NODE_TIERED && node.size() > 1 )
           {
-            do_error( fmt::format( "{} ranks selected for node {}, {} ranks max.", rank, id, max_rank ) );
-            return;
+            player->sim->error( error_level_e::TRIVIAL, "{} talent node {} has changed since this string; left out.",
+                                *player, id );
+            throwaway = true;
           }
-
-          if ( rank == max_rank )
+          else if ( rank > max_rank )
           {
-            do_error( fmt::format( "Partial rank for node {} but all {} ranks are allocated.", id, rank ) );
-            return;
+            player->sim->error( error_level_e::TRIVIAL, "{} talent node {}: {} ranks in the string, {} now; set to {}.",
+                                *player, id, rank, max_rank, max_rank );
+            rank = max_rank;
+          }
+          else if ( rank == max_rank )
+          {
+            player->sim->error( error_level_e::TRIVIAL, "{} talent node {}: partial rank {} is now the full rank.",
+                                *player, id, rank );
           }
         }
 
@@ -3119,11 +3124,12 @@ static void parse_traits_hash( const std::string& talents_str, player_t* player 
           size_t index = get_bit( choice_bits );
           if ( index >= node.size() )
           {
-            do_error( fmt::format( "Index {} for choice node {} out of bounds.", index, id ) );
-            return;
+            player->sim->error( error_level_e::TRIVIAL, "{} talent node {}: choice {} is not in this client data; left out.",
+                                *player, id, index );
+            throwaway = true;
           }
-
-          trait = node[ index ].first;
+          else
+            trait = node[ index ].first;
           }
         }
       }

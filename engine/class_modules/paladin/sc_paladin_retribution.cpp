@@ -909,7 +909,9 @@ struct templars_verdict_t : public holy_power_consumer_t<paladin_melee_attack_t>
 
     if ( p()->buffs.empyrean_legacy->up() )
     {
-      p()->active.empyrean_legacy->schedule_execute();
+      // BracketSim: no Divine Storm known (a talent string from before a tree change) - its free cast cannot happen.
+      if ( p()->talents.divine_storm->ok() )
+        p()->active.empyrean_legacy->schedule_execute();
       p()->buffs.empyrean_legacy->expire();
     }
 
