@@ -3060,9 +3060,11 @@ static void parse_traits_hash( const std::string& talents_str, player_t* player 
         }
         else
         {
-          do_error( fmt::format( "Selected node {} entry {} is not available to player's spec.", id,
-                                 trait->id_trait_node_entry ) );
-          return;
+          // BracketSim: a talent string from before a tree change (an Armory character not logged in since; a level 50
+          // Discipline held Angel's Mercy, now Shadow-only) is read on and that talent left out, not the character refused.
+          player->sim->error( error_level_e::TRIVIAL, "{} talent node {} entry {} is not available to this spec now; left out.",
+                              *player, id, trait->id_trait_node_entry );
+          throwaway = true;
         }
       }
 
@@ -3099,10 +3101,21 @@ static void parse_traits_hash( const std::string& talents_str, player_t* player 
         {
           if ( node[ 0 ].first->node_type != NODE_CHOICE && node[ 0 ].first->node_type != NODE_SELECTION )
           {
-            do_error( fmt::format( "Node {} is not a choice node but has index selection.", id ) );
-            return;
+            // BracketSim: the game's own export can mark a node as a choice that this client data has as a single
+            // talent (node 82589 Shield Discipline: every level 50 Discipline string taking it failed to load, 22 Oct
+            // 2026). The index is read so the rest of the string stays in step; index 0 is the one entry we have, and any
+            // other is a choice this data lacks, so it is left out rather than the whole character refused.
+            size_t index = get_bit( choice_bits );
+            if ( index != 0 )
+            {
+              player->sim->error( error_level_e::TRIVIAL,
+                                  "{} talent node {}: choice {} is not in this client data; left out.", *player, id,
+                                  index );
+              throwaway = true;
+            }
           }
-
+          else
+          {
           size_t index = get_bit( choice_bits );
           if ( index >= node.size() )
           {
@@ -3111,6 +3124,7 @@ static void parse_traits_hash( const std::string& talents_str, player_t* player 
           }
 
           trait = node[ index ].first;
+          }
         }
       }
 
