@@ -12464,7 +12464,8 @@ void demon_hunter_t::init_spells()
   {
     active.glaive_tempest = get_background_action<glaive_tempest_t>( "glaive_tempest" );
   }
-  if ( talent.havoc.collective_anguish->ok() )
+  // BracketSim legacy compatibility: the Collective Anguish runecarve (7041) summons it too, talent or not.
+  if ( talent.havoc.collective_anguish->ok() || ( shadowlands_legacy.collective_anguish && specialization() == DEMON_HUNTER_HAVOC ) )
   {
     active.collective_anguish = get_background_action<collective_anguish_t>( "collective_anguish" );
   }
