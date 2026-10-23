@@ -4199,6 +4199,7 @@ void paladin_t::create_buffs()
   buffs.legacy_blessing_of_summer =
       make_buff( this, "blessing_of_summer", legacy_covenant.blessing_of_summer )
           ->set_default_value_from_effect( 1, 0.01 )
+          ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
           // BracketSim legacy compatibility: the conduit The Long Summer (210)
           // makes Blessing of Summer last longer. Shadowlands multiplied the
           // buff's own duration by ( 1 + percent ) at construction, which is
@@ -4215,6 +4216,7 @@ void paladin_t::create_buffs()
   buffs.legacy_equinox =
       make_buff( this, "equinox", find_spell( 355567 ) )
           ->set_default_value_from_effect( 2, 0.01 )
+          ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
           ->set_chance( shadowlands_legacy.seasons_of_plenty ? 1.0 : 0.0 );
 
   buffs.legacy_divine_resonance =

@@ -7773,6 +7773,7 @@ void mage_t::create_buffs()
 
   buffs.legacy_fevered_incantation      = make_buff( this, "legacy_fevered_incantation", find_spell( 333049 ) )
                                             ->set_default_value_from_effect( 1 )
+                                            ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
                                             ->set_chance( shadowlands_legacy.fevered_incantation );
   buffs.legacy_firestorm                = make_buff( this, "legacy_firestorm", find_spell( 333100 ) )
                                             ->set_default_value_from_effect( 2 )
@@ -7794,7 +7795,8 @@ void mage_t::create_buffs()
                                     ->set_chance( shadowlands_legacy.freezing_winds );
 
   buffs.legacy_disciplinary_command        = make_buff( this, "legacy_disciplinary_command", find_spell( 327371 ) )
-                                               ->set_default_value_from_effect( 1 );
+                                               ->set_default_value_from_effect( 1 )
+                                               ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER );
   buffs.legacy_disciplinary_command_arcane = make_buff( this, "legacy_disciplinary_command_arcane", find_spell( 327369 ) )
                                                ->set_quiet( true )
                                                ->set_chance( shadowlands_legacy.disciplinary_command );

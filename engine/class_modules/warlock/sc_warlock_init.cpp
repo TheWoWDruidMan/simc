@@ -913,10 +913,15 @@ namespace warlock
     buffs.legacy_demonic_synergy =
         make_buff( this, "legacy_demonic_synergy", find_spell( 337060 ) )
             ->set_default_value_from_effect( 1 )
+            ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
             ->set_chance( shadowlands_legacy.relic_of_demonic_synergy ? 1.0 : 0.0 );
     buffs.legacy_demonic_synergy_pet =
         make_buff( this, "legacy_demonic_synergy_pet", find_spell( 337060 ) )
             ->set_default_value_from_effect( 1 )
+            ->set_stack_change_callback( [ this ]( buff_t*, int, int ) {
+              for ( auto* pet : pet_list )
+                pet->invalidate_cache( CACHE_PLAYER_DAMAGE_MULTIPLIER );
+            } )
             ->set_chance( shadowlands_legacy.relic_of_demonic_synergy ? 1.0 : 0.0 );
 
     buffs.rolling_havoc = make_buff<stat_buff_t>( this, "rolling_havoc", find_spell( 278931 ) )

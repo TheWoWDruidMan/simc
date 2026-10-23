@@ -1432,6 +1432,7 @@ void paladin_t::create_buffs_retribution()
   buffs.legacy_vanguards_momentum =
       make_buff( this, "legacy_vanguards_momentum", find_spell( 345046 ) )
           ->set_default_value_from_effect( 1 )
+          ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
           ->set_chance( shadowlands_legacy.vanguards_momentum ? 1.0 : 0.0 );
 
   // BracketSim legacy compatibility: Of Dusk and Dawn (7055). Reaching 5 Holy
@@ -1444,6 +1445,7 @@ void paladin_t::create_buffs_retribution()
   buffs.legacy_blessing_of_dawn =
       make_buff( this, "legacy_blessing_of_dawn", find_spell( 337747 ) )
           ->set_default_value_from_effect( 1 )
+          ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
           ->set_chance( shadowlands_legacy.of_dusk_and_dawn ? 1.0 : 0.0 );
 
   // BracketSim legacy compatibility: Relentless Inquisitor (7066), the
