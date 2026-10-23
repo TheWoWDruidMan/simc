@@ -2032,6 +2032,10 @@ void warlock_t::vision_of_perfection_proc()
   {
     player_t::reset();
 
+    // BracketSim: legacy counters start each fight empty (23 Oct 2026).
+    legacy_dread_calling_banked   = 0.0;
+    legacy_dread_calling_summoned = 0.0;
+
     range::for_each( sim->target_list, [ this ]( const player_t* t ) {
       if ( auto td = target_data[ t ] )
         td->reset();

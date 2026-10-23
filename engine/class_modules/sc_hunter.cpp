@@ -5466,6 +5466,14 @@ struct barbed_shot_base_t : public hunter_ranged_attack_t
       base_td_multiplier *= 1.0 + p->legacy_conduits.percent( 253 );
       cooldown->duration -= timespan_t::from_seconds( 1.0 );
     }
+
+    // BracketSim legacy compatibility: Qa'pla, Eredun War Order's damage half - Barbed Shot +10% direct and periodic
+    // (336830 effects 2 and 3). Only its Kill Command reset was coded (23 Oct 2026).
+    if ( p->shadowlands_legacy.qapla_eredun_war_order )
+    {
+      base_dd_multiplier *= 1.0 + p->find_spell( 336830 )->effectN( 2 ).percent();
+      base_td_multiplier *= 1.0 + p->find_spell( 336830 )->effectN( 3 ).percent();
+    }
   }
 
   void execute() override
@@ -10039,6 +10047,9 @@ void hunter_t::init_finished()
     for ( auto cd : { cooldowns.trueshot, cooldowns.bestial_wrath } )
       if ( cd )
         cd->duration *= 1.0 + pct;
+    // Survival's Coordinated Assault, named in the same tooltip (23 Oct 2026: it was left out).
+    if ( auto ca = find_action( "coordinated_assault" ) )
+      ca->cooldown->duration *= 1.0 + pct;
   }
 
   player_t::init_finished();

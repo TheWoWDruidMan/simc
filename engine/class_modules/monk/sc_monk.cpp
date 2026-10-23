@@ -5935,6 +5935,13 @@ struct legacy_fallen_order_t : public monk_spell_t
   int legacy_extra_every = 0;
   int legacy_tick_count  = 0;
 
+  // BracketSim: the tick count starts each fight at 0 (23 Oct 2026: it carried over between fights).
+  void reset() override
+  {
+    monk_spell_t::reset();
+    legacy_tick_count = 0;
+  }
+
   void tick( dot_t *d ) override
   {
     monk_spell_t::tick( d );

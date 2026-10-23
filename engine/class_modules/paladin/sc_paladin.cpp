@@ -3997,6 +3997,9 @@ void paladin_t::reset()
 {
   player_t::reset();
 
+  // BracketSim: Blessing of the Seasons starts on Summer every fight (23 Oct 2026: it carried over between fights).
+  legacy_next_season = 0;
+
   legacy_glimmers.clear();
   active_consecration = nullptr;
   active_boj_cons = nullptr;

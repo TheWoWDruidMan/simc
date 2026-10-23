@@ -4515,6 +4515,11 @@ struct fireball_t final : public filler_spell_t<fire_mage_spell_t>
       execute();
       duplicate = false;
     }
+
+    // BracketSim legacy compatibility: Expanded Potential - Fireball is one of its three triggers (23 Oct 2026: only
+    // Arcane Blast and Frostbolt were wired, so Fire never got a proc).
+    if ( !frostfire && !duplicate )
+      p()->buffs.legacy_expanded_potential->trigger();
   }
 
   void impact( action_state_t* s ) override
@@ -7799,9 +7804,12 @@ void mage_t::create_buffs()
   buffs.legacy_disciplinary_command_fire   = make_buff( this, "legacy_disciplinary_command_fire", find_spell( 327368 ) )
                                                ->set_quiet( true )
                                                ->set_chance( shadowlands_legacy.disciplinary_command );
+  // 2 procs a minute, haste-scaled (327489's Real PPM), not every cast (23 Oct 2026: set_chance of the flag was 100%).
   buffs.legacy_expanded_potential          = make_buff( this, "legacy_expanded_potential", find_spell( 327495 ) )
                                                ->set_activated( false )
-                                               ->set_chance( shadowlands_legacy.expanded_potential );
+                                               ->set_chance( shadowlands_legacy.expanded_potential ? 1.0 : 0.0 );
+  if ( shadowlands_legacy.expanded_potential )
+    buffs.legacy_expanded_potential->set_rppm( RPPM_HASTE, find_spell( 327489 )->real_ppm() );
   buffs.thermal_void       = make_buff( this, "thermal_void", find_spell( 1247730 ) )
                                ->set_chance( talents.thermal_void->effectN( 1 ).percent() );
 

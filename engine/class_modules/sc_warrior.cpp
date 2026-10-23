@@ -230,6 +230,7 @@ public:
     action_t* bloody_rebuke;  // Protection MID2 4pc
     // BracketSim legacy compatibility: Seismic Reverberation (Shadowlands).
     action_t* legacy_seismic_reverberation;
+    action_t* legacy_seismic_revenge = nullptr;
   } active;
 
   // Buffs
@@ -6826,6 +6827,13 @@ struct revenge_t : public warrior_attack_t
     warrior_attack_t::execute();
     p()->buff.revenge->expire();
 
+    // BracketSim legacy compatibility: Seismic Reverberation (Protection's Revenge half), 23 Oct 2026.
+    if ( p()->shadowlands_legacy.seismic_reverberation && p()->active.legacy_seismic_revenge &&
+         as<int>( target_list().size() ) >= p()->find_spell( 335758 )->effectN( 1 ).base_value() )
+    {
+      make_event( *sim, 200_ms, [ this ]() { p()->active.legacy_seismic_revenge->execute_on_target( target ); } );
+    }
+
     // BracketSim legacy compatibility: Show of Force.
     if ( p()->legacy_conduits.has( 186 ) )
       p()->buff.legacy_show_of_force->trigger();
@@ -7619,6 +7627,22 @@ struct legacy_seismic_reverberation_t : public whirlwind_arms_damage_t
     : whirlwind_arms_damage_t( name, p, whirlwind )
   {
     base_multiplier *= 1.0 + p->find_spell( 335758 )->effectN( 3 ).percent();
+  }
+};
+
+// BracketSim legacy compatibility: Seismic Reverberation for Protection - a second Revenge hit at 75% damage
+// (335759 effect 1, -25%) when Revenge hits 3 or more enemies (23 Oct 2026).
+struct legacy_seismic_revenge_t : public warrior_attack_t
+{
+  legacy_seismic_revenge_t( util::string_view name, warrior_t* p )
+    : warrior_attack_t( name, p, p->talents.protection.revenge )
+  {
+    background = dual = true;
+    aoe            = -1;
+    base_costs[ RESOURCE_RAGE ] = 0;
+    cooldown       = p->get_cooldown( "legacy_seismic_revenge" );
+    cooldown->duration = 0_ms;
+    base_multiplier *= 1.0 + p->find_spell( 335759 )->effectN( 1 ).percent();
   }
 };
 
@@ -10402,6 +10426,8 @@ void warrior_t::create_actions()
                                                        find_spell( 347363 ) );
     seismic->weapon = &main_hand_weapon;
     active.legacy_seismic_reverberation = seismic;
+    if ( specialization() == WARRIOR_PROTECTION )
+      active.legacy_seismic_revenge = new legacy_seismic_revenge_t( "legacy_seismic_revenge", this );
   }
 
   // BracketSim legacy compatibility: Signet of Tormented Kings.

@@ -10263,6 +10263,18 @@ struct death_coil_damage_base_t : public death_knight_spell_t
     }
   }
 
+  // Legacy Shadowlands: Death's Certainty, +35% Death Coil damage (334898 effect 2). On the damage action - the cast
+  // (death_coil_base_t) deals none, which is where it sat until 23 Oct 2026.
+  double composite_da_multiplier( const action_state_t* state ) const override
+  {
+    double m = death_knight_spell_t::composite_da_multiplier( state );
+
+    if ( p()->shadowlands_legacy.deaths_certainty )
+      m *= 1.0 + p()->find_spell( 334898 )->effectN( 2 ).percent();
+
+    return m;
+  }
+
   double composite_target_multiplier( player_t* target ) const override
   {
     double m = death_knight_spell_t::composite_target_multiplier( target );
@@ -10404,16 +10416,6 @@ struct death_coil_base_t : public death_knight_spell_t
     if ( p()->shadowlands_legacy.deadliest_coil && p()->buffs.dark_transformation->up() )
       p()->buffs.dark_transformation->extend_duration( timespan_t::from_seconds(
           p()->find_spell( 334949 )->effectN( 2 ).base_value() ) );
-  }
-
-  double composite_da_multiplier( const action_state_t* state ) const override
-  {
-    double m = death_knight_spell_t::composite_da_multiplier( state );
-
-    if ( p()->shadowlands_legacy.deaths_certainty )
-      m *= 1.0 + p()->find_spell( 334898 )->effectN( 2 ).percent();
-
-    return m;
   }
 };
 
@@ -18215,6 +18217,9 @@ void death_knight_t::vision_of_perfection_proc()
 void death_knight_t::reset()
 {
   parse_player_effects_t::reset();
+
+  // BracketSim: legacy counters start each fight empty (23 Oct 2026).
+  legacy_insatiable_hunger_rp = 0.0;
 
   _runes.reset();
   runic_power_decay = nullptr;

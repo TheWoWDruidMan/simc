@@ -12906,6 +12906,17 @@ std::unique_ptr<expr_t> player_t::create_expression( util::string_view expressio
       return std::make_unique<variable_expr_t>( this, splits[ 1 ] );
     }
 
+    // BracketSim: bonus_id.<n> is 1 while an equipped item carries bonus id n. A Shadowlands runeforge legendary is a
+    // bonus id, so a rotation line can be limited to characters wearing one (23 Oct 2026).
+    if ( splits[ 0 ] == "bonus_id" )
+    {
+      int bonus = util::to_int( splits[ 1 ] );
+      for ( const auto& item : items )
+        if ( range::contains( item.parsed.bonus_id, bonus ) )
+          return expr_t::create_constant( "bonus_id", 1 );
+      return expr_t::create_constant( "bonus_id", 0 );
+    }
+
     // item equipped by item_id or name or effect_name
     if ( splits[ 0 ] == "equipped" )
     {

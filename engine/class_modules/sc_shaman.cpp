@@ -9921,7 +9921,7 @@ struct healing_wave_t : public shaman_heal_t
 struct riptide_t : public shaman_heal_t
 {
   riptide_t( shaman_t* player, util::string_view options_str )
-    : shaman_heal_t("riptide", player, player->find_specialization_spell( "Riptide" ), options_str )
+    : shaman_heal_t("riptide", player, player->spec.riptide, options_str )
   {
     resurgence_gain =
         0.6 * p()->spell.resurgence->effectN( 1 ).average( player ) * p()->spec.resurgence->effectN( 1 ).percent();
@@ -12379,6 +12379,10 @@ void shaman_t::init_spells()
   // Restoration
   spec.resurgence         = find_specialization_spell( "Resurgence" );
   spec.riptide            = find_specialization_spell( "Riptide" );
+  // BracketSim: Riptide is a spec talent node in Midnight (61295); the spec lookup found nothing and the action could
+  // never be cast (23 Oct 2026).
+  if ( !spec.riptide->ok() && find_talent_spell( talent_tree::SPECIALIZATION, "Riptide" ).ok() )
+    spec.riptide = find_spell( 61295 );
   spec.tidal_waves        = find_specialization_spell( "Tidal Waves" );
   spec.restoration_shaman = find_specialization_spell( "Restoration Shaman" );
 
@@ -15446,6 +15450,9 @@ void shaman_t::vision_of_perfection_proc()
 void shaman_t::reset()
 {
   parse_player_effects_t::reset();
+
+  // BracketSim: legacy counters start each fight empty (23 Oct 2026).
+  legacy_lotfw_counter = 0;
 
   lava_surge_during_lvb = false;
   sk_during_cast        = false;

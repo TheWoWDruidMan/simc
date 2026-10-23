@@ -4139,6 +4139,16 @@ struct eye_beam_base_t : public student_of_suffering_trigger_t<final_breath_trig
   {
     base_t::last_tick( d );
 
+    // BracketSim legacy compatibility: Darkglare Medallion (7043) - Eye Beam has a 40% chance (337534 effect 1) to skip
+    // its cooldown and refund 30 Fury (350726 effect 1) (23 Oct 2026: only Fel Devastation's half was coded).
+    if ( dh()->shadowlands_legacy.darkglare_medallion &&
+         rng().roll( dh()->find_spell( 337534 )->effectN( 1 ).percent() ) )
+    {
+      dh()->cooldown.eye_beam->reset( false );
+      dh()->resource_gain( RESOURCE_FURY, dh()->find_spell( 350726 )->effectN( 1 ).base_value(),
+                           dh()->gain.darkglare_boon );
+    }
+
     // If Eye Beam is canceled early, cancel Blind Fury and skip granting Furious Gaze
     // Collective Anguish is *not* canceled when early canceling Eye Beam, however
     if ( d->current_tick < d->num_ticks() )
@@ -4337,17 +4347,14 @@ struct fel_devastation_t : public final_breath_trigger_t<demon_hunter_spell_t>
   {
     base_t::last_tick( d );
 
-    // BracketSim legacy compatibility: Darkglare Medallion. Same mechanic as the
-    // current Darkglare Boon talent, rolled separately from its own spell.
-    if ( dh()->shadowlands_legacy.darkglare_medallion )
+    // BracketSim legacy compatibility: Darkglare Medallion (7043) - Fel Devastation has a 40% chance (337534 effect 2)
+    // to skip its cooldown and refund 50 Fury (350726 effect 2). 23 Oct 2026: this read effects 3-4, which 337534
+    // does not have (0 Fury), and cut 40% every time instead of a 40% chance.
+    if ( dh()->shadowlands_legacy.darkglare_medallion &&
+         dh()->rng().roll( dh()->find_spell( 337534 )->effectN( 2 ).percent() ) )
     {
-      const spell_data_t* dm = dh()->find_spell( 337534 );
-      double base_cooldown = dh()->talent.vengeance.fel_devastation->cooldown().total_seconds();
-      timespan_t cdr = timespan_t::from_seconds(
-          dh()->rng().range( dm->effectN( 1 ).percent(), dm->effectN( 2 ).percent() ) * base_cooldown );
-      dh()->cooldown.fel_devastation->adjust( -cdr );
-      dh()->resource_gain( RESOURCE_FURY,
-                           dh()->rng().range( dm->effectN( 3 ).base_value(), dm->effectN( 4 ).base_value() ),
+      dh()->cooldown.fel_devastation->reset( false );
+      dh()->resource_gain( RESOURCE_FURY, dh()->find_spell( 350726 )->effectN( 2 ).base_value(),
                            dh()->gain.darkglare_boon );
     }
 
