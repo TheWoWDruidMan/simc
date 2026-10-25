@@ -2269,6 +2269,8 @@ static bool is_restored_chance_on_hit( unsigned spell_id )
     case 71838:  // Bryntroll, the Bone Arbiter 50415, Drain Life (13 Oct 2026 log)
     case 71839:  // Bryntroll, the Bone Arbiter 50709 heroic, Drain Life
     case 23719:  // The Untamed Blade    19334, Untamed Fury, 1.0 PPM
+    case 38282:  // Singing Crystal Axe  31318, The Blade's Song, 0.44 PPM (25 Oct 2026 logs)
+    case 17152:  // Destiny              647, Destiny, 0.80 PPM (25 Oct 2026 logs)
     case 36111:  // World Breaker        30090, 3.7/60 per hit, spent by the next attack
     case 33489:  // Blackout Truncheon   27901, Blinding Speed, 0.8 PPM
     case 34580:  // Despair              28573, Impale, 0.5 PPM

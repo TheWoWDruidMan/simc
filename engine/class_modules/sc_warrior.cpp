@@ -8531,6 +8531,7 @@ void warrior_t::init_spells()
     legacy_apl_actions.emplace_back( "ancient_aftershock" );
 
   legacy_conduits.parse();
+  legacy_conduits.drop_talent_duplicates( [ this ]( util::string_view n ) { return legacy_talent_taken( n ); } );
   azerite.legacy_simmering_rage   = find_azerite_spell( "Simmering Rage" );
   azerite.reckless_flurry         = find_azerite_spell( "Reckless Flurry" );
   azerite.pulverizing_blows       = find_azerite_spell( "Pulverizing Blows" );

@@ -2966,6 +2966,7 @@ void sim_t::register_actor_initializers()
 
   // Initialize each actor's items, construct gear information & stats
   register_actor_initializer( INIT_ACTOR_ITEMS, &player_t::init_items, "items" );
+  register_actor_initializer( INIT_ACTOR_ITEMS + 5, &player_t::strip_legacy_talent_duplicates, "legacy_talent_duplicates" );
   register_actor_initializer( INIT_ACTOR_ITEMS + 10, &player_t::init_azerite, "azerite" );
 
   // Main spell looksup. Populate class/spec/hero talents & spells.

@@ -1989,6 +1989,75 @@ void player_t::parse_temporary_enchants()
   }
 }
 
+bool player_t::legacy_talent_taken( std::string_view name ) const
+{
+  return find_talent_spell( talent_tree::CLASS, name ).ok() ||
+         find_talent_spell( talent_tree::SPECIALIZATION, name, specialization() ).ok();
+}
+
+/*
+ * BracketSim, 25 Oct 2026: a Shadowlands runeforge whose name is a talent the character has taken does nothing - the
+ * talent overrides it in game. Its bonus id is taken off the item after the items load, before any class module reads
+ * it (init_spells). Names from bracketsim-local/public/borrowed-dupes.js (tools/build-borrowed-dupes.mjs).
+ */
+void player_t::strip_legacy_talent_duplicates()
+{
+  static const std::pair<int, const char*> table[] = {
+    { 6829, "Freezing Winds" },
+    { 6931, "Fevered Incantation" },
+    { 6945, "Biting Cold" },
+    { 6953, "Superstrain" },
+    { 6956, "Thunderlord" },
+    { 6960, "Battlelord" },
+    { 6973, "Divine Image" },
+    { 6987, "Deeply Rooted Elements" },
+    { 6993, "Doom Winds" },
+    { 6999, "Primal Tide Core" },
+    { 7000, "Earthen Harmony" },
+    { 7002, "Twins of the Sun Priestess" },
+    { 7007, "Dire Command" },
+    { 7012, "Surging Shots" },
+    { 7030, "Sacrolash's Dark Strike" },
+    { 7041, "Collective Anguish" },
+    { 7047, "Fel Flame Fortification" },
+    { 7050, "Chaos Theory" },
+    { 7058, "Inflorescence of the Sunwell" },
+    { 7062, "Bulwark of Righteous Fury" },
+    { 7064, "Final Verdict" },
+    { 7066, "Relentless Inquisitor" },
+    { 7067, "Tempest of the Lightbringer" },
+    { 7071, "Jade Ignition" },
+    { 7072, "Tear of Morning" },
+    { 7073, "Yu'lon's Whisper" },
+    { 7076, "Charred Passions" },
+    { 7077, "Stormstout's Last Keg" },
+    { 7078, "Celestial Infusion" },
+    { 7081, "Fatal Touch" },
+    { 7085, "Circle of Life and Death" },
+    { 7091, "Apex Predator's Craving" },
+    { 7098, "Verdant Infusion" },
+    { 7107, "Balance of All Things" },
+    { 7115, "Dashing Scoundrel" },
+    { 7116, "Doomblade" },
+    { 7117, "Zoldyck Recipe" },
+    { 7123, "Finality" },
+    { 7125, "The Rotten" },
+    { 7160, "Rage of the Frozen Champion" },
+    { 7184, "Escape from Reality" },
+    { 7219, "Burning Wound" },
+    { 7679, "Divine Resonance" },
+  };
+  for ( auto& item : items )
+    for ( const auto& [ bonus, name ] : table )
+    {
+      auto& ids = item.parsed.bonus_id;
+      if ( !range::contains( ids, bonus ) || !legacy_talent_taken( name ) )
+        continue;
+      ids.erase( std::remove( ids.begin(), ids.end(), bonus ), ids.end() );
+      sim->print_debug( "{} legacy runeforge {} ({}) overridden by the {} talent", *this, bonus, item.name(), name );
+    }
+}
+
 void player_t::init_items()
 {
   sim->print_debug( "Initializing items for {}.", *this );

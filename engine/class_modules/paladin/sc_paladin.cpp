@@ -4838,6 +4838,7 @@ void paladin_t::init_spells()
   // stored and then silently ignored: has() returns false for everything and
   // every conduit on the class quietly does nothing.
   legacy_conduits.parse();
+  legacy_conduits.drop_talent_duplicates( [ this ]( util::string_view n ) { return legacy_talent_taken( n ); } );
 
   // The four blessings only resolve when the covenant does, so they follow the
   // driver rather than being looked up unconditionally.

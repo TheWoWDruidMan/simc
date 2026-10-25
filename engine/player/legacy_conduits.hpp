@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include "util/string_view.hpp"
@@ -338,7 +339,9 @@ struct set_t
   std::unordered_map<unsigned, unsigned> ranks;
 
   // "20:11/21:11" - the shape the BracketSimDump addon emits.
-  void parse()
+  // BracketSim, 25 Oct 2026: `talent_taken` (the actor's player_t::legacy_talent_taken) drops a conduit whose name is a
+  // talent the character has taken - in game the talent overrides it, so both must not apply.
+  void parse( const std::function<bool( util::string_view )>& talent_taken = {} )
   {
     ranks.clear();
     for ( const auto& tok : util::string_split<util::string_view>( option, "/" ) )
@@ -350,6 +353,21 @@ struct set_t
       unsigned rk = util::to_unsigned( parts[ 1 ] );
       if ( id > 0 && rk > 0 )
         ranks[ id ] = rk;
+    }
+  }
+
+  // Talent overrides (see parse); call after parse.
+  void drop_talent_duplicates( const std::function<bool( util::string_view )>& talent_taken )
+  {
+    if ( !talent_taken )
+      return;
+    for ( auto it = ranks.begin(); it != ranks.end(); )
+    {
+      const entry_t* e = find( it->first );
+      if ( e && talent_taken( e->name ) )
+        it = ranks.erase( it );
+      else
+        ++it;
     }
   }
 

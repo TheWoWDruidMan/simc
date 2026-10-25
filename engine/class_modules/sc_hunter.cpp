@@ -8676,6 +8676,7 @@ void hunter_t::init_spells()
   // (Beast Mastery -3.8%, Marksmanship -4.3%, Survival -5.0%, 3 targets -1.5%). Both work when a list throws them.
 
   legacy_conduits.parse();
+  legacy_conduits.drop_talent_duplicates( [ this ]( util::string_view n ) { return legacy_talent_taken( n ); } );
 
   legacy_azerite.dance_of_death      = find_azerite_spell( "Dance of Death" );
   legacy_azerite.dire_consequences   = find_azerite_spell( "Dire Consequences" );

@@ -1148,6 +1148,10 @@ public:
   player_talent_t find_talent_spell( talent_tree tree, std::string_view name, specialization_e s = SPEC_NONE,
                                      bool name_tokenized = false, unsigned index = 0, hero_tree_e hero_tree = HERO_NONE ) const;
   player_talent_t find_talent_spell( talent_tree tree, std::string_view name, unsigned index ) const;
+  // BracketSim, 25 Oct 2026: a taken class or spec talent of this name - it overrides the same-named Shadowlands
+  // legendary or conduit in game.
+  bool legacy_talent_taken( std::string_view name ) const;
+  void strip_legacy_talent_duplicates();
   player_talent_t find_talent_spell( talent_tree tree, unsigned spell_id, specialization_e s = SPEC_NONE  ) const;
   player_talent_t find_talent_spell( unsigned talent_entry_id ) const;
 

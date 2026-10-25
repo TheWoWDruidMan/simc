@@ -7154,6 +7154,7 @@ void mage_t::init_spells()
     legacy_apl_actions.emplace_back( "deathborne" );
 
   legacy_conduits.parse();
+  legacy_conduits.drop_talent_duplicates( [ this ]( util::string_view n ) { return legacy_talent_taken( n ); } );
 
   shadowlands_legacy.harmonic_echo    = legacy_unity( 7473, "kyrian" );
   shadowlands_legacy.heart_of_the_fae = legacy_unity( 7727, "night_fae" );

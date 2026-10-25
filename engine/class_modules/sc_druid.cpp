@@ -11296,6 +11296,7 @@ void druid_t::init_spells()
   // stored and then silently ignored: has() returns false for everything and
   // every conduit on the class quietly does nothing.
   legacy_conduits.parse();
+  legacy_conduits.drop_talent_duplicates( [ this ]( util::string_view n ) { return legacy_talent_taken( n ); } );
 
   // BracketSim legacy compatibility: report the covenant abilities this
   // actor can cast, so player_t::init_actions() can put them into the

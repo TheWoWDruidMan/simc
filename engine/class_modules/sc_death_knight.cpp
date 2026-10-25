@@ -16211,6 +16211,7 @@ void death_knight_t::init_spells()
     legacy_apl_actions.emplace_back( "death_and_decay" );
 
   legacy_conduits.parse();
+  legacy_conduits.drop_talent_duplicates( [ this ]( util::string_view n ) { return legacy_talent_taken( n ); } );
   azerite.bone_spike_graveyard     = find_azerite_spell( "Bone Spike Graveyard" );
   azerite.cold_hearted             = find_azerite_spell( "Cold Hearted" );
   azerite.deep_cuts                = find_azerite_spell( "Deep Cuts" );

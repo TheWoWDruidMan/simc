@@ -3871,6 +3871,7 @@ void priest_t::init_spells()
     legacy_apl_actions.emplace_back( "mindgames" );
 
   legacy_conduits.parse();
+  legacy_conduits.drop_talent_duplicates( [ this ]( util::string_view n ) { return legacy_talent_taken( n ); } );
   // Fae Guardians is now modelled, but only its Wrathful Faerie. The Guardian
   // Faerie is defensive, and the Benevolent Faerie's cooldown-rate effect names
   // its targets as Label 690 and Categories 1550/1592/1572/1614, which nothing

@@ -6367,6 +6367,7 @@ void monk_t::init_spells()
   legacy_covenant.bonedust_brew_damage =
       legacy_covenant.bonedust_brew->ok() ? find_spell( 325217 ) : spell_data_t::not_found();
   legacy_conduits.parse();
+  legacy_conduits.drop_talent_duplicates( [ this ]( util::string_view n ) { return legacy_talent_taken( n ); } );
 
   legacy_covenant.faeline_stomp_damage =
       legacy_covenant.faeline_stomp->ok() ? find_spell( 327264 ) : spell_data_t::not_found();

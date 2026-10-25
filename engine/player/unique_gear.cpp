@@ -90,6 +90,8 @@ namespace item
   void heartrazor( special_effect_t& );
   void night_blade( special_effect_t& );
   void untamed_blade( special_effect_t& );
+  void singing_crystal_axe( special_effect_t& );
+  void destiny( special_effect_t& );
   void blackout_truncheon( special_effect_t& );
   void despair( special_effect_t& );
   void world_breaker( special_effect_t& );
@@ -1552,6 +1554,25 @@ void item::night_blade( special_effect_t& effect )
 void item::untamed_blade( special_effect_t& effect )
 {
   weapon_stat_proc( effect, "untamed_fury", 1.0, 3.4, true );
+}
+
+/*
+ * 25 Oct 2026 (a player's report): Singing Crystal Axe (31318, The Blade's Song 38282, +haste 10 s) and Destiny (647,
+ * Destiny 17152, +Strength 10 s) were stat sticks - each driver is the buff, the Untamed Blade shape. RATES from the author's
+ * raw raid logs (warcraftlogsarchive, a level 30 Fury with Destiny main hand and Singing Crystal Axe off hand, Titan's
+ * Grip; this client's logs no longer mark the off-hand swing, so the rate is per landed weapon hit of EITHER hand, the rule
+ * the Untamed Blade and Bryntroll logs showed for Fury): Singing Crystal Axe 730 procs (applied or refreshed) from 27,517
+ * landed white and yellow hits in 57 fights = 2.65% a hit (0.44 PPM x 3.6 sec); Destiny 1,482 from 30,940 in 68 fights =
+ * 4.79% (0.80 PPM x 3.6 sec). The amounts are the client's own scaled values (stat_buff_t from the driver).
+ */
+void item::singing_crystal_axe( special_effect_t& effect )
+{
+  weapon_stat_proc( effect, "the_blades_song", 0.44, 3.6, true );
+}
+
+void item::destiny( special_effect_t& effect )
+{
+  weapon_stat_proc( effect, "destiny", 0.80, 3.6, true );
 }
 
 // BracketSim: Blackout Truncheon (27901) and Despair (28573), 23 September 2026 -
@@ -8055,6 +8076,8 @@ void unique_gear::register_special_effects()
   // on tooltip wording ("Increases attack power by", no "your"). See the handlers.
   register_special_effect( 36041,   item::heartrazor ); /* Heartrazor - 1.0 PPM (wowsims tbc) */
   register_special_effect( 23719,   item::untamed_blade ); /* The Untamed Blade - Untamed Fury, 1.0 PPM (wowsims classic) */
+  register_special_effect( 38282,   item::singing_crystal_axe ); /* Singing Crystal Axe - The Blade's Song, 0.44 PPM (the author's logs) */
+  register_special_effect( 17152,   item::destiny ); /* Destiny - 0.80 PPM (the author's logs) */
   register_special_effect( 9806,    item::phantom_blade ); /* Phantom Blade - Phantom Strike armor debuff, 2.7 PPM (the author's log) */
   register_special_effect( 144260,  item::vibroblade ); /* Vibroblade - Puncture Armor debuff, 1.4 PPM (the author's log) */
   register_special_effect( 16928,   item::annihilator ); /* Annihilator - Armor Shatter debuff x3, 1.6 PPM (the author's log) */
