@@ -8046,8 +8046,12 @@ void player_t::arise()
   if ( consumables.augmentation && consumables.augmentation_action )
     consumables.augmentation_action->execute();
   // After the flask, so that a profile which names both keeps the flask
-  // rather than silently dropping it for the elixir.
-  if ( ( consumables.battle_elixir || consumables.guardian_elixir ) && consumables.elixir_action )
+  // rather than silently dropping it for the elixir.  execute() skips the
+  // elixir's ready() check, so the flask has to be tested here: without it a
+  // profile naming both ran with both buffs for the whole fight (27 Oct 2026,
+  // a player's report: Flask of Endless Rage and Ghost Elixir together).
+  if ( ( consumables.battle_elixir || consumables.guardian_elixir ) && consumables.elixir_action &&
+       !( consumables.flask && consumables.flask->check() ) )
     consumables.elixir_action->execute();
 
   // Requires index-based lookup since on-arise callbacks may
