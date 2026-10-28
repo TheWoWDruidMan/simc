@@ -3969,7 +3969,8 @@ void hunter_t::trigger_eagles_mark( player_t* target, bool sentinel, bool force 
 
     procs.eagles_mark->occur();
 
-    cooldowns.aimed_shot->adjust( -talents.moons_blessing->effectN( 2 ).time_value() );
+    // 2026-10-22: Moon's Blessing reduces the cooldown of Aimed Shot by 2 sec per Sentinel's Mark instead of 1 sec.
+    cooldowns.aimed_shot->adjust( -talents.moons_blessing->effectN( 2 ).time_value() * ( bugs ? 2 : 1 ) );
     cooldowns.wildfire_bomb->adjust( -talents.moons_blessing->effectN( 3 ).time_value() );
 
     return;
@@ -4013,7 +4014,8 @@ void hunter_t::trigger_eagles_mark( player_t* target, bool sentinel, bool force 
 
     procs.eagles_mark->occur();
 
-    cooldowns.aimed_shot->adjust( -talents.moons_blessing->effectN( 2 ).time_value() );
+    // 2026-10-22: Moon's Blessing reduces the cooldown of Aimed Shot by 2 sec per Sentinel's Mark instead of 1 sec.
+    cooldowns.aimed_shot->adjust( -talents.moons_blessing->effectN( 2 ).time_value() * ( bugs ? 2 : 1 ) );
     cooldowns.wildfire_bomb->adjust( -talents.moons_blessing->effectN( 3 ).time_value() );
   }
 }
@@ -4113,7 +4115,8 @@ bool hunter_t::consume_howl_of_the_pack_leader( player_t* target )
 
   if ( up )
   {
-    cooldowns.barbed_shot->adjust( -talents.pack_mentality->effectN( 2 ).time_value() * up );
+    // 2026-10-22: Pack Mentality reduces the cooldown of Barbed Shot by the Wildfire Bomb value (6 sec per Beast) instead of its own (4 sec).
+    cooldowns.barbed_shot->adjust( -talents.pack_mentality->effectN( bugs ? 3 : 2 ).time_value() * up );
     cooldowns.wildfire_bomb->adjust( -talents.pack_mentality->effectN( 3 ).time_value() * up );
 
     if ( buffs.stampede_incoming->check() )
@@ -6565,6 +6568,15 @@ struct explosive_shot_t final : public explosive_shot_base_t
     return explosive_shot_base_t::ready();
   }
 
+  void update_ready( timespan_t cd_duration = timespan_t::min() ) override
+  {
+    // Recasting under Unstable Trigger does not restart the cooldown.
+    if ( p()->buffs.unstable_trigger->check() )
+      return;
+
+    explosive_shot_base_t::update_ready( cd_duration );
+  }
+
   double cost() const override
   {
     if ( p()->buffs.unstable_trigger->check() )
@@ -8349,8 +8361,6 @@ hunter_td_t::hunter_td_t( player_t* t, hunter_t* p ) : actor_target_data_t( t, p
     hydra_priority = p->rng().range( INT_MAX );
 
   double outland_venom_value = p->talents.outland_venom_debuff->effectN( 1 ).percent();
-  if ( p->bugs )
-    outland_venom_value /= 2; // 2026-01-24: Outland Venom is only giving half of its value.
   // Legacy Azerite: Steady Aim
   // BracketSim legacy (27 Sep 2026): Death Chakram's debuff, as upstream shadowlands.
   debuffs.legacy_death_chakram = make_buff( *this, "death_chakram", p->find_spell( 325037 ) )
