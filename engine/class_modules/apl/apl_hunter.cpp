@@ -143,7 +143,9 @@ void beast_mastery( player_t* p )
 
   trinkets->add_action( "use_item,name=voracious_heart_of_ulatek,if=cooldown.bestial_wrath.remains<6" );
   trinkets->add_action( "use_items,check_existing=0,slots=trinket1:trinket2,if=this_trinket.has_use_buff&(cooldown.bestial_wrath.ready|cooldown.bestial_wrath.remains<this_trinket.proc.any_dps.duration-15)|fight_remains<21" );
-  trinkets->add_action( "use_items,check_existing=0,slots=trinket1:trinket2,if=this_trinket.has_use_damage&(!potion.liquid_luster|!equipped.font_of_venomous_rage|((buff.liquid_luster.up&buff.liquid_luster.remains<6)|(fight_remains<cooldown.potion.remains&!buff.liquid_luster.up)))|fight_remains<10" );
+  // BracketSim (28 Oct 2026): the pre-12.1.5 line, kept. Upstream's bracketed fix uses only damage trinkets here, so an
+  // on-use the engine reads as neither damage nor buff (level 60 BiS: 188253, 186429) was never pressed: 60 BM -4.9%.
+  trinkets->add_action( "use_items,check_existing=0,slots=trinket1:trinket2,if=this_trinket.has_use_damage&!potion.liquid_luster|!equipped.font_of_venomous_rage|((buff.liquid_luster.up&buff.liquid_luster.remains<6)|(fight_remains<cooldown.potion.remains&!buff.liquid_luster.up))|fight_remains<10" );
 }
 //beast_mastery_apl_end
 

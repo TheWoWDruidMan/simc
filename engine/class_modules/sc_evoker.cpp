@@ -1026,7 +1026,10 @@ struct simplified_player_t : public player_t
     {
       const int crafted_item_ilvl = item_level - 3;
       const int elevated_item_ilvl = item_level == 334 ? 344 : item_level;
-      bool during_event = ( sim->dbc->wowv() >= wowv_t( 12, 1, 5 ));
+      // BracketSim (28 Oct 2026): upstream's 12.1.5 event trinkets (ilevel 340) only at its own default item level
+      // (334); a bracket ally (legacy_ilvl or 170) keeps its own level - pinned at 340 they gave level 30-70
+      // Augmentation +10 to +15%.
+      bool during_event = ( sim->dbc->wowv() >= wowv_t( 12, 1, 5 ) ) && item_level == 334;
       const int event_item_ilvl = 340;
 
       default_items               = {
