@@ -4900,6 +4900,22 @@ struct execute_main_hand_t : public warrior_attack_t
     return warrior_attack_t::n_targets();
   }
 
+  // BracketSim legacy compatibility: Harrowing Punishment (conduit 165). Fury's
+  // Condemn deals its damage through these two weapon attacks, so the bonus sits
+  // here, as in SimulationCraft's Shadowlands condemn_main/off_hand.
+  double action_multiplier() const override
+  {
+    double am = warrior_attack_t::action_multiplier();
+
+    if ( p()->legacy_covenant.condemn->ok() && p()->legacy_conduits.has( 165 ) )
+    {
+      size_t targets = std::min( sim->target_non_sleeping_list.size(), size_t( 5 ) );
+      am *= 1.0 + p()->legacy_conduits.percent( 165 ) * targets;
+    }
+
+    return am;
+  }
+
   void impact( action_state_t* state ) override
   {
     warrior_attack_t::impact( state );
@@ -4934,6 +4950,20 @@ struct execute_off_hand_t : public warrior_attack_t
       return aoe_targets + 1;
     }
     return warrior_attack_t::n_targets();
+  }
+
+  // BracketSim legacy compatibility: Harrowing Punishment (165), off-hand half.
+  double action_multiplier() const override
+  {
+    double am = warrior_attack_t::action_multiplier();
+
+    if ( p()->legacy_covenant.condemn->ok() && p()->legacy_conduits.has( 165 ) )
+    {
+      size_t targets = std::min( sim->target_non_sleeping_list.size(), size_t( 5 ) );
+      am *= 1.0 + p()->legacy_conduits.percent( 165 ) * targets;
+    }
+
+    return am;
   }
 };
 
