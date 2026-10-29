@@ -4801,6 +4801,11 @@ void paladin_t::init_spells()
   shadowlands_legacy.of_dusk_and_dawn             = legacy( 7055 );
   shadowlands_legacy.relentless_inquisitor        = legacy( 7066 );
   shadowlands_legacy.the_mad_paragon              = legacy( 7054 );
+  // BracketSim legacy compatibility (29 Oct 2026, the author, in game): The Mad Paragon and the Protection talent
+  // Zealot's Paragon do not stack - whichever is superior wins. With the legendary worn the talent does nothing, so
+  // the site's legendary search (each legendary against the gear without it) keeps whichever of the two is stronger.
+  if ( shadowlands_legacy.the_mad_paragon && talents.zealots_paragon->ok() )
+    talents.zealots_paragon = spell_data_t::not_found();
   shadowlands_legacy.the_magistrates_judgment     = legacy( 7056 );
   shadowlands_legacy.vanguards_momentum           = legacy( 7065 );
   // BracketSim legacy compatibility: Unity (bonus 8125), the 9.2 legendary whose
@@ -5067,6 +5072,15 @@ void paladin_t::init_spells()
   register_passive_affect_list( talents.blessed_champion,
                                 affect_list_t( 1 ).add_spell( 20271, 275773 ) );
 
+  // BracketSim legacy compatibility (29 Oct 2026): with The Mad Paragon worn, Zealot's Paragon's damage bonus is a passive
+  // aura parse_all_passive_talents() would still apply (its wings extension is gated on talents.zealots_paragon, cleared
+  // above), so both of its effects read 0 for this character.
+  if ( shadowlands_legacy.the_mad_paragon && find_talent_spell( talent_tree::SPECIALIZATION, "Zealot's Paragon" )->ok() )
+  {
+    const spell_data_t* zealots = find_spell( 391142 );
+    register_passive_effect_override( zealots->effectN( 1 ), 0 );
+    register_passive_effect_override( zealots->effectN( 2 ), 0 );
+  }
   parse_all_class_passives();
   parse_all_passive_talents();
   parse_all_passive_sets();
