@@ -5403,7 +5403,9 @@ void set_bonus::journey_through_time( special_effect_t& effect )
 
 void item::jeweled_signet_of_melandrus( special_effect_t& effect )
 {
-  double value = effect.driver()->effectN( 1 ).average( effect.item );
+  // BracketSim legacy compatibility (30 Oct 2026): the game shows a whole number - item level 47 reads "+2" where
+  // the scaled value is 2.99 (0.465363 x 6.429) - and the sim now matches it (the author: "match in-game"): the fraction is dropped.
+  double value = std::floor( effect.driver()->effectN( 1 ).average( effect.item ) );
   effect.player->auto_attack_modifier += value;
 }
 
