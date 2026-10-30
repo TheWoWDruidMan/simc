@@ -4822,6 +4822,11 @@ void paladin_t::init_spells()
   shadowlands_legacy.seasons_of_plenty            = legacy_unity( 7702, "night_fae" );
   shadowlands_legacy.duty_bound_gavel             = legacy_unity( 7680, "necrolord" );
   shadowlands_legacy.divine_resonance             = legacy_unity( 7679, "kyrian" );
+  // BracketSim legacy compatibility (30 Oct 2026): a taken talent overrides the same-named Shadowlands legendary
+  // (player_t::strip_legacy_talent_duplicates), but that strips only the legendary's own bonus 7679 - Unity (8125) still
+  // opened Divine Resonance for a Kyrian with the Divine Resonance talent, and both applied (60 Protection, same seed: +11.5%).
+  if ( shadowlands_legacy.divine_resonance && legacy_talent_taken( "Divine Resonance" ) )
+    shadowlands_legacy.divine_resonance = false;
   shadowlands_legacy.final_verdict                = legacy( 7064 );
   shadowlands_legacy.tempest_of_the_lightbringer  = legacy( 7067 );
   shadowlands_legacy.radiant_embers               = legacy_unity( 7701, "venthyr" );
