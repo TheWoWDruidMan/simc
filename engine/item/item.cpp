@@ -2274,6 +2274,7 @@ static bool is_restored_chance_on_hit( unsigned spell_id )
     case 36111:  // World Breaker        30090, 3.7/60 per hit, spent by the next attack
     case 33489:  // Blackout Truncheon   27901, Blinding Speed, 0.8 PPM
     case 34580:  // Despair              28573, Impale, 0.5 PPM
+    case 24388:  // The Lobotomizer      19324, Brain Damage, 0.4 PPM (30 Oct 2026)
     // 8 October 2026 - armor-shred debuffs, see armor_shred in unique_gear.cpp.
     case 9806:   // Phantom Blade        7961, Phantom Strike
     case 144260: // Vibroblade           9485, Puncture Armor

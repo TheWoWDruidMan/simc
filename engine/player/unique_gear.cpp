@@ -94,6 +94,7 @@ namespace item
   void destiny( special_effect_t& );
   void blackout_truncheon( special_effect_t& );
   void despair( special_effect_t& );
+  void lobotomizer( special_effect_t& );
   void world_breaker( special_effect_t& );
   void variable_pulse_lightning_capacitor( special_effect_t& );
   void eskhandars_right_claw( special_effect_t& );
@@ -1595,6 +1596,29 @@ void item::despair( special_effect_t& effect )
   const weapon_t* w   = effect.item ? effect.item->weapon() : nullptr;
   effect.proc_chance_ = chance_on_hit_from_ppm( 0.5, ( w && w->swing_time > timespan_t::zero() )
                                                         ? w->swing_time.total_seconds() : 3.5 );
+  effect.ppm_         = 0;
+
+  if ( effect.player->find_action( effect.name_str ) )
+    return;
+
+  effect.execute_action = create_proc_action<generic_proc_t>( effect.name_str, effect, effect.driver() );
+  chance_on_hit( effect );
+}
+
+// BracketSim: The Lobotomizer (19324, Alterac Valley vendor dagger), 30 October 2026. "Chance on hit: Wounds the target for
+// N damage and lowers Intellect of target by N for 30 sec." (Brain Damage 24388; the damage is effect 1, scaled by the item's
+// level; the target's Intellect does not change a damage sim). The item's bonus data lists 24388 as a historical
+// chance-on-hit effect, so it only runs because item.cpp is_restored_chance_on_hit lists it. RATE: 0.4 PPM (the author, 30 Oct
+// 2026; the only published figure, an emulator's own code - no log or wowsims entry), on its own hand's landed melee hits,
+// as chance_on_hit sets it, scaled by its weapon speed (1.8 sec: 1.2% a hit).
+void item::lobotomizer( special_effect_t& effect )
+{
+  effect.name_str     = "brain_damage";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  const weapon_t* w   = effect.item ? effect.item->weapon() : nullptr;
+  effect.proc_chance_ = chance_on_hit_from_ppm( 0.4, ( w && w->swing_time > timespan_t::zero() )
+                                                        ? w->swing_time.total_seconds() : 1.8 );
   effect.ppm_         = 0;
 
   if ( effect.player->find_action( effect.name_str ) )
@@ -8084,6 +8108,7 @@ void unique_gear::register_special_effects()
   register_special_effect( 36111,   item::world_breaker ); /* World Breaker - 3.7/60 per hit, spent by the next attack (wowsims tbc) */
   register_special_effect( 33489,   item::blackout_truncheon ); /* Blackout Truncheon - Blinding Speed, 0.8 PPM (wowsims tbc) */
   register_special_effect( 34580,   item::despair ); /* Despair - Impale, 0.5 PPM (wowsims tbc) */
+  register_special_effect( 24388,   item::lobotomizer ); /* The Lobotomizer - Brain Damage, 0.4 PPM (the author, 30 Oct 2026) */
   // 14 Oct 2026: the rest of the Loot Finder's CHANCE_ON_HIT weapons with a rate in wowsims (see legacy_coh_spell).
   register_special_effect( 21151,  gutgore_ripper );       /* Gutgore Ripper 17071 - 1.0 PPM (wowsims classic) */
   register_special_effect( 69180,  gutgore_ripper );       /* Rusted Gutgore Ripper 49437 */

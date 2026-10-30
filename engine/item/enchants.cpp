@@ -343,7 +343,13 @@ item_socket_color enchant::initialize_gem( item_t& item, size_t gem_idx )
   const auto& gem = item.player->dbc->item( gem_id );
   if ( gem.id == 0 )
   {
-    throw sc_invalid_item_string( fmt::format( "No gem data for id '{}'.", gem_id ) );
+    // BracketSim legacy compatibility (30 Oct 2026): a gem id this client has no data for (a player's export carried
+    // gem_id=1 on Timewalking rings) failed the whole sim with "No gem data". It is now skipped, with a warning that names
+    // it, and the socket counts as empty.
+    item.player->sim->error( "Player {} item '{}' has unknown gem id {} in socket {}, ignoring", item.player->name(),
+                             item.name(), gem_id, gem_idx + 1 );
+    item.parsed.gem_id[ gem_idx ] = 0;
+    return SOCKET_COLOR_NONE;
   }
 
   const gem_property_data_t& gem_prop = item.player->dbc->gem_property( gem.gem_properties );
