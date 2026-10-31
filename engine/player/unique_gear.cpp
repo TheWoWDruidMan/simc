@@ -5252,7 +5252,7 @@ void item::heartpierce( special_effect_t& effect )
 
   // The heroic dagger has a 12-second Invigoration spell; normal lasts 10.
   // The old implementation always selected the normal spell even for heroic.
-  const bool heroic = effect.spell_id == 71892;
+  const bool heroic = effect.spell_id == 71892;  // 71892 is no longer registered (see register_special_effect below)
   unsigned spell_id = 0;
   switch ( effect.item -> player -> primary_resource() )
   {
@@ -8167,7 +8167,8 @@ void unique_gear::register_special_effects()
   register_special_effect( 34584,  item::love_struck                     ); /* Masquerade Gown (no client data) */
   register_special_effect( 71406,  item::tiny_abomination_in_a_jar       );
   register_special_effect( 71545,  item::tiny_abomination_in_a_jar       );
-  register_special_effect( 71892,  item::heartpierce                    );
+  // 71892 (Heartpierce Heroic, 50641) is NOT registered: its proc does not fire in the live game (seen in game, 21 Sep 2026;
+  // only the 25 Normal copy procs), so the Heroic dagger sims as stats only.
   register_special_effect( 71880,  item::heartpierce                    );
   register_special_effect( 38307,  item::night_blade                    ); /* The Night Blade - item.cpp is_restored_chance_on_hit */
   register_special_effect( 71838,  item::bryntroll                      ); /* Bryntroll, the Bone Arbiter */
