@@ -2279,6 +2279,47 @@ static bool is_restored_chance_on_hit( unsigned spell_id )
     case 9806:   // Phantom Blade        7961, Phantom Strike
     case 144260: // Vibroblade           9485, Puncture Armor
     case 16928:  // Annihilator          12798, Armor Shatter
+    // 31 Oct 2026 - forty-one weapons outside the Loot Finder, see LEGACY_COH_1031 in unique_gear.cpp.
+    case 10373:  // Pendulum of Doom
+    case 144250: // Nightblade
+    case 18107:  // Gut Ripper
+    case 18289:  // Gravestone War Axe
+    case 18633:  // Frightskull Shaft
+    case 18652:  // Barovian Family Sword
+    case 18656:  // Ebon Hilt of Marduk
+    case 13519:  // Shortsword of Vengeance
+    case 13486:  // Bloodletter Scalpel
+    case 144248: // Serpent Slicer
+    case 17504:  // Bloodrazor
+    case 20883:  // Joonho's Mercy
+    case 13439:  // Hammer of the Northern Wind
+    case 144246: // Shadowblade
+    case 144244: // Hanzo Sword
+    case 16405:  // Vilerend Slicer, The Needler
+    case 16454:  // Searing Needle
+    case 16898:  // Blazing Rapier
+    case 18082:  // Volcanic Hammer
+    case 13318:  // Blood Talon
+    case 13442:  // Baron Charr's Sceptre
+    case 16921:  // Masterwork Stormhammer
+    case 18833:  // Alcor's Sunrazor
+    case 144240: // Thunderstrike
+    case 18086:  // Teebu's Blazing Longsword
+    case 18398:  // Glacial Blade
+    case 23592:  // Electrified Dagger
+    case 24251:  // Zulian Slicer
+    case 24257:  // Jeklik's Crusher
+    case 24993:  // Emerald Dragonfang
+    case 29155:  // Corrupted Ashbringer
+    case 26693:  // Neretzek, The Blood Drinker
+    case 24585:  // Blade of Unquenched Thirst
+    case 144238: // Empyrean Demolisher
+    case 144239: // Arcanite Champion
+    case 16916:  // Khorium Champion
+    case 144232: // Lionheart Champion
+    case 34513:  // Lionheart Executioner
+    case 21165:  // Dragonstrike
+    case 12686:  // Ragehammer
     // 14 Oct 2026 - rates from wowsims classic / tbc, see legacy_coh_spell in unique_gear.cpp.
     case 21151:  // Gutgore Ripper       17071
     case 69180:  // Rusted Gutgore Ripper 49437

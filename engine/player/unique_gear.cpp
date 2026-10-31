@@ -1488,7 +1488,7 @@ void item::jackhammer( special_effect_t& effect )
 // A second copy (a dual-wielded Heartrazor) shares the buff but gets its own
 // roll, as each hand's proc did.
 static void weapon_stat_proc( special_effect_t& effect, const std::string& name, double ppm,
-                              double fallback_speed, bool any_hand = false )
+                              double fallback_speed, bool any_hand = false, double chance_per_hit = 0 )
 {
   effect.name_str     = name;
   effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
@@ -1496,7 +1496,7 @@ static void weapon_stat_proc( special_effect_t& effect, const std::string& name,
   const weapon_t* w   = effect.item ? effect.item->weapon() : nullptr;
   const double speed  = ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds()
                                                                      : fallback_speed;
-  effect.proc_chance_ = chance_on_hit_from_ppm( ppm, speed );
+  effect.proc_chance_ = chance_per_hit > 0 ? chance_per_hit : chance_on_hit_from_ppm( ppm, speed );
   effect.ppm_         = 0;
 
   if ( !already_built( effect ) )
@@ -1691,6 +1691,93 @@ static void perditions_blade( special_effect_t& e )   { legacy_coh_spell( e, "pe
 static void drake_talon_cleaver( special_effect_t& e ){ legacy_coh_spell( e, "fatal_wound", 1.0, 3.4 ); }
 static void kalimdors_revenge( special_effect_t& e )  { legacy_coh_spell( e, "kalimdors_revenge_shock", 1.25, 3.6 ); }
 static void glaive_of_the_pit( special_effect_t& e )  { legacy_coh_spell( e, "glaive_of_the_pit_drain_life", 0, 3.7, 3.7 / 60.0 ); }
+
+/*
+ * BracketSim (31 Oct 2026, the author: "for the 90 with no published rate just find the proc rate from wowsims ... I can always
+ * update them in the future with combat logs"). Forty-one more old CHANCE_ON_HIT weapons, NOT in the Loot Finder, so a
+ * player wearing one can sim it. The proc spells are this client's own (amounts scale with the item's level); the RATES
+ * are wowsims', cited per row (test-results/coh-census/wowsims-blocks.json). Where Season of Discovery and the original
+ * game differ, the original's (wowsims/classic or /tbc) is used. Rates are per landed hit of the weapon's own hand, as
+ * chance_on_hit_cb_t rolls every legacy weapon. Keyed by ITEM, because a driver can be shared: Winter's Bite uses
+ * Hammer of the Northern Wind's Frost Bolt, Gurubashi Slicer/Crusher and Teebu's Scorching Straight Sword the Zul'Gurub
+ * and Teebu's spells - wowsims has no rate for those, so on them this initializer builds nothing (as before).
+ * Not here, with the reason: Warp Slicer / Devastation (wowsims rolls 50% a hit - always up, not a rate), Sword of Zeal
+ * and Ravager (a flat damage bonus and a 9 second self-channel, no builder), Bashguuder / Rivenspike (Puncture Armor 17315:
+ * armor debuffs here use log-measured flat amounts, none for this spell).
+ */
+struct legacy_coh_row_t
+{
+  unsigned item;
+  const char* name;
+  double ppm;       // per minute, scaled by the weapon's speed
+  double per_hit;   // or a flat chance per landed hit (wowsims tbc's N/60)
+  bool stat;        // a buff on the wearer (stat_buff_t from the driver), else the driver is cast at the target
+};
+
+static constexpr legacy_coh_row_t LEGACY_COH_1031[] = {
+  {  9425, "pendulum_of_doom",              0.5, 0               , false }, // classic item_effects.go:1802
+  {  1982, "nightblade",                      1, 0               , false }, // classic item_effects.go:1757
+  {  2164, "gut_ripper",                      1, 0               , false }, // classic item_effects.go:1385
+  { 13983, "gravestone_war_axe",            0.5, 0               , false }, // classic item_effects.go:1265
+  { 14531, "frightskull_shaft",             0.5, 0               , false }, // classic item_effects.go:1186
+  { 14541, "barovian_family_sword",         0.5, 0               , false }, // classic item_effects.go:301
+  { 14576, "ebon_hilt_of_marduk",             1, 0               , false }, // classic item_effects.go:851
+  {   754, "shortsword_of_vengeance",         1, 0               , false }, // classic item_effects.go:2084
+  {  9511, "bloodletter_scalpel",             1, 0               , false }, // classic item_effects.go:666
+  { 13035, "serpent_slicer",                  1, 0               , false }, // classic item_effects.go:2028
+  {   809, "bloodrazor",                      1, 0               , false }, // classic item_effects.go:669
+  { 17054, "joonhos_mercy",                   1, 0               , false }, // classic item_effects.go:1544
+  {   810, "hammer_of_the_northern_wind",   3.5, 0               , false }, // classic item_effects.go:1423
+  {  2163, "shadowblade",                     1, 0               , false }, // classic item_effects.go:2060
+  {  8190, "hanzo_sword",                     1, 0               , false }, // classic item_effects.go:1445
+  { 11603, "vilerend_slicer",                 1, 0               , false }, // classic item_effects.go:2549
+  { 12531, "searing_needle",                  1, 0               , false }, // classic item_effects.go:1966
+  { 12777, "blazing_rapier",                  1, 0               , false }, // classic item_effects.go:632
+  { 12792, "volcanic_hammer",                 1, 0               , false }, // classic item_effects.go:2557
+  { 12795, "blood_talon",                     1, 0               , false }, // classic item_effects.go:700
+  { 13060, "the_needler",                     3, 0               , false }, // classic item_effects.go:2367
+  { 18671, "baron_charrs_sceptre",            1, 0               , false }, // classic item_effects.go:296
+  { 12794, "masterwork_stormhammer",        0.5, 0               , false }, // classic item_effects.go:1692
+  { 14555, "alcors_sunrazor",                 1, 0               , false }, // classic item_effects.go:186
+  { 17223, "thunderstrike_weapon",          1.5, 0               , false }, // classic item_effects.go:2483
+  {  1728, "teebus_blazing_longsword",        1, 0               , false }, // classic item_effects.go:2273
+  { 19099, "glacial_blade",                 1.4, 0               , false }, // classic item_effects.go:1260
+  { 19100, "electrified_dagger",            1.4, 0               , false }, // classic item_effects.go:887
+  { 19901, "zulian_slicer",                 1.2, 0               , false }, // classic item_effects.go:2616
+  { 19918, "jekliks_crusher",                 4, 0               , false }, // classic item_effects.go:1541 (Season of Discovery: 1.5)
+  { 20578, "emerald_dragonfang",              1, 0               , false }, // classic item_effects.go:892
+  { 22691, "corrupted_ashbringer",          1.6, 0               , false }, // classic item_effects/phase_6.go:30 (Season of Discovery: 2.0)
+  { 21856, "neretzek_drain_life",           0.8, 0               , false }, // sod vanilla/item_effects.go:1551 (only source)
+  { 31193, "blade_of_unquenched_thirst",      0, 0.02            , false }, // tbc melee_items.go:768, 2% a hit
+  { 17112, "empyrean_demolisher",             1, 0               , true  }, // classic item_effects.go:896 (SoD 0.6, tbc 2.8/60 a hit)
+  { 12790, "arcanite_champion",               1, 0               , true  }, // classic item_effects.go:215
+  { 23541, "khorium_champion",                0, 0.5 * 3.3 / 60.0, true  }, // tbc melee_items.go:199, 0.5 x 3.3/60 a hit
+  { 28429, "lionheart_champion",              0, 3.6 / 60.0      , true  }, // tbc melee_items.go:257, 3.6/60 a hit
+  { 28430, "lionheart_executioner",           0, 3.6 / 60.0      , true  }, // tbc melee_items.go:283, 3.6/60 a hit
+  { 28439, "dragonstrike",                    0, 2.7 / 60.0      , true  }, // tbc melee_items.go:362, 2.7/60 a hit
+  { 10626, "ragehammer",                      1, 0               , true  }, // classic item_effects.go:1844; its flat +20 physical damage a hit is not modelled
+};
+
+static void legacy_coh_1031( special_effect_t& effect )
+{
+  const unsigned id = effect.item ? effect.item->parsed.data.id : 0;
+  for ( const auto& row : LEGACY_COH_1031 )
+  {
+    if ( row.item != id )
+      continue;
+    if ( row.stat )
+      weapon_stat_proc( effect, row.name, row.ppm, 2.6, false, row.per_hit );
+    else
+    {
+      // The spell is cast at the target; a second effect that lowers the TARGET's stats (Frightskull Shaft's Strength) is
+      // no buff for the wearer - the generic builder hung it on the wearer (-2.8% on a level 30 Fury), as Gutgore Ripper's.
+      effect.disable_buff();
+      legacy_coh_spell( effect, row.name, row.ppm, 2.6, row.per_hit );
+    }
+    return;
+  }
+  effect.type = SPECIAL_EFFECT_NONE;  // another item on a shared driver: no published rate, so nothing (as before)
+}
 
 static void the_bladefist( special_effect_t& effect )
 {
@@ -8126,6 +8213,47 @@ void unique_gear::register_special_effects()
   register_special_effect( 35131,  the_bladefist );        /* The Bladefist 29348 - 2.7/60 a hit (wowsims tbc) */
   register_special_effect( 36070,  rod_of_the_sun_king );  /* Rod of the Sun King 29996 - 2.7/60 a hit (wowsims tbc) */
   register_special_effect( 40291,  syphon_of_the_nathrezim ); /* Syphon of the Nathrezim 32262 - 1.0 PPM (wowsims tbc) */
+  // 31 Oct 2026: forty-one old CHANCE_ON_HIT weapons outside the Loot Finder, wowsims rates (see LEGACY_COH_1031).
+  register_special_effect( 10373 , legacy_coh_1031 ); /* Pendulum of Doom */
+  register_special_effect( 144250, legacy_coh_1031 ); /* Nightblade */
+  register_special_effect( 18107 , legacy_coh_1031 ); /* Gut Ripper */
+  register_special_effect( 18289 , legacy_coh_1031 ); /* Gravestone War Axe */
+  register_special_effect( 18633 , legacy_coh_1031 ); /* Frightskull Shaft */
+  register_special_effect( 18652 , legacy_coh_1031 ); /* Barovian Family Sword */
+  register_special_effect( 18656 , legacy_coh_1031 ); /* Ebon Hilt of Marduk */
+  register_special_effect( 13519 , legacy_coh_1031 ); /* Shortsword of Vengeance */
+  register_special_effect( 13486 , legacy_coh_1031 ); /* Bloodletter Scalpel */
+  register_special_effect( 144248, legacy_coh_1031 ); /* Serpent Slicer */
+  register_special_effect( 17504 , legacy_coh_1031 ); /* Bloodrazor */
+  register_special_effect( 20883 , legacy_coh_1031 ); /* Joonho's Mercy */
+  register_special_effect( 13439 , legacy_coh_1031 ); /* Hammer of the Northern Wind (and Winter's Bite: nothing) */
+  register_special_effect( 144246, legacy_coh_1031 ); /* Shadowblade */
+  register_special_effect( 144244, legacy_coh_1031 ); /* Hanzo Sword */
+  register_special_effect( 16405 , legacy_coh_1031 ); /* Vilerend Slicer, The Needler */
+  register_special_effect( 16454 , legacy_coh_1031 ); /* Searing Needle */
+  register_special_effect( 16898 , legacy_coh_1031 ); /* Blazing Rapier */
+  register_special_effect( 18082 , legacy_coh_1031 ); /* Volcanic Hammer */
+  register_special_effect( 13318 , legacy_coh_1031 ); /* Blood Talon */
+  register_special_effect( 13442 , legacy_coh_1031 ); /* Baron Charr's Sceptre */
+  register_special_effect( 16921 , legacy_coh_1031 ); /* Masterwork Stormhammer */
+  register_special_effect( 18833 , legacy_coh_1031 ); /* Alcor's Sunrazor */
+  register_special_effect( 144240, legacy_coh_1031 ); /* Thunderstrike (and Reclaimed Thunderstrike: nothing) */
+  register_special_effect( 18086 , legacy_coh_1031 ); /* Teebu's Blazing Longsword (and the Scorching remake: nothing) */
+  register_special_effect( 18398 , legacy_coh_1031 ); /* Glacial Blade */
+  register_special_effect( 23592 , legacy_coh_1031 ); /* Electrified Dagger */
+  register_special_effect( 24251 , legacy_coh_1031 ); /* Zulian Slicer (and Gurubashi Slicer: nothing) */
+  register_special_effect( 24257 , legacy_coh_1031 ); /* Jeklik's Crusher (and Gurubashi Crusher: nothing) */
+  register_special_effect( 24993 , legacy_coh_1031 ); /* Emerald Dragonfang */
+  register_special_effect( 29155 , legacy_coh_1031 ); /* Corrupted Ashbringer */
+  register_special_effect( 26693 , legacy_coh_1031 ); /* Neretzek, The Blood Drinker */
+  register_special_effect( 24585 , legacy_coh_1031 ); /* Blade of Unquenched Thirst */
+  register_special_effect( 144238, legacy_coh_1031 ); /* Empyrean Demolisher */
+  register_special_effect( 144239, legacy_coh_1031 ); /* Arcanite Champion */
+  register_special_effect( 16916 , legacy_coh_1031 ); /* Khorium Champion */
+  register_special_effect( 144232, legacy_coh_1031 ); /* Lionheart Champion */
+  register_special_effect( 34513 , legacy_coh_1031 ); /* Lionheart Executioner */
+  register_special_effect( 21165 , legacy_coh_1031 ); /* Dragonstrike */
+  register_special_effect( 12686 , legacy_coh_1031 ); /* Ragehammer */
   register_special_effect( 250765, ampoule_of_pure_void );    /* Ampoule of Pure Void 151312 - use: 10 sec Shadow pool */
   register_special_effect( 96887,   item::variable_pulse_lightning_capacitor ); /* VPLC - wowsims cata */
   register_special_effect( 97119,   item::variable_pulse_lightning_capacitor ); /* VPLC (heroic) - wowsims cata */
