@@ -5831,7 +5831,13 @@ struct the_hunt_base_t
 
     void impact( action_state_t* s ) override
     {
-      impact_action->target_cache.is_valid = false;
+      // BracketSim legacy compatibility: the Night Fae The Hunt (no talent)
+      // has no damage over time here - its impact spell names none - so
+      // active.the_hunt_dot is only made for the talents and stays empty.
+      // Upstream's 9 Sep 2026 change read it unguarded and crashed every
+      // covenant-only Vengeance and Devourer when The Hunt landed.
+      if ( impact_action )
+        impact_action->target_cache.is_valid = false;
 
       base_t::impact( s );
 
