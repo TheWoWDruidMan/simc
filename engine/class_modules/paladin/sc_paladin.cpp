@@ -4926,7 +4926,11 @@ void paladin_t::init_spells()
   // talents.divine_toll from the covenant block above dereferences a pointer
   // that is not assigned until here, and the simulator dies with no output at
   // all - which looks exactly like a crash in the profile rather than in this.
-  if ( !talents.divine_toll->ok() && legacy_covenant.divine_toll->ok() )
+  //
+  // Not for Holy (31 Oct 2026, measured on the player path, same seed, 4,000 it.): BracketSim sims a Holy Paladin for
+  // damage, and pressing Divine Toll there LOSES it - a Kyrian Holy without the talent -0.56% (no soulbinds), -0.58%
+  // Kleia, -0.52% Mikanikos; with the talent, a line before Holy Shock -0.15..-0.59% at every bracket.
+  if ( !talents.divine_toll->ok() && legacy_covenant.divine_toll->ok() && specialization() != PALADIN_HOLY )
     legacy_apl_actions.emplace_back( "divine_toll" );
   talents.unbound_freedom                 = find_talent_spell( talent_tree::CLASS, "Unbound Freedom" );
   talents.sanctified_plates               = find_talent_spell( talent_tree::CLASS, "Sanctified Plates" );
