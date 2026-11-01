@@ -1536,9 +1536,12 @@ void item::heartrazor( special_effect_t& effect )
  * roll it, as for Heartpierce: 12 / 470 = 2.55% a roll, every weapon hit either hand and every poison hit. (wowsims/tbc
  * has 2 PPM own hand; 6% on every hit would have given ~18 procs.)
  */
+// 1 Nov 2026: two Night Blades (not unique, one-hand dagger) give two buffs, each stacking to 3, as two Untamed Blades and
+// two Crusaders do; the off-hand blade's is the_dark_of_night_oh. Each keeps its own rolls (weapon hits and poison hits).
 void item::night_blade( special_effect_t& effect )
 {
-  weapon_stat_proc( effect, "the_dark_of_night", 0.85, 1.8, true );  // 0.85 PPM x 1.8 sec = 2.55% a hit
+  const bool off_hand = effect.item && effect.item->slot == SLOT_OFF_HAND;
+  weapon_stat_proc( effect, off_hand ? "the_dark_of_night_oh" : "the_dark_of_night", 0.85, 1.8, true );  // 0.85 PPM x 1.8 sec = 2.55% a hit
 
   buff_t* buff = effect.custom_buff;
   player_t* p = effect.player;
