@@ -3885,9 +3885,11 @@ struct ledger_t final : public buff_t
   {
     double phantom = std::max( value_of( "phantom_strike" ), value_of( "ally_phantom_strike" ) );
     double big     = std::max( { value_of( "puncture_armor" ), value_of( "ally_puncture_armor" ),
-                                 value_of( "armor_shatter" ), value_of( "ally_armor_shatter" ),
-                                 value_of( "dazzling_faerie_fire" ) } );  // see item::dazzling_longsword
-    double want    = std::clamp( phantom + big, 0.0, std::max( 0.0, player->current.stats.armor + applied ) );
+                                 value_of( "armor_shatter" ), value_of( "ally_armor_shatter" ) } );
+    // Dazzling Longsword's Faerie Fire stacks with none of the others: it counts only when it is worth more than they are
+    // together (see item::dazzling_longsword).
+    double total   = std::max( phantom + big, value_of( "dazzling_faerie_fire" ) );
+    double want    = std::clamp( total, 0.0, std::max( 0.0, player->current.stats.armor + applied ) );
     double delta   = want - applied;
     if ( delta > 0 )
       player->stat_loss( STAT_ARMOR, delta );
@@ -4022,8 +4024,8 @@ void item::annihilator( special_effect_t& effect )
  * Chance on hit: Faerie Fire (13752), the target's armor -67 for 30 sec. Like the three above its spell stops at
  * level 49, so it works in the 30-45 brackets only. Rate 0.17 PPM: a ranked log of a level 30 Outlaw Rogue with it
  * in the off hand, 11 procs in 1,486 hits (0.74% a hit at 2.6 speed). The 67 is the tooltip's (Phantom Strike's
- * tooltip doubled what the game takes) and whether it adds to Vibroblade or Annihilator is not known, so it is put
- * with them: the largest of the three counts. A dummy log would settle both.
+ * tooltip doubled what the game takes). STACKING (1 Nov 2026, the author): it does not stack with Vibroblade or Phantom
+ * Blade; Annihilator is treated the same. With others up it counts only when it is worth more than they are together.
  */
 void item::dazzling_longsword( special_effect_t& effect )
 {
