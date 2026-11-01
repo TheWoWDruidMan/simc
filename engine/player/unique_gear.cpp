@@ -1632,18 +1632,43 @@ void item::lobotomizer( special_effect_t& effect )
 // BracketSim: Headmaster's Charge (13937, Darkmaster Gandling, Scholomance), 1 November 2026 (the author: "gives main stat to
 // party members"). "Use: Gives $M1 additional intellect to party members within $a1 yards" (18264: a 15 minute party
 // aura, Intellect scaled by the item's level; the item's use has a 10 minute cooldown). Upstream builds nothing from a party
-// aura. Fifteen minutes outlasts any fight and it is used before the pull, so the wearer has it from the first second; the
-// party's copies are other players and are not simmed.
+// aura. Fifteen minutes outlasts any fight and it is used before the pull, so the wearer has it from the first second.
+// THE PARTY (1 Nov 2026, the author: "would give the other players the buff"): in a sim with other players (an Augmentation
+// group's allies) up to 4 of them get the same Intellect - a 5-player party, damage dealers before tanks, in the order
+// they were written. A raid larger than a party leaves the rest out, so the item is never credited to more than its
+// party. Their buff is "headmasters_charge_party" in their own report.
 void item::headmasters_charge( special_effect_t& effect )
 {
   if ( !buff_t::find( effect.player, "headmasters_charge" ) )
   {
     const double amount = effect.driver()->effectN( 1 ).average( effect.item );
-    auto buff = make_buff<stat_buff_t>( effect.player, "headmasters_charge", effect.driver(), effect.item );
-    buff->stats.clear();
-    buff->add_stat( STAT_INTELLECT, amount );
-    buff->set_duration( effect.driver()->duration() );
-    effect.player->register_combat_begin( [ buff ]( player_t* ) { buff->trigger(); } );
+    auto make = [ & ]( player_t* p, util::string_view name ) {
+      auto b = make_buff<stat_buff_t>( p, name, effect.driver(), effect.item );
+      b->stats.clear();
+      b->add_stat( STAT_INTELLECT, amount );
+      b->set_duration( effect.driver()->duration() );
+      return b;
+    };
+    buff_t* own = make( effect.player, "headmasters_charge" );
+    std::vector<buff_t*> others;
+    for ( player_t* p : effect.player->sim->player_list )
+    {
+      if ( p == effect.player || p->is_pet() || p->is_enemy() )
+        continue;
+      others.push_back( buff_t::find( p, "headmasters_charge_party" ) ? buff_t::find( p, "headmasters_charge_party" )
+                                                                     : make( p, "headmasters_charge_party" ) );
+    }
+    effect.player->register_combat_begin( [ own, others ]( player_t* ) {
+      own->trigger();
+      int given = 0;
+      for ( int pass = 0; pass < 2 && given < 4; pass++ )  // damage dealers first, then tanks
+        for ( buff_t* b : others )
+          if ( given < 4 && ( ( b->player->primary_role() == ROLE_TANK ) == ( pass == 1 ) ) )
+          {
+            b->trigger();
+            given++;
+          }
+    } );
   }
   effect.type = SPECIAL_EFFECT_NONE;  // no use action: it is already up
 }

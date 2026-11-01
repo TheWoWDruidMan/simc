@@ -1377,9 +1377,9 @@ struct evoker_t : public player_t
     double legacy_ally_int_scale                               = -1;
   } option;
 
-  // BracketSim support lines: Ebon Might, Shifting Sands, Prescience
-  action_t* support_lines[ 3 ] = { nullptr, nullptr, nullptr };
-  void credit_support( player_t* ally, result_amount_type rt, action_state_t* s );
+  // BracketSim support lines: Ebon Might, Shifting Sands, Prescience, Headmaster's Charge (when the Aug wears it)
+  action_t* support_lines[ 4 ] = { nullptr, nullptr, nullptr, nullptr };
+  void credit_support( player_t* ally, result_amount_type rt, action_state_t* s, buff_t* staff = nullptr );
 
   // Action pointers
   struct actions_t
@@ -10068,8 +10068,10 @@ void evoker_t::init_finished()
     {
       if ( ally == this )
         continue;
-      auto hook = [ this, ally ]( result_amount_type rt, action_state_t* s ) {
-        credit_support( ally, rt, s );
+      // The staff's copy on this ally, when this Aug wears Headmaster's Charge (made at item init, before this runs).
+      buff_t* staff = support_lines[ 3 ] ? buff_t::find( ally, "headmasters_charge_party" ) : nullptr;
+      auto hook = [ this, ally, staff ]( result_amount_type rt, action_state_t* s ) {
+        credit_support( ally, rt, s, staff );
         return assessor::CONTINUE;
       };
       ally->assessor_out_damage.add( assessor::TARGET_DAMAGE + 2, hook );
@@ -10085,7 +10087,8 @@ void evoker_t::init_finished()
 //   Prescience      hit x (its crit chance / (1 + the hit's crit chance)), the ally's own hits
 // Evoker effects that run as the ally's damage (Blistering Scales, Infernos Blessing, Fate Mirror, Bombardments,
 // Breath of Eons) move whole to the Aug's line of the same name. A stand-in's flat proc does not scale with Int.
-void evoker_t::credit_support( player_t* ally, result_amount_type rt, action_state_t* s )
+//   Headmaster's Charge (1 Nov 2026) hit x (Intellect the staff gave / the ally's Intellect now), Intellect allies only
+void evoker_t::credit_support( player_t* ally, result_amount_type rt, action_state_t* s, buff_t* staff )
 {
   if ( ( rt != result_amount_type::DMG_DIRECT && rt != result_amount_type::DMG_OVER_TIME ) || !s->action ||
        s->result_amount <= 0 )
@@ -10133,6 +10136,19 @@ void evoker_t::credit_support( player_t* ally, result_amount_type rt, action_sta
     if ( c > 0 )
       debug_cast<spells::support_credit_t*>( support_lines[ 2 ] )
           ->credit( amt * c / ( 1.0 + std::clamp( s->composite_crit_chance(), 0.0, 1.0 ) ), s->target );
+  }
+
+  if ( staff && staff->check() && s->action->name_str != "simple_proc" &&
+       ally->convert_hybrid_stat( STAT_STR_AGI_INT ) == STAT_INTELLECT )
+  {
+    auto sb = debug_cast<stat_buff_t*>( staff );
+    if ( !sb->stats.empty() )
+    {
+      double given = sb->stats[ 0 ].current_value * ally->composite_attribute_multiplier( ATTR_INTELLECT );
+      double total = ally->cache.get_attribute( ATTR_INTELLECT );
+      if ( total > 0 && given > 0 )
+        debug_cast<spells::support_credit_t*>( support_lines[ 3 ] )->credit( amt * std::min( 1.0, given / total ), s->target );
+    }
   }
 }
 
@@ -10648,6 +10664,9 @@ void evoker_t::create_actions()
     support_lines[ 0 ] = new support_credit_t( this, "ebon_might_support", 395152 );
     support_lines[ 1 ] = new support_credit_t( this, "shifting_sands_support", 413984 );
     support_lines[ 2 ] = new support_credit_t( this, "prescience_support", 410089 );
+    // 1 Nov 2026: Headmaster's Charge (13937) gives the party Intellect (unique_gear.cpp headmasters_charge).
+    if ( find_item_by_id( 13937 ) )
+      support_lines[ 3 ] = new support_credit_t( this, "headmasters_charge_support", 18264 );
   }
 
   if ( sets->has_set_bonus( EVOKER_DEVASTATION, DF2, B2 ) )
