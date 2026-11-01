@@ -2279,6 +2279,7 @@ static bool is_restored_chance_on_hit( unsigned spell_id )
     case 9806:   // Phantom Blade        7961, Phantom Strike
     case 144260: // Vibroblade           9485, Puncture Armor
     case 16928:  // Annihilator          12798, Armor Shatter
+    case 13752:  // Dazzling Longsword   869, Faerie Fire (1 Nov 2026)
     // 31 Oct 2026 - forty-one weapons outside the Loot Finder, see LEGACY_COH_1031 in unique_gear.cpp.
     case 10373:  // Pendulum of Doom
     case 144250: // Nightblade

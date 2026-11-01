@@ -532,10 +532,40 @@ void secondary_weapon_enchant( special_effect_t& effect )
   new dbc_proc_callback_t( effect.player, effect );
 }
 
+/*
+ * BLASPHEMITE COLOURS (1 Nov 2026, the author's in-game tests): the tooltip counts "Algari gem colors in Helm, Neck, Wrists,
+ * Waist or Rings", and the game does the same. Three crit-damage tests on a level 30 Demonology Warlock: one colour gave
+ * x2.003-2.005, five colours in those slots x2.013-2.017, and one colour there plus three others in shoulder, chest,
+ * hands and feet x2.004 (one colour). Every other slot's gems do not count.
+ */
+static size_t blasphemite_colors( player_t* p )
+{
+  std::vector<unsigned> found;
+  for ( const auto& item : p->items )
+  {
+    switch ( item.slot )
+    {
+      case SLOT_HEAD: case SLOT_NECK: case SLOT_WRISTS: case SLOT_WAIST: case SLOT_FINGER_1: case SLOT_FINGER_2:
+        break;
+      default:
+        continue;
+    }
+    for ( auto gem_id : item.parsed.gem_id )
+    {
+      if ( !gem_id )
+        continue;
+      const auto& prop = p->dbc->gem_property( p->dbc->item( gem_id ).gem_properties );
+      if ( range::contains( gem_colors, prop.desc_id ) && !range::contains( found, prop.desc_id ) )
+        found.push_back( prop.desc_id );
+    }
+  }
+  return found.size();
+}
+
 // 435500 driver
 void culminating_blasphemite( special_effect_t& effect )
 {
-  auto pct = effect.driver()->effectN( 1 ).percent() * unique_gem_list( effect.player, gem_colors ).size();
+  auto pct = effect.driver()->effectN( 1 ).percent() * blasphemite_colors( effect.player );
   // check for prismatic null stone
   if ( auto null_stone = find_special_effect( effect.player, 435992 ) )
     pct *= 1.0 + null_stone->driver()->effectN( 1 ).percent();
@@ -549,7 +579,7 @@ void culminating_blasphemite( special_effect_t& effect )
 // 435488 driver
 void insightful_blasphemite( special_effect_t& effect )
 {
-  auto pct = effect.driver()->effectN( 1 ).percent() * unique_gem_list( effect.player, gem_colors ).size();
+  auto pct = effect.driver()->effectN( 1 ).percent() * blasphemite_colors( effect.player );
   // check for prismatic null stone
   if ( auto null_stone = find_special_effect( effect.player, 435992 ) )
     pct *= 1.0 + null_stone->driver()->effectN( 1 ).percent();

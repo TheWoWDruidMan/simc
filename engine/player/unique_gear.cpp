@@ -109,6 +109,7 @@ namespace item
   void shadowmourne( special_effect_t& );
   void phantom_blade( special_effect_t& );
   void vibroblade( special_effect_t& );
+  void dazzling_longsword( special_effect_t& );
   void annihilator( special_effect_t& );
   void nibelung( special_effect_t& );
   void dislodged_foreign_object( special_effect_t& );
@@ -3884,7 +3885,8 @@ struct ledger_t final : public buff_t
   {
     double phantom = std::max( value_of( "phantom_strike" ), value_of( "ally_phantom_strike" ) );
     double big     = std::max( { value_of( "puncture_armor" ), value_of( "ally_puncture_armor" ),
-                                 value_of( "armor_shatter" ), value_of( "ally_armor_shatter" ) } );
+                                 value_of( "armor_shatter" ), value_of( "ally_armor_shatter" ),
+                                 value_of( "dazzling_faerie_fire" ) } );  // see item::dazzling_longsword
     double want    = std::clamp( phantom + big, 0.0, std::max( 0.0, player->current.stats.armor + applied ) );
     double delta   = want - applied;
     if ( delta > 0 )
@@ -3918,6 +3920,8 @@ static double flat_amount( util::string_view name )
     return 90.0;
   if ( name == "armor_shatter" || name == "ally_armor_shatter" )
     return 110.0 / 3.0;  // per stack
+  if ( name == "dazzling_faerie_fire" )
+    return 67.0;  // the tooltip's figure, not yet read off a log (see item::dazzling_longsword)
   return 0.0;
 }
 
@@ -4011,6 +4015,19 @@ void item::vibroblade( special_effect_t& effect )
 void item::annihilator( special_effect_t& effect )
 {
   armor_shred::weapon( effect, "armor_shatter", 1.6 );
+}
+
+/*
+ * DAZZLING LONGSWORD (869, 1 Nov 2026, the author: "code this in just so people who have it can sim it"; on no loot table).
+ * Chance on hit: Faerie Fire (13752), the target's armor -67 for 30 sec. Like the three above its spell stops at
+ * level 49, so it works in the 30-45 brackets only. Rate 0.17 PPM: a ranked log of a level 30 Outlaw Rogue with it
+ * in the off hand, 11 procs in 1,486 hits (0.74% a hit at 2.6 speed). The 67 is the tooltip's (Phantom Strike's
+ * tooltip doubled what the game takes) and whether it adds to Vibroblade or Annihilator is not known, so it is put
+ * with them: the largest of the three counts. A dummy log would settle both.
+ */
+void item::dazzling_longsword( special_effect_t& effect )
+{
+  armor_shred::weapon( effect, "dazzling_faerie_fire", 0.17 );
 }
 
 /*
@@ -8444,6 +8461,7 @@ void unique_gear::register_special_effects()
   register_special_effect( 9806,    item::phantom_blade ); /* Phantom Blade - Phantom Strike armor debuff, 2.7 PPM (the author's log) */
   register_special_effect( 144260,  item::vibroblade ); /* Vibroblade - Puncture Armor debuff, 1.4 PPM (the author's log) */
   register_special_effect( 16928,   item::annihilator ); /* Annihilator - Armor Shatter debuff x3, 1.6 PPM (the author's log) */
+  register_special_effect( 13752,   item::dazzling_longsword ); /* Dazzling Longsword - Faerie Fire armor debuff, 0.17 PPM (ranked log) */
   register_special_effect( 36111,   item::world_breaker ); /* World Breaker - 3.7/60 per hit, spent by the next attack (wowsims tbc) */
   register_special_effect( 33489,   item::blackout_truncheon ); /* Blackout Truncheon - Blinding Speed, 0.8 PPM (wowsims tbc) */
   register_special_effect( 34580,   item::despair ); /* Despair - Impale, 0.5 PPM (wowsims tbc) */
