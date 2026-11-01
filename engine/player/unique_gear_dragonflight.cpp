@@ -7752,7 +7752,13 @@ void bronzed_grip_wrappings( special_effect_t& effect )
 
     void execute( const spell_data_t* spell, player_t* t, action_state_t* s ) override
     {
-      if ( t->is_sleeping() )
+      /*
+       * BracketSim, 1 Nov 2026: a proc that comes with no action state (or no target) read s->action and crashed the
+       * sim - about 6 runs in 10 for a level 70 Havoc, Devourer or Vengeance Demon Hunter, Holy Priest or Warlock with
+       * it on the weapon, upstream too. The default execute (dbc_proc_callback.cpp) checks the state first; only a
+       * white hit procs here (see above), and a proc with no state is not one.
+       */
+      if ( !t || !s || !s->action || t->is_sleeping() )
         return;
 
       if ( execute_fn )
