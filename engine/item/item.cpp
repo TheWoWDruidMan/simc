@@ -2320,6 +2320,50 @@ static bool is_restored_chance_on_hit( unsigned spell_id )
     case 34513:  // Lionheart Executioner
     case 21165:  // Dragonstrike
     case 12686:  // Ragehammer
+    // 1 Nov 2026 - fifty more, see LEGACY_COH_1101 in unique_gear.cpp.
+    case 20869:  // Glacial Stone
+    case 144272: // Tranquillien Flamberge, Ghoulfang
+    case 18077:  // Venom Web Fang
+    case 18092:  // Shiver Blade
+    case 18217:  // Duskbringer
+    case 144271: // Black Malice
+    case 18197:  // Serpent's Kiss
+    case 13480:  // Night Reaver
+    case 144268: // Shadowfang, Skeletal Club
+    case 16413:  // Searing Blade
+    case 13491:  // Iron Knuckles
+    case 13518:  // Blackvenom Blade
+    case 16400:  // Naraxis' Fang
+    case 144265: // Wyvern Tailspike
+    case 144264: // Killmaim
+    case 17510:  // Sword of Corruption
+    case 13527:  // Supercharger Battle Axe
+    case 144263: // Bloodpike
+    case 18199:  // Burning War Axe
+    case 18200:  // Bloodspiller
+    case 14106:  // The Black Knight
+    case 16401:  // Poison-Tipped Bone Spear
+    case 18204:  // Cobalt Crusher
+    case 13530:  // Tainted Pierce
+    case 144258: // Midnight Axe
+    case 18208:  // Scorpion Sting
+    case 144254: // Sliverblade
+    case 16407:  // Edge of Winter
+    case 144251: // Frost Tiger Blade
+    case 13438:  // Excavator's Brand
+    case 14126:  // Grim Reaper
+    case 18214:  // Witchfury
+    case 16415:  // Taran Icebreaker
+    case 9796:   // Blight
+    case 16411:  // Deathblow
+    case 18104:  // Axe of the Deep Woods
+    case 17148:  // Brain Hacker
+    case 16603:  // Demonfork
+    case 17407:  // The Blackrock Slicer
+    case 144237: // Ancient Hakkari Manslayer
+    case 24254:  // Sceptre of Smiting, Sceptre of Hexing
+    case 18205:  // Arlokk's Grasp, Gurubashi's Grasp
+    case 144230: // Reclaimed Thunderstrike
     // 14 Oct 2026 - rates from wowsims classic / tbc, see legacy_coh_spell in unique_gear.cpp.
     case 21151:  // Gutgore Ripper       17071
     case 69180:  // Rusted Gutgore Ripper 49437

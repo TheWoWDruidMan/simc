@@ -1701,6 +1701,13 @@ static void glaive_of_the_pit( special_effect_t& e )  { legacy_coh_spell( e, "gl
  * chance_on_hit_cb_t rolls every legacy weapon. Keyed by ITEM, because a driver can be shared: Winter's Bite uses
  * Hammer of the Northern Wind's Frost Bolt, Gurubashi Slicer/Crusher and Teebu's Scorching Straight Sword the Zul'Gurub
  * and Teebu's spells - wowsims has no rate for those, so on them this initializer builds nothing (as before).
+ * LEGACY_COH_1101 (1 Nov 2026, the author: "do all 83 and if the data disagrees take the lower number so at worse we undervalue
+ * it and not overvalue it"): fifty more, and every row now carries the LOWEST rate any source gives, compared as PPM at
+ * the weapon's own speed - wowsims (classic, tbc, Season of Discovery), the AzerothCore and CMaNGOS emulator item tables
+ * (spellppmRate; they disagree with wowsims and each other), and the author's logs (Ragehammer 0.12, Killmaim 0.56, Searing Blade
+ * 0.06 PPM: procs per landed hit x 60 / speed). A remake takes its original's sources. Each row names the source used and
+ * the others (test-results/coh-census/picked-rates.json). Flesh Piercer, Kang the Decapitator and Dustbringer have no rate.
+ * Iron Knuckles is left out: its Pummel proc cost a level 30 Fury 1.4% (3,000 iterations) for 0.006% of damage.
  * Not here, with the reason: Warp Slicer / Devastation (wowsims rolls 50% a hit - always up, not a rate), Sword of Zeal
  * and Ravager (a flat damage bonus and a 9 second self-channel, no builder), Bashguuder / Rivenspike (Puncture Armor 17315:
  * armor debuffs here use log-measured flat amounts, none for this spell).
@@ -1715,47 +1722,97 @@ struct legacy_coh_row_t
 };
 
 static constexpr legacy_coh_row_t LEGACY_COH_1031[] = {
-  {  9425, "pendulum_of_doom",              0.5, 0               , false }, // classic item_effects.go:1802
-  {  1982, "nightblade",                      1, 0               , false }, // classic item_effects.go:1757
-  {  2164, "gut_ripper",                      1, 0               , false }, // classic item_effects.go:1385
-  { 13983, "gravestone_war_axe",            0.5, 0               , false }, // classic item_effects.go:1265
-  { 14531, "frightskull_shaft",             0.5, 0               , false }, // classic item_effects.go:1186
-  { 14541, "barovian_family_sword",         0.5, 0               , false }, // classic item_effects.go:301
-  { 14576, "ebon_hilt_of_marduk",             1, 0               , false }, // classic item_effects.go:851
-  {   754, "shortsword_of_vengeance",         1, 0               , false }, // classic item_effects.go:2084
-  {  9511, "bloodletter_scalpel",             1, 0               , false }, // classic item_effects.go:666
-  { 13035, "serpent_slicer",                  1, 0               , false }, // classic item_effects.go:2028
-  {   809, "bloodrazor",                      1, 0               , false }, // classic item_effects.go:669
-  { 17054, "joonhos_mercy",                   1, 0               , false }, // classic item_effects.go:1544
-  {   810, "hammer_of_the_northern_wind",   3.5, 0               , false }, // classic item_effects.go:1423
-  {  2163, "shadowblade",                     1, 0               , false }, // classic item_effects.go:2060
-  {  8190, "hanzo_sword",                     1, 0               , false }, // classic item_effects.go:1445
-  { 11603, "vilerend_slicer",                 1, 0               , false }, // classic item_effects.go:2549
-  { 12531, "searing_needle",                  1, 0               , false }, // classic item_effects.go:1966
-  { 12777, "blazing_rapier",                  1, 0               , false }, // classic item_effects.go:632
-  { 12792, "volcanic_hammer",                 1, 0               , false }, // classic item_effects.go:2557
-  { 12795, "blood_talon",                     1, 0               , false }, // classic item_effects.go:700
-  { 13060, "the_needler",                     3, 0               , false }, // classic item_effects.go:2367
-  { 18671, "baron_charrs_sceptre",            1, 0               , false }, // classic item_effects.go:296
-  { 12794, "masterwork_stormhammer",        0.5, 0               , false }, // classic item_effects.go:1692
-  { 14555, "alcors_sunrazor",                 1, 0               , false }, // classic item_effects.go:186
-  { 17223, "thunderstrike_weapon",          1.5, 0               , false }, // classic item_effects.go:2483
-  {  1728, "teebus_blazing_longsword",        1, 0               , false }, // classic item_effects.go:2273
-  { 19099, "glacial_blade",                 1.4, 0               , false }, // classic item_effects.go:1260
-  { 19100, "electrified_dagger",            1.4, 0               , false }, // classic item_effects.go:887
-  { 19901, "zulian_slicer",                 1.2, 0               , false }, // classic item_effects.go:2616
-  { 19918, "jekliks_crusher",                 4, 0               , false }, // classic item_effects.go:1541 (Season of Discovery: 1.5)
-  { 20578, "emerald_dragonfang",              1, 0               , false }, // classic item_effects.go:892
-  { 22691, "corrupted_ashbringer",          1.6, 0               , false }, // classic item_effects/phase_6.go:30 (Season of Discovery: 2.0)
-  { 21856, "neretzek_drain_life",           0.8, 0               , false }, // sod vanilla/item_effects.go:1551 (only source)
-  { 31193, "blade_of_unquenched_thirst",      0, 0.02            , false }, // tbc melee_items.go:768, 2% a hit
-  { 17112, "empyrean_demolisher",             1, 0               , true  }, // classic item_effects.go:896 (SoD 0.6, tbc 2.8/60 a hit)
-  { 12790, "arcanite_champion",               1, 0               , true  }, // classic item_effects.go:215
-  { 23541, "khorium_champion",                0, 0.5 * 3.3 / 60.0, true  }, // tbc melee_items.go:199, 0.5 x 3.3/60 a hit
-  { 28429, "lionheart_champion",              0, 3.6 / 60.0      , true  }, // tbc melee_items.go:257, 3.6/60 a hit
-  { 28430, "lionheart_executioner",           0, 3.6 / 60.0      , true  }, // tbc melee_items.go:283, 3.6/60 a hit
-  { 28439, "dragonstrike",                    0, 2.7 / 60.0      , true  }, // tbc melee_items.go:362, 2.7/60 a hit
-  { 10626, "ragehammer",                      1, 0               , true  }, // classic item_effects.go:1844; its flat +20 physical damage a hit is not modelled
+  {   9425, "pendulum_of_doom",                    0.5, 0       , false }, // wowsims classic (also: AzerothCore 1)
+  {   1982, "nightblade",                          0.8, 0       , false }, // AzerothCore (also: wowsims classic 1)
+  {   2164, "gut_ripper",                            1, 0       , false }, // wowsims classic (also: AzerothCore 1.8)
+  {  13983, "gravestone_war_axe",                  0.5, 0       , false }, // wowsims classic (also: AzerothCore 0.6)
+  {  14531, "frightskull_shaft",                   0.5, 0       , false }, // wowsims classic (also: AzerothCore 2)
+  {  14541, "barovian_family_sword",               0.5, 0       , false }, // wowsims classic (also: AzerothCore 1)
+  {  14576, "ebon_hilt_of_marduk",                   1, 0       , false }, // wowsims classic (also: AzerothCore 1; CMaNGOS 1)
+  {    754, "shortsword_of_vengeance",               1, 0       , false }, // wowsims classic (also: AzerothCore 2)
+  {   9511, "bloodletter_scalpel",                   1, 0       , false }, // wowsims classic (also: AzerothCore 1.5)
+  {  13035, "serpent_slicer",                        1, 0       , false }, // wowsims classic (also: AzerothCore 1.5)
+  {    809, "bloodrazor",                            1, 0       , false }, // wowsims classic (also: AzerothCore 1.5)
+  {  17054, "joonhos_mercy",                         1, 0       , false }, // wowsims classic (also: AzerothCore 1.4)
+  {    810, "hammer_of_the_northern_wind",         1.5, 0       , false }, // AzerothCore (also: wowsims classic 3.5)
+  {   2163, "shadowblade",                           1, 0       , false }, // wowsims classic (also: AzerothCore 2)
+  {   8190, "hanzo_sword",                           1, 0       , false }, // wowsims classic (also: AzerothCore 2)
+  {  11603, "vilerend_slicer",                       1, 0       , false }, // wowsims classic (also: AzerothCore 2)
+  {  12531, "searing_needle",                        1, 0       , false }, // wowsims classic (also: AzerothCore 2)
+  {  12777, "blazing_rapier",                        1, 0       , false }, // wowsims classic (also: AzerothCore 1.7)
+  {  12792, "volcanic_hammer",                       1, 0       , false }, // wowsims classic (also: AzerothCore 2)
+  {  12795, "blood_talon",                           1, 0       , false }, // wowsims classic
+  {  13060, "the_needler",                         1.7, 0       , false }, // AzerothCore (also: wowsims classic 3)
+  {  18671, "baron_charrs_sceptre",                  1, 0       , false }, // wowsims classic (also: AzerothCore 2)
+  {  12794, "masterwork_stormhammer",              0.5, 0       , false }, // wowsims classic (also: AzerothCore 2)
+  {  14555, "alcors_sunrazor",                       1, 0       , false }, // wowsims classic (also: AzerothCore 3; CMaNGOS 1)
+  {  17223, "thunderstrike_weapon",                  1, 0       , false }, // CMaNGOS (also: wowsims classic 1.5; AzerothCore 2)
+  {   1728, "teebus_blazing_longsword",              1, 0       , false }, // wowsims classic (also: AzerothCore 1.4; CMaNGOS 1)
+  {  19099, "glacial_blade",                         1, 0       , false }, // CMaNGOS (also: wowsims classic 1.4; AzerothCore 1.8)
+  {  19100, "electrified_dagger",                  1.4, 0       , false }, // wowsims classic (also: AzerothCore 2)
+  {  19901, "zulian_slicer",                         1, 0       , false }, // CMaNGOS (also: wowsims classic 1.2; AzerothCore 1.2)
+  {  19918, "jekliks_crusher",                     1.5, 0       , false }, // wowsims sod (also: wowsims classic 4; AzerothCore 3; CMaNGOS 4)
+  {  20578, "emerald_dragonfang",                    1, 0       , false }, // wowsims classic (also: AzerothCore 2.3; CMaNGOS 1)
+  {  22691, "corrupted_ashbringer",                1.6, 0       , false }, // wowsims classic (also: wowsims sod 2)
+  {  21856, "neretzek_drain_life",                 0.8, 0       , false }, // wowsims sod (also: AzerothCore 1.3; CMaNGOS 1)
+  {  31193, "blade_of_unquenched_thirst",            0, 0.02    , false }, // wowsims tbc (also: AzerothCore 1)
+  {  17112, "empyrean_demolisher",                 0.6, 0       , true  }, // wowsims sod (also: wowsims classic 1; wowsims tbc 1.077; AzerothCore 1.5; CMaNGOS 1)
+  {  12790, "arcanite_champion",                     1, 0       , true  }, // wowsims classic (also: AzerothCore 1.2)
+  {  23541, "khorium_champion",                      0, 0.0275  , true  }, // wowsims tbc (also: AzerothCore 1)
+  {  28429, "lionheart_champion",                    0, 0.06    , true  }, // wowsims tbc
+  {  28430, "lionheart_executioner",                 0, 0.06    , true  }, // wowsims tbc
+  {  28439, "dragonstrike",                          0, 0.045   , true  }, // wowsims tbc (also: AzerothCore 1.5)
+  {  10626, "ragehammer",                         0.12, 0       , true  }, // log: Feral, 27 procs / 3,629 hits (also: wowsims classic 1; AzerothCore 2)
+  {   5815, "glacial_stone",                         2, 0       , false }, // AzerothCore
+  {  28164, "tranquillien_flamberge",              0.8, 0       , false }, // AzerothCore
+  {    899, "venom_web_fang",                        2, 0       , false }, // AzerothCore
+  {   1387, "ghoulfang",                             1, 0       , false }, // AzerothCore
+  {   5182, "shiver_blade",                        0.8, 0       , false }, // AzerothCore
+  {   2205, "duskbringer",                         0.8, 0       , false }, // AzerothCore
+  {   3194, "black_malice",                          2, 0       , false }, // AzerothCore
+  {   5426, "serpents_kiss",                         1, 0       , false }, // AzerothCore
+  {   1318, "night_reaver",                          1, 0       , false }, // AzerothCore
+  {   1482, "shadowfang",                          1.6, 0       , false }, // AzerothCore
+  {   2256, "skeletal_club",                      0.75, 0       , false }, // AzerothCore
+  {  12992, "searing_blade",                      0.06, 0       , false }, // log: Survival, 5 procs / 1,390 hits (also: AzerothCore 1; log: Arms, 9 procs / 133 hits 1.13)
+  {   4446, "blackvenom_blade",                      2, 0       , false }, // AzerothCore
+  {   4449, "naraxis_fang",                          2, 0       , false }, // AzerothCore
+  {   5752, "wyvern_tailspike",                    1.5, 0       , false }, // AzerothCore
+  {  13016, "killmaim",                           0.56, 0       , false }, // log: Fury, 257 procs / 7,675 hits (also: AzerothCore 0.8)
+  {  13032, "sword_of_corruption",                 1.4, 0       , false }, // AzerothCore (also: CMaNGOS 1.4)
+  {   9486, "supercharger_battle_axe",             0.9, 0       , false }, // AzerothCore
+  {  13057, "bloodpike",                           1.5, 0       , false }, // AzerothCore
+  {   2299, "burning_war_axe",                       1, 0       , false }, // AzerothCore
+  {   7753, "bloodspiller",                        0.9, 0       , false }, // AzerothCore
+  {  12974, "the_black_knight",                   1.35, 0       , false }, // AzerothCore
+  {   1726, "poison_tipped_bone_spear",            1.5, 0       , false }, // AzerothCore
+  {   7730, "cobalt_crusher",                    1.875, 0       , false }, // AzerothCore
+  {   8225, "tainted_pierce",                        1, 0       , false }, // CMaNGOS (also: AzerothCore 2)
+  {  12250, "midnight_axe",                        1.1, 0       , false }, // AzerothCore
+  {   1265, "scorpion_sting",                      1.3, 0       , false }, // AzerothCore
+  {   5756, "sliverblade",                         1.7, 0       , false }, // AzerothCore
+  {  17704, "edge_of_winter",                        1, 0       , false }, // AzerothCore
+  {   3854, "frost_tiger_blade",                   0.8, 0       , false }, // AzerothCore
+  {   9386, "excavators_brand",                      1, 0       , false }, // AzerothCore
+  {  13054, "grim_reaper",                           1, 0       , false }, // AzerothCore
+  {  13051, "witchfury",                           1.2, 0       , false }, // AzerothCore
+  {   2915, "taran_icebreaker",                      2, 0       , false }, // AzerothCore
+  {   7959, "blight",                                2, 0       , false }, // AzerothCore
+  {  10623, "winters_bite",                          1, 0       , false }, // AzerothCore
+  {  10628, "deathblow_weapon",                    1.2, 0       , false }, // AzerothCore
+  {    811, "axe_of_the_deep_woods",               0.8, 0       , false }, // CMaNGOS (also: AzerothCore 1.35)
+  {   1263, "brain_hacker",                          1, 0       , false }, // CMaNGOS
+  {  12621, "demonfork",                           1.4, 0       , false }, // AzerothCore
+  {  13285, "the_blackrock_slicer",                0.8, 0       , false }, // AzerothCore (also: CMaNGOS 1)
+  {  19852, "ancient_hakkari_manslayer",             1, 0       , false }, // CMaNGOS (also: AzerothCore 2)
+  {  19908, "sceptre_of_smiting",                    1, 0       , false }, // CMaNGOS (also: AzerothCore 1.5)
+  {  19910, "arlokks_grasp",                         1, 0       , false }, // CMaNGOS (also: AzerothCore 3.5)
+  { 203801, "gurubashi_slicer",                      1, 0       , false }, // CMaNGOS (as Zulian Slicer) (also: wowsims classic (as Zulian Slicer) 1.2; AzerothCore (as Zulian Slicer) 1.2)
+  { 203804, "sceptre_of_hexing",                     1, 0       , false }, // CMaNGOS (as Sceptre of Smiting) (also: AzerothCore (as Sceptre of Smiting) 1.5)
+  { 203805, "gurubashis_grasp",                      1, 0       , false }, // CMaNGOS (as Arlokk's Grasp) (also: AzerothCore (as Arlokk's Grasp) 3.5)
+  { 203806, "gurubashi_crusher",                   1.5, 0       , false }, // wowsims sod (as Jeklik's Crusher) (also: wowsims classic (as Jeklik's Crusher) 4; AzerothCore (as Jeklik's Crusher) 3; CMaNGOS (as Jeklik's Crusher) 4)
+  { 159840, "teebus_scorching_straight_sword",       1, 0       , false }, // wowsims classic (as Teebu's Blazing Longsword) (also: AzerothCore (as Teebu's Blazing Longsword) 1.4; CMaNGOS (as Teebu's Blazing Longsword) 1)
+  {  49301, "reclaimed_thunderstrike",               1, 0       , false }, // CMaNGOS (as Thunderstrike) (also: wowsims classic (as Thunderstrike) 1.5; AzerothCore (as Thunderstrike) 2)
 };
 
 static void legacy_coh_1031( special_effect_t& effect )
@@ -8254,6 +8311,50 @@ void unique_gear::register_special_effects()
   register_special_effect( 34513 , legacy_coh_1031 ); /* Lionheart Executioner */
   register_special_effect( 21165 , legacy_coh_1031 ); /* Dragonstrike */
   register_special_effect( 12686 , legacy_coh_1031 ); /* Ragehammer */
+  // 1 Nov 2026: fifty more, Iron Knuckles's driver included (LEGACY_COH_1101 note above LEGACY_COH_1031).
+  register_special_effect( 20869 , legacy_coh_1031 ); /* Glacial Stone */
+  register_special_effect( 144272, legacy_coh_1031 ); /* Tranquillien Flamberge, Ghoulfang */
+  register_special_effect( 18077 , legacy_coh_1031 ); /* Venom Web Fang */
+  register_special_effect( 18092 , legacy_coh_1031 ); /* Shiver Blade */
+  register_special_effect( 18217 , legacy_coh_1031 ); /* Duskbringer */
+  register_special_effect( 144271, legacy_coh_1031 ); /* Black Malice */
+  register_special_effect( 18197 , legacy_coh_1031 ); /* Serpent's Kiss */
+  register_special_effect( 13480 , legacy_coh_1031 ); /* Night Reaver */
+  register_special_effect( 144268, legacy_coh_1031 ); /* Shadowfang, Skeletal Club */
+  register_special_effect( 16413 , legacy_coh_1031 ); /* Searing Blade */
+  register_special_effect( 13491 , legacy_coh_1031 ); /* Iron Knuckles */
+  register_special_effect( 13518 , legacy_coh_1031 ); /* Blackvenom Blade */
+  register_special_effect( 16400 , legacy_coh_1031 ); /* Naraxis' Fang */
+  register_special_effect( 144265, legacy_coh_1031 ); /* Wyvern Tailspike */
+  register_special_effect( 144264, legacy_coh_1031 ); /* Killmaim */
+  register_special_effect( 17510 , legacy_coh_1031 ); /* Sword of Corruption */
+  register_special_effect( 13527 , legacy_coh_1031 ); /* Supercharger Battle Axe */
+  register_special_effect( 144263, legacy_coh_1031 ); /* Bloodpike */
+  register_special_effect( 18199 , legacy_coh_1031 ); /* Burning War Axe */
+  register_special_effect( 18200 , legacy_coh_1031 ); /* Bloodspiller */
+  register_special_effect( 14106 , legacy_coh_1031 ); /* The Black Knight */
+  register_special_effect( 16401 , legacy_coh_1031 ); /* Poison-Tipped Bone Spear */
+  register_special_effect( 18204 , legacy_coh_1031 ); /* Cobalt Crusher */
+  register_special_effect( 13530 , legacy_coh_1031 ); /* Tainted Pierce */
+  register_special_effect( 144258, legacy_coh_1031 ); /* Midnight Axe */
+  register_special_effect( 18208 , legacy_coh_1031 ); /* Scorpion Sting */
+  register_special_effect( 144254, legacy_coh_1031 ); /* Sliverblade */
+  register_special_effect( 16407 , legacy_coh_1031 ); /* Edge of Winter */
+  register_special_effect( 144251, legacy_coh_1031 ); /* Frost Tiger Blade */
+  register_special_effect( 13438 , legacy_coh_1031 ); /* Excavator's Brand */
+  register_special_effect( 14126 , legacy_coh_1031 ); /* Grim Reaper */
+  register_special_effect( 18214 , legacy_coh_1031 ); /* Witchfury */
+  register_special_effect( 16415 , legacy_coh_1031 ); /* Taran Icebreaker */
+  register_special_effect( 9796  , legacy_coh_1031 ); /* Blight */
+  register_special_effect( 16411 , legacy_coh_1031 ); /* Deathblow */
+  register_special_effect( 18104 , legacy_coh_1031 ); /* Axe of the Deep Woods */
+  register_special_effect( 17148 , legacy_coh_1031 ); /* Brain Hacker */
+  register_special_effect( 16603 , legacy_coh_1031 ); /* Demonfork */
+  register_special_effect( 17407 , legacy_coh_1031 ); /* The Blackrock Slicer */
+  register_special_effect( 144237, legacy_coh_1031 ); /* Ancient Hakkari Manslayer */
+  register_special_effect( 24254 , legacy_coh_1031 ); /* Sceptre of Smiting, Sceptre of Hexing */
+  register_special_effect( 18205 , legacy_coh_1031 ); /* Arlokk's Grasp, Gurubashi's Grasp */
+  register_special_effect( 144230, legacy_coh_1031 ); /* Reclaimed Thunderstrike */
   register_special_effect( 250765, ampoule_of_pure_void );    /* Ampoule of Pure Void 151312 - use: 10 sec Shadow pool */
   register_special_effect( 96887,   item::variable_pulse_lightning_capacitor ); /* VPLC - wowsims cata */
   register_special_effect( 97119,   item::variable_pulse_lightning_capacitor ); /* VPLC (heroic) - wowsims cata */
