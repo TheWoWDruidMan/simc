@@ -14572,6 +14572,7 @@ void player_t::create_options()
   add_option( opt_string( "bracketsim_ally_armor_shred", bracketsim.ally_armor_shred ) );
   add_option( opt_string( "bracketsim_consumable_ilvl", bracketsim.consumable_ilvl ) );
   add_option( opt_int( "bracketsim_trinket_fallback", bracketsim.trinket_fallback, 0, 600 ) );
+  add_option( opt_string( "bracketsim_shattered_sun", bracketsim.shattered_sun ) );
   add_option( opt_float( "bracketsim_dragonwrath_chance",
                          bracketsim.dragonwrath_chance, 0.0, 1.0 ) );
 

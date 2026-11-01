@@ -397,6 +397,9 @@ struct player_t : public actor_t
     // from the pull in every later fight. One the rotation does press (however late - 60 Elemental waits for its 2nd
     // Fire Elemental) is left to the rotation: pressing those at a fixed time cost up to 1.3%. 0 = off.
     int trinket_fallback = 1;
+    // bracketsim_shattered_sun=aldor|scryer (1 Nov 2026): which reputation a Shattered Sun pendant answers to. Unset keeps
+    // the old picks (Acumen and Might Aldor, Resolve Scryer, Restoration Aldor).
+    std::string shattered_sun;
     int trinket_rotation_presses[ 2 ] = { -1, -1 };  // -1 not probed yet, 0 never, 1 presses it
     bool trinket_fallback_on[ 2 ] = { false, false };
     buff_t* raid_haste_buff = nullptr;

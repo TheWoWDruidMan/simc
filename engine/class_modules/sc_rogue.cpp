@@ -1295,6 +1295,10 @@ public:
   // the player applied by hand. Combat state, cleared every iteration.
   player_t* legacy_last_rupture_target = nullptr;
 
+  // BracketSim (1 Nov 2026): Ashtongue Talisman of Lethality (32492) - "20% chance per combo point for your finishing moves to
+  // grant $40461s1 critical strike for $40461d" (40460 / Exploit Weakness 40461, amount scaled by the item's level).
+  buff_t* bracketsim_exploit_weakness = nullptr;
+
   rogue_t( sim_t* sim, util::string_view name, race_e r = RACE_NIGHT_ELF ) :
     player_t( sim, ROGUE, name, r ),
     rogue_ready_trigger_threshold( 25 ),
@@ -9228,6 +9232,8 @@ void actions::rogue_action_t<Base>::spend_combo_points( const action_state_t* st
 
   ab::stats->consume_resource( RESOURCE_COMBO_POINT, max_spend );
   p()->resource_loss( RESOURCE_COMBO_POINT, cp_loss );
+  if ( p()->bracketsim_exploit_weakness && max_spend > 0 && p()->rng().roll( std::min( 1.0, 0.2 * max_spend ) ) )
+    p()->bracketsim_exploit_weakness->trigger();
 
   p()->sim->print_log( "{} consumes {} {} for {} ({})", *p(), cp_loss, util::resource_type_string( RESOURCE_COMBO_POINT ),
                        *this, p()->current_cp() );
@@ -12569,6 +12575,9 @@ void rogue_t::init_resources( bool force )
 void rogue_t::create_buffs()
 {
   player_t::create_buffs();
+
+  if ( auto talisman = find_item_by_id( 32492 ) )
+    bracketsim_exploit_weakness = make_buff<stat_buff_t>( this, "exploit_weakness", find_spell( 40461 ), talisman );
 
   // Baseline ===============================================================
   // Shared

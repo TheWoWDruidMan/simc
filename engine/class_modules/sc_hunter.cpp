@@ -1185,6 +1185,10 @@ public:
     bool max_prio_damage = true;
   } options;
 
+  // BracketSim (1 Nov 2026): Ashtongue Talisman of Swiftness (32487) - "Your Steady Shot has a 15% chance to grant you
+  // $40487s1 attack power for $40487d" (40485 / Deadly Aim 40487, scaled by the item's level; one attack power effect).
+  buff_t* bracketsim_deadly_aim = nullptr;
+
   hunter_t( sim_t* sim, util::string_view name, race_e r = RACE_NONE ) :
     player_t( sim, HUNTER, name, r ),
     pets( this ),
@@ -4407,6 +4411,9 @@ struct steady_shot_t: public hunter_ranged_attack_t
     hunter_ranged_attack_t::execute();
 
     p()->cooldowns.aimed_shot->adjust( -data().effectN( 2 ).time_value() );
+
+    if ( p()->bracketsim_deadly_aim && rng().roll( 0.15 ) )
+      p()->bracketsim_deadly_aim->trigger();
   }
 
   void impact( action_state_t* s ) override
@@ -9240,6 +9247,14 @@ void hunter_t::create_actions()
 void hunter_t::create_buffs()
 {
   player_t::create_buffs();
+
+  if ( auto talisman = find_item_by_id( 32487 ) )
+  {
+    auto b = make_buff<stat_buff_t>( this, "deadly_aim", find_spell( 40487 ), talisman );
+    b->stats.clear();
+    b->add_stat( STAT_ATTACK_POWER, find_spell( 40487 )->effectN( 1 ).average( talisman ) );
+    bracketsim_deadly_aim = b;
+  }
 
   // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
   buffs.legacy_eagletalons_true_focus =

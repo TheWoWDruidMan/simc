@@ -1667,6 +1667,93 @@ static void linkens_boomerang( special_effect_t& effect )
   effect.execute_action = create_proc_action<generic_proc_t>( "linkens_boomerang", effect, "linkens_boomerang", effect.driver() );
 }
 
+// BracketSim: Manipulator's Talisman (86529), 1 November 2026 (the author: "fix all"). "Your pet's attacks have a chance to deal
+// an additional 50% damage as Nature, but no more than $s1" (Manipulator's Wrath 128853: 10%, the cap scaled by the item's
+// level). A callback on each of the owner's pets; the extra hit is the owner's, at a flat amount (its own modifiers off).
+struct manipulators_wrath_cb_t final : public dbc_proc_callback_t
+{
+  action_t* dmg;
+  double cap;
+  manipulators_wrath_cb_t( player_t* pet, const special_effect_t& e, action_t* d, double c )
+    : dbc_proc_callback_t( pet, e ), dmg( d ), cap( c ) {}
+
+  void execute( const spell_data_t*, player_t*, action_state_t* s ) override
+  {
+    if ( !s || !s->target || s->result_amount <= 0 )
+      return;
+    double amount = std::min( 0.5 * s->result_amount, cap );
+    dmg->base_dd_min = dmg->base_dd_max = amount;
+    dmg->execute_on_target( s->target );
+  }
+};
+
+struct manipulators_wrath_t final : public spell_t
+{
+  manipulators_wrath_t( player_t* p, const spell_data_t* s ) : spell_t( "manipulators_wrath", p, s )
+  {
+    background = true;
+    may_crit = may_miss = callbacks = false;
+    school = SCHOOL_NATURE;
+  }
+  double composite_da_multiplier( const action_state_t* ) const override { return 1.0; }
+  double composite_versatility( const action_state_t* ) const override { return 0.0; }
+};
+
+static void manipulators_talisman( special_effect_t& effect )
+{
+  const double cap = effect.driver()->effectN( 1 ).average( effect.item );
+  action_t* dmg    = effect.player->find_action( "manipulators_wrath" );
+  if ( !dmg )
+    dmg = new manipulators_wrath_t( effect.player, effect.driver() );
+  effect.player->sim->print_debug( "{} manipulators_talisman: {} pets, cap {}", *effect.player, effect.player->pet_list.size(), cap );
+  for ( pet_t* pet : effect.player->pet_list )
+  {
+    auto pe          = new special_effect_t( pet );
+    pe->name_str     = "manipulators_wrath_proc";
+    pe->type         = SPECIAL_EFFECT_EQUIP;
+    pe->source       = SPECIAL_EFFECT_SOURCE_ITEM;
+    pe->spell_id     = effect.spell_id;
+    pe->proc_flags_  = PF_MELEE | PF_MELEE_ABILITY | PF_RANGED | PF_RANGED_ABILITY | PF_MAGIC_SPELL;
+    pe->proc_flags2_ = PF2_ALL_HIT;
+    pe->proc_chance_ = effect.driver()->proc_chance();
+    pet->special_effects.push_back( pe );
+    // The pet finished its own effect setup before its owner's items ran, so its callbacks are already switched on.
+    auto cb = new manipulators_wrath_cb_t( pet, *pe, dmg, cap );
+    cb->initialize();
+  }
+}
+
+// BracketSim: the Shattered Sun pendants (34677-34680, Shattered Sun Offensive exalted), 1 November 2026. "Your attacks /
+// spells have a chance to call on the power of the Arcane if you're exalted with the Scryers, or the Light if you're
+// exalted with the Aldor." Upstream registered one fixed version each; bracketsim_shattered_sun=aldor|scryer picks one,
+// unset keeps upstream's. Proc chance and cooldown are the driver's (15%, 45 sec). A damage trigger is cast at the target.
+//   Acumen 45481: Light's Wrath 45479 (Intellect) / Arcane Bolt 45429      Might 45482: Light's Strength 45480 / Arcane Strike 45428
+//   Resolve 45483: Light's Ward 45432 (dodge) / Arcane Insight 45431      Restoration 45484: Light's Salvation 45478 / Arcane Surge 45430
+static void shattered_sun_pendant( special_effect_t& effect )
+{
+  unsigned aldor = 0, scryer = 0;
+  bool aldor_default = true;
+  switch ( effect.spell_id )
+  {
+    case 45481: aldor = 45479; scryer = 45429; break;
+    case 45482: aldor = 45480; scryer = 45428; break;
+    case 45483: aldor = 45432; scryer = 45431; aldor_default = false; break;
+    case 45484: aldor = 45478; scryer = 45430; break;
+    default: return;
+  }
+  const std::string& rep = effect.player->bracketsim.shattered_sun;
+  const bool use_aldor   = util::str_compare_ci( rep, "aldor" ) ? true : util::str_compare_ci( rep, "scryer" ) ? false : aldor_default;
+  effect.trigger_spell_id = use_aldor ? aldor : scryer;
+  effect.proc_flags2_     = PF2_ALL_HIT;  // as upstream's "ProcOn/hit": landed hits only
+  const spell_data_t* trig = effect.player->find_spell( effect.trigger_spell_id );
+  if ( trig->ok() && trig->effectN( 1 ).type() == E_SCHOOL_DAMAGE )
+  {
+    effect.execute_action = create_proc_action<generic_proc_t>( util::tokenize_fn( trig->name_cstr() ), effect,
+                                                                util::tokenize_fn( trig->name_cstr() ), trig );
+  }
+  new dbc_proc_callback_t( effect.player, effect );
+}
+
 // BracketSim (1 Nov 2026): the Legion artifact quest copies of Ashbringer (137582) and Truthguard (137661) still carry their
 // artifact's use - Wake of Ashes (209122), Eye of Tyr (209202) - which left the game with artifact weapons. Wake of Ashes
 // fired at 0 seconds with no cooldown and no damage forever ("Simulator likely stuck"). The uses are not built.
@@ -8238,10 +8325,12 @@ void unique_gear::register_special_effects()
   midnight::register_special_effects();
 
   /* Legacy Effects, pre-5.0 */
-  register_special_effect( 45481,  "ProcOn/hit_45479Trigger"            ); /* Shattered Sun Pendant of Acumen */
-  register_special_effect( 45482,  "ProcOn/hit_45480Trigger"            ); /* Shattered Sun Pendant of Might */
-  register_special_effect( 45483,  "ProcOn/hit_45431Trigger"            ); /* Shattered Sun Pendant of Resolve */
-  register_special_effect( 45484,  "ProcOn/hit_45478Trigger"            ); /* Shattered Sun Pendant of Restoration */
+  register_special_effect( 128853,  manipulators_talisman ); /* Manipulator's Talisman 86529 - pet attacks, 10%, +50% as Nature (capped) */
+  // BracketSim 1 Nov 2026: bracketsim_shattered_sun=aldor|scryer picks the version (shattered_sun_pendant).
+  register_special_effect( 45481,  shattered_sun_pendant ); /* Shattered Sun Pendant of Acumen */
+  register_special_effect( 45482,  shattered_sun_pendant ); /* Shattered Sun Pendant of Might */
+  register_special_effect( 45483,  shattered_sun_pendant ); /* Shattered Sun Pendant of Resolve */
+  register_special_effect( 45484,  shattered_sun_pendant ); /* Shattered Sun Pendant of Restoration */
   register_special_effect( 57345,  item::darkmoon_card_greatness        );
   register_special_effect( 71519,  item::deathbringers_will             );
   register_special_effect( 71562,  item::deathbringers_will             );
