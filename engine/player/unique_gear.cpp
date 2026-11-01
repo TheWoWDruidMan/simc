@@ -1667,6 +1667,20 @@ static void linkens_boomerang( special_effect_t& effect )
   effect.execute_action = create_proc_action<generic_proc_t>( "linkens_boomerang", effect, "linkens_boomerang", effect.driver() );
 }
 
+// BracketSim: Pulse Seeker's Oculus (274495), 1 November 2026 (the author: "fix all"). "Your Mastery is increased by $s2, plus an
+// additional $s1 while a party member is below $s5% health" (1294326). Nothing was built. The always-on $s2 (effect 2,
+// scaled by the item's level) is up the whole fight; the low-health extra needs a party below 65% and is left out.
+static void pulse_seekers_oculus( special_effect_t& effect )
+{
+  if ( buff_t::find( effect.player, "pulse_seekers_oculus" ) )
+    return;
+  auto b = make_buff<stat_buff_t>( effect.player, "pulse_seekers_oculus", effect.driver(), effect.item );
+  b->stats.clear();
+  b->add_stat( STAT_MASTERY_RATING, effect.driver()->effectN( 2 ).average( effect.item ) );
+  b->set_duration( 0_ms );
+  effect.player->register_combat_begin( [ b ]( player_t* ) { b->trigger(); } );
+}
+
 // BracketSim: Manipulator's Talisman (86529), 1 November 2026 (the author: "fix all"). "Your pet's attacks have a chance to deal
 // an additional 50% damage as Nature, but no more than $s1" (Manipulator's Wrath 128853: 10%, the cap scaled by the item's
 // level). A callback on each of the owner's pets; the extra hit is the owner's, at a flat amount (its own modifiers off).
@@ -8325,6 +8339,7 @@ void unique_gear::register_special_effects()
   midnight::register_special_effects();
 
   /* Legacy Effects, pre-5.0 */
+  register_special_effect( 1294326, pulse_seekers_oculus ); /* Pulse Seeker's Oculus 274495 - its always-on Mastery */
   register_special_effect( 128853,  manipulators_talisman ); /* Manipulator's Talisman 86529 - pet attacks, 10%, +50% as Nature (capped) */
   // BracketSim 1 Nov 2026: bracketsim_shattered_sun=aldor|scryer picks the version (shattered_sun_pendant).
   register_special_effect( 45481,  shattered_sun_pendant ); /* Shattered Sun Pendant of Acumen */
