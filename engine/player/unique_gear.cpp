@@ -2036,6 +2036,13 @@ static void the_bladefist( special_effect_t& effect )
   effect.proc_flags2_ = PF2_ALL_HIT;
   effect.proc_chance_ = 2.7 / 60.0;
   effect.ppm_         = 0;
+  /*
+   * NO 45 SEC COOLDOWN (1 Nov 2026, the author: the cooldown is the Timewalking version's only). The 45 sec is the haste
+   * buff's own proc cooldown (35131's aura options): it limits what that buff procs, not how often the weapon applies
+   * it. The Timewalking Bladefist (124030) carries its 45 sec on its own driver, 196446 (15%, 45s cooldown). With no
+   * cooldown set here, special_effect_t::cooldown() fell back to 35131's and held the proc for 45 sec.
+   */
+  effect.cooldown_    = timespan_t::zero();
   if ( !already_built( effect ) )
   {
     auto buff = make_buff<stat_buff_t>( effect.player, effect.name_str, effect.driver(), effect.item );
