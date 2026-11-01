@@ -4612,6 +4612,25 @@ void player_t::create_actions()
     }
   }
 
+  // BracketSim (1 Nov 2026, the author: "fix all"): the Legion engineering headguns (Head Shot, 201360). The default lists only
+  // press trinket uses, so a helmet's use never fired. Pressed on cooldown, just above the first jump to another list.
+  if ( is_player() && !is_enemy() && !is_pet() )
+  {
+    const auto& head = items[ SLOT_HEAD ];
+    const auto* use  = head.active() && head.has_use_special_effect() ? head.special_effect( SPECIAL_EFFECT_SOURCE_NONE, SPECIAL_EFFECT_USE ) : nullptr;
+    if ( use && use->driver() && use->driver()->id() == 201360 )
+    {
+      auto& def = get_action_priority_list( "default" )->action_list;
+      auto at   = std::find_if( def.begin(), def.end(), []( const action_priority_t& e ) {
+        return util::str_prefix_ci( e.action_, "call_action_list" ) || util::str_prefix_ci( e.action_, "run_action_list" ) ||
+               util::str_prefix_ci( e.action_, "swap_action_list" );
+      } );
+      if ( at == def.end() )
+        at = def.begin();
+      def.insert( at, { "use_item,slot=head", "" } );
+    }
+  }
+
   // BracketSim legacy compatibility: put the Shadowlands covenant abilities into
   // the rotation. Without this an imported profile never presses them at all and
   // still reports a perfectly plausible number, which is the worst kind of wrong.

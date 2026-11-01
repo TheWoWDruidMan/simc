@@ -9807,9 +9807,14 @@ void might_of_the_drogbar( special_effect_t& effect )
   }
   else
   {
+    // BracketSim (1 Nov 2026): this client has no item set entry for 407914 and no 407913 buff spell, so the set driver
+    // is never made and the lookup was a null pointer - every sim wearing Drogbar Rocks or Drogbar Stones crashed.
+    // Without the driver there is no set bonus to give; each trinket's own proc still works.
+    auto driver = unique_gear::find_special_effect( effect.player, set_driver_id );
+    if ( !driver || !effect.player->find_spell( 407913 )->ok() )
+      return;
     auto buff = create_buff<stat_buff_t>( effect.player, effect.player->find_spell( 407913 ) )
       ->add_stat ( STAT_STR_AGI_INT, effect.driver()->effectN( 1 ).average( effect.item ) );
-    auto driver = unique_gear::find_special_effect( effect.player, set_driver_id );
     driver->custom_buff = buff;
   }
 }

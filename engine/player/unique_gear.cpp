@@ -1629,6 +1629,52 @@ void item::lobotomizer( special_effect_t& effect )
   chance_on_hit( effect );
 }
 
+// BracketSim: Hand of Justice (11815), 1 November 2026 (the author: "fix all"). "Chance on melee hit to gain 1 extra attack" (15600;
+// the client gives 100% behind a 2 second cooldown, which no source agrees with). RATE: the lower of wowsims' two - classic
+// 2% a landed melee hit, tbc 1.333% (the author: "take the lower number") - behind the same 2 seconds. The extra attack is the
+// character's own main-hand swing, run once without starting a second swing timer, so it hits like any swing.
+struct hand_of_justice_cb_t final : public dbc_proc_callback_t
+{
+  hand_of_justice_cb_t( const special_effect_t& e ) : dbc_proc_callback_t( e.player, e ) {}
+
+  void execute( const spell_data_t*, player_t* target, action_state_t* state ) override
+  {
+    attack_t* mh = listener->main_hand_attack;
+    if ( !mh )
+      return;
+    player_t* t = state && state->target ? state->target : target;
+    const bool rep = mh->repeating;
+    mh->repeating = false;
+    mh->execute_on_target( t );
+    mh->repeating = rep;
+  }
+};
+
+static void hand_of_justice( special_effect_t& effect )
+{
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  effect.proc_chance_ = 0.013333;
+  effect.cooldown_    = 2_s;
+  effect.ppm_         = 0;
+  new hand_of_justice_cb_t( effect );
+}
+
+// BracketSim: Linken's Boomerang (11905), 1 November 2026. Its use (15712: damage, then a chance to stun or disarm - neither
+// matters to a damage sim) built nothing, so the trinket's use action had nothing to fire. The damage is the spell's own.
+static void linkens_boomerang( special_effect_t& effect )
+{
+  effect.execute_action = create_proc_action<generic_proc_t>( "linkens_boomerang", effect, "linkens_boomerang", effect.driver() );
+}
+
+// BracketSim (1 Nov 2026): the Legion artifact quest copies of Ashbringer (137582) and Truthguard (137661) still carry their
+// artifact's use - Wake of Ashes (209122), Eye of Tyr (209202) - which left the game with artifact weapons. Wake of Ashes
+// fired at 0 seconds with no cooldown and no damage forever ("Simulator likely stuck"). The uses are not built.
+static void removed_artifact_use( special_effect_t& effect )
+{
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
 // BracketSim: Headmaster's Charge (13937, Darkmaster Gandling, Scholomance), 1 November 2026 (the author: "gives main stat to
 // party members"). "Use: Gives $M1 additional intellect to party members within $a1 yards" (18264: a 15 minute party
 // aura, Intellect scaled by the item's level; the item's use has a 10 minute cooldown). Upstream builds nothing from a party
@@ -8298,6 +8344,10 @@ void unique_gear::register_special_effects()
   register_special_effect( 33489,   item::blackout_truncheon ); /* Blackout Truncheon - Blinding Speed, 0.8 PPM (wowsims tbc) */
   register_special_effect( 34580,   item::despair ); /* Despair - Impale, 0.5 PPM (wowsims tbc) */
   register_special_effect( 24388,   item::lobotomizer ); /* The Lobotomizer - Brain Damage, 0.4 PPM (the author, 30 Oct 2026) */
+  register_special_effect( 15712,   linkens_boomerang ); /* Linken's Boomerang 11905 - its use's damage */
+  register_special_effect( 15600,   hand_of_justice ); /* Hand of Justice 11815 - 1 extra attack, 1.333% a melee hit, 2 sec cd */
+  register_special_effect( 209122,  removed_artifact_use ); /* Ashbringer 137582 (quest copy) - Wake of Ashes, removed */
+  register_special_effect( 209202,  removed_artifact_use ); /* Truthguard 137661 (quest copy) - Eye of Tyr, removed */
   register_special_effect( 18264,   item::headmasters_charge ); /* Headmaster's Charge - Intellect for the whole fight (the author, 1 Nov 2026) */
   // 14 Oct 2026: the rest of the Loot Finder's CHANCE_ON_HIT weapons with a rate in wowsims (see legacy_coh_spell).
   register_special_effect( 21151,  gutgore_ripper );       /* Gutgore Ripper 17071 - 1.0 PPM (wowsims classic) */
