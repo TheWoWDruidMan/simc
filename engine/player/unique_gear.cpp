@@ -1554,9 +1554,17 @@ void item::night_blade( special_effect_t& effect )
 // dummy log (Untamed Blade main hand, The Jackhammer off hand): 89 procs from 891 main-hand and 797 off-hand hits - 96
 // expected from every hit, 53 from its own hand's - where the sim gave ~43 and 68-75% uptime against 92% in game. A
 // two-hander on its own (Frost DK logs) is unchanged: 25 procs in game, 24.4 simmed.
+/*
+ * TWO UNTAMED BLADES, TWO BUFFS (1 Nov 2026, the author: "they should have their own individual buffs like crusader"). The same
+ * proc from two different items is two auras in game - a Crusader on each weapon gives two Holy Strength buffs, both up
+ * at once (Fury log, enchants::crusader). Both blades shared one Untamed Fury, so the second blade's procs only refreshed
+ * the first's. The off-hand blade now has its own buff (untamed_fury_oh); each keeps its own roll on every hit, either hand.
+ * No double-blade wearer is in the author's logs (3 wearers, one blade each); the rule is Crusader's.
+ */
 void item::untamed_blade( special_effect_t& effect )
 {
-  weapon_stat_proc( effect, "untamed_fury", 1.0, 3.4, true );
+  const bool off_hand = effect.item && effect.item->slot == SLOT_OFF_HAND;
+  weapon_stat_proc( effect, off_hand ? "untamed_fury_oh" : "untamed_fury", 1.0, 3.4, true );
 }
 
 /*
