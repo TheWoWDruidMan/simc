@@ -95,6 +95,7 @@ namespace item
   void blackout_truncheon( special_effect_t& );
   void despair( special_effect_t& );
   void lobotomizer( special_effect_t& );
+  void headmasters_charge( special_effect_t& );
   void world_breaker( special_effect_t& );
   void variable_pulse_lightning_capacitor( special_effect_t& );
   void eskhandars_right_claw( special_effect_t& );
@@ -1626,6 +1627,25 @@ void item::lobotomizer( special_effect_t& effect )
 
   effect.execute_action = create_proc_action<generic_proc_t>( effect.name_str, effect, effect.driver() );
   chance_on_hit( effect );
+}
+
+// BracketSim: Headmaster's Charge (13937, Darkmaster Gandling, Scholomance), 1 November 2026 (the author: "gives main stat to
+// party members"). "Use: Gives $M1 additional intellect to party members within $a1 yards" (18264: a 15 minute party
+// aura, Intellect scaled by the item's level; the item's use has a 10 minute cooldown). Upstream builds nothing from a party
+// aura. Fifteen minutes outlasts any fight and it is used before the pull, so the wearer has it from the first second; the
+// party's copies are other players and are not simmed.
+void item::headmasters_charge( special_effect_t& effect )
+{
+  if ( !buff_t::find( effect.player, "headmasters_charge" ) )
+  {
+    const double amount = effect.driver()->effectN( 1 ).average( effect.item );
+    auto buff = make_buff<stat_buff_t>( effect.player, "headmasters_charge", effect.driver(), effect.item );
+    buff->stats.clear();
+    buff->add_stat( STAT_INTELLECT, amount );
+    buff->set_duration( effect.driver()->duration() );
+    effect.player->register_combat_begin( [ buff ]( player_t* ) { buff->trigger(); } );
+  }
+  effect.type = SPECIAL_EFFECT_NONE;  // no use action: it is already up
 }
 
 // BracketSim: World Breaker (30090), 23 September 2026. Driver 36111: "Increases
@@ -8253,6 +8273,7 @@ void unique_gear::register_special_effects()
   register_special_effect( 33489,   item::blackout_truncheon ); /* Blackout Truncheon - Blinding Speed, 0.8 PPM (wowsims tbc) */
   register_special_effect( 34580,   item::despair ); /* Despair - Impale, 0.5 PPM (wowsims tbc) */
   register_special_effect( 24388,   item::lobotomizer ); /* The Lobotomizer - Brain Damage, 0.4 PPM (the author, 30 Oct 2026) */
+  register_special_effect( 18264,   item::headmasters_charge ); /* Headmaster's Charge - Intellect for the whole fight (the author, 1 Nov 2026) */
   // 14 Oct 2026: the rest of the Loot Finder's CHANCE_ON_HIT weapons with a rate in wowsims (see legacy_coh_spell).
   register_special_effect( 21151,  gutgore_ripper );       /* Gutgore Ripper 17071 - 1.0 PPM (wowsims classic) */
   register_special_effect( 69180,  gutgore_ripper );       /* Rusted Gutgore Ripper 49437 */
