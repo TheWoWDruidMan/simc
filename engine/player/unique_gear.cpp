@@ -2045,7 +2045,12 @@ static void the_bladefist( special_effect_t& effect )
   effect.name_str     = "the_bladefist";
   effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
   effect.proc_flags2_ = PF2_ALL_HIT;
-  effect.proc_chance_ = 2.7 / 60.0;
+  /*
+   * 6.6% A MAIN-HAND HIT (2 Nov 2026, fitted from a log; was 2.7 / 60 = 4.5%). A Fury Warrior with it in the main hand,
+   * one report: 325 procs from ~4,934 main-hand hits (6.4-6.9% by maximum likelihood). Own-hand only, as before: within
+   * 1.5 ms of a proc, 8 sit on main-hand-only hits and 2 on off-hand-only, with the two hands landing ~equal hits.
+   */
+  effect.proc_chance_ = 0.066;
   effect.ppm_         = 0;
   /*
    * NO 45 SEC COOLDOWN (1 Nov 2026, the author: the cooldown is the Timewalking version's only). The 45 sec is the haste
