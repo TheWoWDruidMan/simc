@@ -3351,8 +3351,11 @@ void item::souldrinker( special_effect_t& effect )
   struct drain_life_t final : public spell_t
   {
     double share;
+    // One action per weapon (3 Nov 2026, the author: "nice to know how much my offhand souldrinker did vs main hand").
+    // Both swords used to share the name "drain_life", so the report merged them into one line. Each sword always
+    // procced on its own; only the name changes, so no damage number moves.
     drain_life_t( const special_effect_t& e, double s )
-      : spell_t( "drain_life", e.player, e.driver() ), share( s )
+      : spell_t( e.item && e.item->slot == SLOT_OFF_HAND ? "drain_life_oh" : "drain_life", e.player, e.driver() ), share( s )
     {
       background = may_crit = true;
       // SHADOW school, so it ignores armour - which is most of its value.
