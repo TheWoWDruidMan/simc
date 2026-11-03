@@ -739,6 +739,31 @@ void scale_factors_to_json( JsonOutput root, const player_t& p )
   }
 }
 
+// BracketSim: each stat weight's own 95% error (scale_factor_control.cpp works it out; the JSON never carried it,
+// so a reader had no error bars and treated every weight as exact). Same units as "scale_factors".
+void scale_factors_error_to_json( JsonOutput root, const player_t& p )
+{
+  if ( p.sim->report_precision < 0 )
+    p.sim->report_precision = 2;
+
+  auto sm = p.sim->scaling->scaling_metric;
+  double divisor = 1.0;
+  if ( p.sim->scaling->normalize_scale_factors )
+  {
+    divisor = p.scaling->scaling[ sm ].get_stat( p.normalize_by() ) / p.sim->scaling_normalized;
+    if ( divisor == 0 )
+      divisor = 1.0;
+  }
+
+  for ( stat_e i = STAT_NONE; i < STAT_MAX; i++ )
+  {
+    if ( p.scaling->scales_with[ i ] )
+    {
+      root[ util::stat_type_abbrev( i ) ] = p.scaling->scaling_error[ sm ].get_stat( i ) / std::fabs( divisor );
+    }
+  }
+}
+
 void scale_factors_all_to_json( JsonOutput root, const player_t& p )
 {
   if ( p.sim->report_precision < 0 )
@@ -879,6 +904,7 @@ void to_json( JsonOutput& arr, const ::report::json::report_configuration_t& rep
   {
     scale_factors_to_json( root[ "scale_factors" ], p );
     scale_factors_all_to_json( root[ "scale_factors_all" ], p );
+    scale_factors_error_to_json( root[ "scale_factors_error" ], p );
     scale_deltas_to_json( root[ "scale_deltas" ], p );
   }
 
