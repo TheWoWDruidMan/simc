@@ -4685,7 +4685,8 @@ void player_t::create_actions()
     };
     // 14 Oct 2026 (the author: "yeah do" it): on-use RINGS too - no action list presses a ring (Mark of the Dragon Lord's
     // Versatility worked and was never used). A use with no buff or action (a teleport) builds nothing and is never pressed.
-    for ( auto slot : { SLOT_MAIN_HAND, SLOT_OFF_HAND, SLOT_FINGER_1, SLOT_FINGER_2 } )
+    // 5 Nov 2026: and NECKS - Gigantifier and Knick of Time (damage / haste for 15 sec) were never pressed either.
+    for ( auto slot : { SLOT_MAIN_HAND, SLOT_OFF_HAND, SLOT_FINGER_1, SLOT_FINGER_2, SLOT_NECK } )
     {
       const auto& it = items[ slot ];
       if ( !it.active() || !it.has_use_special_effect() )
@@ -5850,6 +5851,11 @@ double player_t::composite_melee_haste() const
     // being Bloodlust. See bracketsim_raid_haste.
     if ( bracketsim.raid_haste_buff && bracketsim.raid_haste_buff->check() )
       h *= 1.0 / ( 1.0 + bracketsim.raid_haste_buff->check_value() );
+
+    // BracketSim (5 Nov 2026): item haste with no rating (Knick of Time).
+    for ( const buff_t* b : bracketsim.item_haste_pct_buffs )
+      if ( b->check() )
+        h *= 1.0 / ( 1.0 + b->check_value() );
   }
 
   return h;
@@ -6193,6 +6199,11 @@ double player_t::composite_spell_haste() const
     // being Bloodlust. See bracketsim_raid_haste.
     if ( bracketsim.raid_haste_buff && bracketsim.raid_haste_buff->check() )
       h *= 1.0 / ( 1.0 + bracketsim.raid_haste_buff->check_value() );
+
+    // BracketSim (5 Nov 2026): item haste with no rating (Knick of Time).
+    for ( const buff_t* b : bracketsim.item_haste_pct_buffs )
+      if ( b->check() )
+        h *= 1.0 / ( 1.0 + b->check_value() );
   }
 
   return h;
@@ -6231,6 +6242,14 @@ double player_t::composite_spell_power( school_e school ) const
   if ( bracketsim.fire_spell_power_buff && bracketsim.fire_spell_power_buff->check() &&
        dbc::is_school( school, SCHOOL_FIRE ) )
     sp += bracketsim.fire_spell_power_buff->check_value();
+
+  // BracketSim (5 Nov 2026): spell power for one school only (Nathrezim Acolyte's Band: Shadow). A spell of two schools
+  // takes the larger.
+  double school_sp = 0;
+  for ( school_e s : { SCHOOL_PHYSICAL, SCHOOL_HOLY, SCHOOL_FIRE, SCHOOL_NATURE, SCHOOL_FROST, SCHOOL_SHADOW, SCHOOL_ARCANE } )
+    if ( bracketsim.school_spell_power[ s ] > 0 && dbc::is_school( school, s ) )
+      school_sp = std::max( school_sp, bracketsim.school_spell_power[ s ] );
+  sp += school_sp;
 
   return sp;
 }
@@ -6438,6 +6457,11 @@ double player_t::composite_player_multiplier( school_e school ) const
 
   // BracketSim: bracketsim_damage_done (Icecrown Citadel buff, Plague Stream).
   m *= bracketsim.damage_done_mult;
+
+  // BracketSim (5 Nov 2026): item buffs of +N% damage done (Gigantifier).
+  for ( const buff_t* b : bracketsim.item_damage_pct_buffs )
+    if ( b->check() )
+      m *= 1.0 + b->check_value();
 
   return m;
 }

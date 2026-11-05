@@ -372,6 +372,10 @@ struct player_t : public actor_t
     std::string damage_done;
     double damage_done_mult = 1.0;
     buff_t* fire_spell_power_buff = nullptr;
+    // 5 Nov 2026 (items outside the Loot Finder, batch 2): item buffs with no stat - +N% damage done (Gigantifier), +N%
+    // haste (Knick of Time) - read while up, and spell power for one school only (Nathrezim Acolyte's Band: Shadow).
+    std::vector<buff_t*> item_damage_pct_buffs, item_haste_pct_buffs;
+    std::array<double, SCHOOL_MAX> school_spell_power{};
     // "<percent>/<duration seconds>/<period seconds>", e.g. "15/40/300" for
     // Drums of Fury. A raid-wide HASTE percentage, which no stat buff can
     // express: Bloodlust is a level 48 spell (the engine's own data says so, and

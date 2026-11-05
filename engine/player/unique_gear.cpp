@@ -2210,6 +2210,11 @@ struct log_pet_hit_t : public generic_proc_t
   }
   double composite_crit_chance() const override { return crit; }
   double composite_da_multiplier( const action_state_t* ) const override { return 1.0; }
+  // 5 Nov 2026: and none of the player's damage multipliers or Versatility either - they were still applied, so the
+  // logged hit came out 11-23% high (Book of the Dead's Skeleton 79 vs 71 logged, Emerald Dragon Whelp 81.5 vs 66).
+  double composite_player_multiplier( const action_state_t* ) const override { return 1.0; }
+  double composite_versatility( const action_state_t* ) const override { return 1.0; }
+  double composite_persistent_multiplier( const action_state_t* ) const override { return 1.0; }
   double composite_target_multiplier( player_t* ) const override { return 1.0; }
   double composite_target_armor( const action_state_t* ) const override { return 0; }
 };
@@ -2746,6 +2751,807 @@ static void talon_of_alar( special_effect_t& effect )
   };
   action_t* hit = create_proc_action<shot_power_hit_t>( "shot_power_hit", *hit_effect );
   new talon_hit_cb_t( *hit_effect, buff, hit );
+}
+
+/*
+ * BracketSim (5 Nov 2026, batch 2 - the author: "keep looking into the remaining not coded ... Do everything properly"). The
+ * all-items audit's next ~45 items whose numbers the client's data gives: the amount at the item's own level, the proc
+ * rate / chance / cooldown from the driver. What the data cannot give is left out and named in each comment, so these
+ * err low. Not here, with the reason: summons (no pet data - the PET rule), channels that lock the player (Torrent
+ * Caller's Shell, Brimming Ember Shard, Goblin Dragon Gun: each deals less than the player would in the same seconds, so
+ * not pressing is right; Hargal's Bladestorm: the data does not say what can be pressed during it), Buzzing Orb Core
+ * (its stacks per second "can vary" - no rate in the data), Abyssal Trap (the boss never walks into
+ * it), Moonwell Chalice (breaks on entering combat), Fungarian Mystic's Cluster (its Mastery goes to allies), Unstable
+ * Elemental Confluence (no school or target in its data), "vs Demons / Undead / Beasts" bonuses (the sim's boss is
+ * none), kill / PvP / damage-taken effects, Fear and The Sleeper (a Rogue ability list), Netherstrand Longbow.
+ */
+
+// Every stat an aura or PARTY aura gives at the item's level. The old jewelcrafted necklaces and Atiesh are party
+// auras - the wearer included - which the generic builder skips, so they did nothing.
+static std::vector<std::pair<stat_e, double>> item_spell_stats( const special_effect_t& e, const spell_data_t* s )
+{
+  std::vector<std::pair<stat_e, double>> out;
+  for ( const auto& eff : s->effects() )
+  {
+    if ( eff.type() != E_APPLY_AURA && eff.type() != E_APPLY_AREA_AURA_PARTY )
+      continue;
+    const double v = eff.average( e.item );
+    switch ( eff.subtype() )
+    {
+      case A_MOD_STAT:
+        out.emplace_back( eff.misc_value1() == -1 ? STAT_ALL : static_cast<stat_e>( eff.misc_value1() + 1 ), v );
+        break;
+      case A_MOD_RATING:
+        for ( stat_e st : util::translate_all_rating_mod( eff.misc_value1() ) )
+          out.emplace_back( st, v );
+        break;
+      case A_MOD_DAMAGE_DONE:
+        if ( eff.misc_value1() & 0x7E )
+          out.emplace_back( STAT_SPELL_POWER, v );
+        break;
+      case A_MOD_ATTACK_POWER:
+        out.emplace_back( STAT_ATTACK_POWER, v );
+        break;
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
+static stat_buff_t* item_stat_buff( special_effect_t& e, const std::string& name, const spell_data_t* s )
+{
+  if ( auto b = dynamic_cast<stat_buff_t*>( buff_t::find( e.player, name ) ) )
+    return b;
+  auto b = make_buff<stat_buff_t>( e.player, name, s, e.item );
+  b->stats.clear();
+  for ( auto [ st, v ] : item_spell_stats( e, s ) )
+    b->add_stat( st, v );
+  return b;
+}
+
+// A stat aura that is on the whole fight: an equipped passive, or a 30 minute party buff used before the pull (its
+// use is then not a button in the fight).
+static void item_permanent_stats( special_effect_t& effect, const std::string& name )
+{
+  effect.name_str = name;
+  auto b = item_stat_buff( effect, name, effect.driver() );
+  b->set_duration( timespan_t::zero() );
+  effect.player->register_combat_begin( b );
+  effect.disable_buff();
+  effect.disable_action();
+  effect.type = SPECIAL_EFFECT_EQUIP;
+}
+static void therazanes_touch( special_effect_t& e )        { item_permanent_stats( e, "therazanes_touch" ); }
+static void power_of_the_guardian( special_effect_t& e )   { item_permanent_stats( e, "power_of_the_guardian" ); }  // Atiesh
+static void jewelcrafted_party_buff( special_effect_t& e ) // Amulet of the Moon, Eye of the Night, Embrace of the Dawn...
+{ item_permanent_stats( e, util::tokenize_fn( e.driver()->name_cstr() ) ); }
+
+// Corrupted Rings' Purified 310362: "Your damage and healing are increased by $s1%". Their corruption downsides act on
+// kills, low health, movement or other targets - none in a single-target sim.
+static void purified_corruption( special_effect_t& effect )
+{
+  effect.type = SPECIAL_EFFECT_NONE;
+  if ( buff_t::find( effect.player, "purified" ) )  // the same aura from a second ring does not stack
+    return;
+  // Shown as a constant buff so the report says it is on.
+  effect.player->register_combat_begin( make_buff( effect.player, "purified", effect.driver() )->set_duration( timespan_t::zero() ) );
+  const double m = 1.0 + effect.driver()->effectN( 1 ).percent();
+  for ( school_e s = SCHOOL_NONE; s < SCHOOL_MAX; s++ )
+    effect.player->base.damage_multiplier[ s ] *= m;
+}
+
+// Savage Bow 378315: "Your pet ... deal $s1% more damage" (Modify Pet Damage Done%, the bow's level).
+static void savage_inspiration( special_effect_t& effect )
+{
+  effect.player->base.pet_damage_multiplier *= 1.0 + effect.driver()->effectN( 1 ).average( effect.item ) / 100.0;
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+// "+N Weapon Damage" (Damage Done, physical): added to every weapon-based hit of each hand.
+static void item_weapon_damage( special_effect_t& effect )
+{
+  const double v = effect.driver()->effectN( 1 ).average( effect.item );
+  for ( weapon_t* w : { &effect.player->main_hand_weapon, &effect.player->off_hand_weapon } )
+    if ( w->type != WEAPON_NONE )
+      w->bonus_dmg += v;
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+// Nathrezim Acolyte's Band 331993: "Increase Shadow damage dealt by $s1" - Shadow spell power.
+static void call_of_the_shadows( special_effect_t& effect )
+{
+  effect.player->bracketsim.school_spell_power[ SCHOOL_SHADOW ] += effect.driver()->effectN( 1 ).average( effect.item );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+// On-use buffs.
+static void twilight_serpent( special_effect_t& effect )   // 56184: spell power for 20 sec (its serpent left out)
+{
+  effect.custom_buff = item_stat_buff( effect, "twilight_serpent", effect.driver() );
+  effect.disable_action();
+}
+static void gigantifier( special_effect_t& effect )        // 428791: damage done +$s1% for 15 sec
+{
+  auto b = make_buff( effect.player, "gigantifier", effect.driver() )
+             ->set_default_value( effect.driver()->effectN( 1 ).percent() )
+             ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER );
+  effect.player->bracketsim.item_damage_pct_buffs.push_back( b );
+  effect.custom_buff = b;
+  effect.disable_action();
+}
+static void knick_of_time( special_effect_t& effect )      // 428803: haste +$s1% for 15 sec (the enemies' slow left out)
+{
+  auto b = make_buff( effect.player, "knick_of_time", effect.driver() )
+             ->set_default_value( effect.driver()->effectN( 1 ).percent() )
+             ->add_invalidate( CACHE_HASTE );
+  effect.player->bracketsim.item_haste_pct_buffs.push_back( b );
+  effect.custom_buff = b;
+  effect.disable_action();
+}
+
+// A burst the item fires: `count` hits of `hit`, `gap` apart, starting `delay` after it is used or procs.
+struct item_burst_t : public generic_proc_t
+{
+  action_t* hit;
+  int count;
+  timespan_t gap, delay;
+  item_burst_t( const special_effect_t& e, util::string_view n, action_t* h, int c, timespan_t g, timespan_t d )
+    : generic_proc_t( e, n, spell_data_t::nil() ), hit( h ), count( c ), gap( g ), delay( d )
+  {
+    callbacks = may_crit = may_miss = false;
+    harmful = false;
+    quiet = true;
+    background = true;
+  }
+  void execute() override
+  {
+    player_t* t = target;
+    for ( int i = 0; i < count; i++ )
+    {
+      timespan_t at = delay + gap * i;
+      if ( at <= timespan_t::zero() )
+        hit->execute_on_target( t );
+      else
+        make_event( *sim, at, [ this, t ]() { hit->execute_on_target( t->is_sleeping() ? player->target : t ); } );
+    }
+  }
+};
+
+static void item_use_burst( special_effect_t& effect, const std::string& name, double amount, school_e school, int count,
+                            timespan_t gap, timespan_t delay, int targets, bool split, const spell_data_t* spell = nullptr )
+{
+  effect.name_str = name;
+  effect.disable_buff();
+  auto hit = flat_item_hit( effect, name, amount, school, targets, split, spell );
+  effect.execute_action = create_proc_action<item_burst_t>( name + "_use", effect, hit, count, gap, delay );
+}
+static void alerages_reserve_keg( special_effect_t& e )    // 127793: $s2 every 0.5 sec for 6 sec to nearby enemies
+{ item_use_burst( e, "alerages_reserve_keg", e.driver()->effectN( 2 ).average( e.item ), SCHOOL_FIRE, 12,
+                  timespan_t::from_seconds( 0.5 ), timespan_t::zero(), -1, false ); }
+static void magma_serpent_lure( special_effect_t& e )      // 408913: after $s2 sec, $s1 a second for $s3 sec, split
+{
+  const spell_data_t* d = e.player->find_spell( 408913 );
+  item_use_burst( e, "magma_lure", d->effectN( 1 ).average( e.item ), SCHOOL_FIRE, as<int>( d->effectN( 3 ).base_value() ),
+                  timespan_t::from_seconds( 1 ), timespan_t::from_seconds( d->effectN( 2 ).base_value() ), -1, true );
+}
+static void arathi_demolition_charge( special_effect_t& e ) // ${$<rolemult>*$445516s1} Fire split between all enemies
+{
+  const spell_data_t* d = e.player->find_spell( 445516 );
+  item_use_burst( e, "arathi_demolition_charge", d->effectN( 1 ).average( e.item ) * role_mult( e.player ), SCHOOL_FIRE,
+                  1, timespan_t::zero(), timespan_t::zero(), -1, true );
+}
+static void blastmaster3000( special_effect_t& e )         // "a random number" (1 to 3) of grenades: ONE, the lowest
+{
+  const spell_data_t* d = e.player->find_spell( 1214939 );
+  item_use_burst( e, "blastmaster3000", d->effectN( 1 ).average( e.item ) * role_mult( e.player ), SCHOOL_FIRE,
+                  1, timespan_t::zero(), timespan_t::zero(), -1, true );
+}
+
+// Friendship Censer 406459: one friend of three - $406477s3 Physical to the target (Angry Friend 406488), a heal (not
+// simmed), or a random secondary stat +$406477s2 for 20 sec (Encouraging Friend 406485).
+struct censing_friendship_t : public generic_proc_t
+{
+  action_t* punch;
+  std::vector<buff_t*> stats;
+  censing_friendship_t( const special_effect_t& e ) : generic_proc_t( e, "censing_friendship", spell_data_t::nil() )
+  {
+    callbacks = may_crit = may_miss = harmful = false;
+    quiet = background = true;
+    const spell_data_t* d = e.player->find_spell( 406477 );
+    punch = create_proc_action<flat_item_hit_t>( "angry_friend", e, e.player->find_spell( 406488 ),
+                                                 d->effectN( 3 ).average( e.item ), SCHOOL_PHYSICAL, 0, false );
+    const spell_data_t* enc = e.player->find_spell( 406485 );
+    for ( auto [ st, tag ] : { std::pair{ STAT_CRIT_RATING, "crit" }, std::pair{ STAT_HASTE_RATING, "haste" },
+                               std::pair{ STAT_MASTERY_RATING, "mastery" }, std::pair{ STAT_VERSATILITY_RATING, "versatility" } } )
+    {
+      auto b = make_buff<stat_buff_t>( e.player, std::string( "encouraging_friend_" ) + tag, enc, e.item );
+      b->stats.clear();
+      b->add_stat( st, d->effectN( 2 ).average( e.item ) );
+      stats.push_back( b );
+    }
+  }
+  void execute() override
+  {
+    switch ( rng().range( 3 ) )
+    {
+      case 0: punch->execute_on_target( target ); break;
+      case 1: stats[ rng().range( stats.size() ) ]->trigger(); break;
+      default: break;  // the heal
+    }
+  }
+};
+static void friendship_censer( special_effect_t& effect )
+{
+  effect.name_str = "censing_friendship";
+  effect.disable_buff();
+  effect.execute_action = create_proc_action<censing_friendship_t>( "censing_friendship", effect );
+}
+
+// A damage-over-time the item applies: `per_tick` each tick of `spell` (its duration and tick time unless given).
+struct flat_item_dot_t : public generic_proc_t
+{
+  bool burst_at_max = false;  // Sulfuric Burning: the last stack removes them all
+  flat_item_dot_t( const special_effect_t& e, util::string_view n, const spell_data_t* s, double per_tick, school_e sch,
+                   timespan_t duration, timespan_t tick )
+    : generic_proc_t( e, n, s )
+  {
+    base_dd_min = base_dd_max = 0;
+    base_td = per_tick;
+    spell_power_mod.direct = attack_power_mod.direct = spell_power_mod.tick = attack_power_mod.tick = 0;
+    if ( sch != SCHOOL_NONE )
+      school = sch;
+    if ( duration > timespan_t::zero() )
+      dot_duration = duration;
+    if ( tick > timespan_t::zero() )
+      base_tick_time = tick;
+    tick_may_crit = true;
+    may_crit = false;
+    hasted_ticks = false;
+  }
+  void execute() override
+  {
+    if ( burst_at_max )
+    {
+      dot_t* d = get_dot( target );
+      if ( d->is_ticking() && d->current_stack() >= dot_max_stack - 1 )
+      {
+        d->cancel();
+        return;
+      }
+    }
+    generic_proc_t::execute();
+  }
+};
+
+static flat_item_dot_t* item_dot( special_effect_t& effect, const std::string& name, const spell_data_t* s, double per_tick,
+                                  school_e school = SCHOOL_NONE, timespan_t duration = timespan_t::zero(),
+                                  timespan_t tick = timespan_t::zero() )
+{
+  if ( auto a = dynamic_cast<flat_item_dot_t*>( effect.player->find_action( name ) ) )
+    return a;
+  return debug_cast<flat_item_dot_t*>(
+      create_proc_action<flat_item_dot_t>( name, effect, s, per_tick, school, duration, tick ) );
+}
+
+// Spirit-Rending Poison 1297145: $1297103u (5) stacks on the target, each $1297051s1 Nature every 2 sec for 30 sec.
+struct spirit_rending_volley_t : public generic_proc_t
+{
+  action_t* dot;
+  spirit_rending_volley_t( const special_effect_t& e, action_t* d ) : generic_proc_t( e, "spirit_rending_volley", spell_data_t::nil() ), dot( d )
+  {
+    callbacks = may_crit = may_miss = harmful = false;
+    quiet = background = true;
+  }
+  void execute() override
+  {
+    player_t* t = target;
+    make_event( *sim, timespan_t::from_seconds( 2 ), [ this, t ]() {
+      for ( int i = 0; i < 5; i++ )
+        dot->execute_on_target( t->is_sleeping() ? player->target : t );
+    } );
+  }
+};
+static void spirit_rending_poison( special_effect_t& effect )
+{
+  effect.name_str = "spirit_rending_poison";
+  effect.disable_buff();
+  const spell_data_t* s = effect.player->find_spell( 1297103 );
+  auto d = item_dot( effect, "spirit_rending_poison", s, effect.player->find_spell( 1297051 )->effectN( 1 ).average( effect.item ),
+                     SCHOOL_NATURE );
+  d->dot_max_stack = s->max_stacks();
+  effect.execute_action = create_proc_action<spirit_rending_volley_t>( "spirit_rending_volley", effect, d );
+}
+
+// Procs.
+static void brain_damage_308776( special_effect_t& e )     // The Lobotomizer 172137: Brain Damage 308774 (its debuff left out)
+{
+  const spell_data_t* s = e.player->find_spell( 308774 );
+  e.name_str = "brain_damage";
+  e.disable_buff();
+  e.execute_action = flat_item_hit( e, "brain_damage", s->effectN( 1 ).average( e.item ), SCHOOL_PHYSICAL, 0, false, s );
+  new dbc_proc_callback_t( e.player, e );
+}
+static void puzzling_crypt_relic( special_effect_t& e )    // ${$s1*$<rolemult>} Physical split (Relic Overload 1283381)
+{
+  e.name_str = "relic_overload";
+  e.disable_buff();
+  e.execute_action = flat_item_hit( e, "relic_overload", e.driver()->effectN( 1 ).average( e.item ) * role_mult( e.player ),
+                                    SCHOOL_PHYSICAL, -1, true, e.player->find_spell( 1283381 ) );
+  new dbc_proc_callback_t( e.player, e );
+}
+static void volatile_crystal_shard( special_effect_t& e )  // $s1 Physical split (409002)
+{
+  e.name_str = "volatile_crystal_shard";
+  e.disable_buff();
+  e.execute_action = flat_item_hit( e, "volatile_crystal_shard", e.driver()->effectN( 1 ).average( e.item ), SCHOOL_PHYSICAL,
+                                    -1, true, e.player->find_spell( 409002 ) );
+  new dbc_proc_callback_t( e.player, e );
+}
+static void drakeforged_magma_charm( special_effect_t& e ) // "up to ${$s1*3}": three Magma Volleys (409095), 1.5 sec apart
+{
+  e.name_str = "magma_volley";
+  e.disable_buff();
+  auto hit = flat_item_hit( e, "magma_volley", e.driver()->effectN( 1 ).average( e.item ), SCHOOL_FIRE, 0, false,
+                            e.player->find_spell( 409095 ) );
+  e.execute_action = create_proc_action<item_burst_t>( "magma_volley_burst", e, hit, 3, timespan_t::from_seconds( 1.5 ),
+                                                       timespan_t::zero() );
+  new dbc_proc_callback_t( e.player, e );
+}
+static void deephunters_bloody_hook( special_effect_t& e ) // ${$<rolemult>*$s1} Physical when the hook retracts (449877, 4 sec);
+{                                                          // the extra bleed from crits while hooked is left out
+  e.name_str = "deephunters_bloody_hook";
+  e.disable_buff();
+  auto hit = flat_item_hit( e, "deephunters_bloody_hook", e.driver()->effectN( 1 ).average( e.item ) * role_mult( e.player ),
+                            SCHOOL_PHYSICAL );
+  e.execute_action = create_proc_action<item_burst_t>( "deephunters_bloody_hook_latch", e, hit, 1, timespan_t::zero(),
+                                                       e.player->find_spell( 449877 )->duration() );
+  new dbc_proc_callback_t( e.player, e );
+}
+static void bashful_book( special_effect_t& e )            // ${$<rolemult>*$s1} Arcane every 2 sec for 20 sec (1216424)
+{
+  e.name_str = "unpublished_steamy_romance_novel";
+  e.disable_buff();
+  e.proc_flags2_ = PF2_ALL_HIT | PF2_PERIODIC_DAMAGE;
+  e.execute_action = item_dot( e, "unpublished_steamy_romance_novel", e.player->find_spell( 1216424 ),
+                               e.driver()->effectN( 1 ).average( e.item ) * role_mult( e.player ), SCHOOL_ARCANE );
+  new dbc_proc_callback_t( e.player, e );
+}
+static void suspended_sulfuric_droplet( special_effect_t& e ) // a Sulfuric Burning stack (406744): $s1 Fire every 2 sec
+{
+  e.name_str = "sulfuric_burning";
+  e.disable_buff();
+  e.proc_flags2_ = PF2_ALL_HIT | PF2_PERIODIC_DAMAGE;
+  const spell_data_t* s = e.player->find_spell( 406744 );
+  auto d = item_dot( e, "sulfuric_burning", s, e.driver()->effectN( 1 ).average( e.item ), SCHOOL_FIRE );
+  d->dot_max_stack = s->max_stacks();
+  d->burst_at_max = true;
+  e.execute_action = d;
+  new dbc_proc_callback_t( e.player, e );
+}
+
+// Ekrazathal's Colored Fang 376801: Red Magic Infusion (377544, 8 sec) - each spell then deals $s1 more Fire (377551).
+static void ekrazathals_colored_fang( special_effect_t& effect )
+{
+  const spell_data_t* buff_spell = effect.player->find_spell( 377544 );
+  effect.name_str = "red_magic_infusion";
+  buff_t* buff = buff_t::find( effect.player, "red_magic_infusion" );
+  if ( !buff )
+    buff = make_buff( effect.player, "red_magic_infusion", buff_spell );
+  effect.custom_buff = buff;
+  effect.disable_action();
+  new dbc_proc_callback_t( effect.item, effect );
+
+  auto* extra = new special_effect_t( effect.player );
+  extra->name_str     = "red_magic_infusion_damage";
+  extra->type         = SPECIAL_EFFECT_EQUIP;
+  extra->source       = SPECIAL_EFFECT_SOURCE_ITEM;
+  extra->item         = effect.item;
+  extra->spell_id     = buff_spell->id();
+  extra->proc_flags_  = PF_MAGIC_SPELL | PF_NONE_HARMFUL;  // its damage half; the healing half is not simmed
+  extra->proc_flags2_ = PF2_ALL_HIT;
+  extra->proc_chance_ = 1.0;
+  extra->ppm_         = 0;
+  extra->disable_action();
+  extra->disable_buff();
+  effect.player->special_effects.push_back( extra );
+  auto hit = flat_item_hit( *extra, "red_magic_infusion_damage", effect.driver()->effectN( 1 ).average( effect.item ),
+                            SCHOOL_FIRE, 0, false, effect.player->find_spell( 377551 ) );
+  new item_extra_hit_cb_t( *extra, hit, buff, SCHOOL_NONE );
+}
+
+// Glowing Endmire Stinger 328603: below $s2% health the target is stung for $329127s1 Shadow every 3 sec for 15 sec,
+// once every $s4 sec (the leech's heal not simmed).
+struct endmire_cb_t : public dbc_proc_callback_t
+{
+  double below;
+  endmire_cb_t( const special_effect_t& e, double b ) : dbc_proc_callback_t( e.item, e ), below( b ) {}
+  void trigger( const proc_data_t& data, player_t* t, action_state_t* s, proc_trigger_type_e type ) override
+  {
+    player_t* who = s && s->target ? s->target : t;
+    if ( !who || who->health_percentage() >= below )
+      return;
+    dbc_proc_callback_t::trigger( data, t, s, type );
+  }
+};
+static void glowing_endmire_stinger( special_effect_t& e )
+{
+  e.name_str = "leeching_sting";
+  e.disable_buff();
+  e.cooldown_ = timespan_t::from_seconds( e.driver()->effectN( 4 ).base_value() );
+  const spell_data_t* s = e.player->find_spell( 329127 );
+  e.execute_action = item_dot( e, "leeching_sting", s, s->effectN( 1 ).average( e.item ), SCHOOL_SHADOW, s->duration(),
+                               s->effectN( 1 ).period() );
+  new endmire_cb_t( e, e.driver()->effectN( 2 ).base_value() );
+}
+
+// Blade of Hatred 444410: "Dealing Fire damage has a chance to apply Seething Hate" - $s1 Shadow every 3 sec for 9 sec
+// (444409 / 444466). Only Fire damage rolls the chance; the more-enemies bonus is left out.
+struct fire_only_cb_t : public dbc_proc_callback_t
+{
+  fire_only_cb_t( const special_effect_t& e ) : dbc_proc_callback_t( e.item, e ) {}
+  void trigger( const proc_data_t& data, player_t* t, action_state_t* s, proc_trigger_type_e type ) override
+  {
+    if ( !s || !s->action || !dbc::is_school( s->action->get_school(), SCHOOL_FIRE ) )
+      return;
+    dbc_proc_callback_t::trigger( data, t, s, type );
+  }
+};
+static void blade_of_hatred( special_effect_t& e )
+{
+  e.name_str = "seething_hate";
+  e.disable_buff();
+  e.proc_flags2_ = PF2_ALL_HIT | PF2_PERIODIC_DAMAGE;
+  const spell_data_t* s = e.player->find_spell( 444409 );
+  e.execute_action = item_dot( e, "seething_hate", s, e.driver()->effectN( 1 ).average( e.item ), SCHOOL_SHADOW,
+                               s->duration(), s->effectN( 1 ).period() );
+  new fire_only_cb_t( e );
+}
+
+// Death Knight's Anguish 54695: 10% on a melee or ranged attack - Wracking Pains (54696, 20 sec), during which each attack
+// adds an Oozing Wound stack (54697, Critical Strike, up to 10); the stacks go when Wracking Pains ends.
+static void death_knights_anguish( special_effect_t& effect )
+{
+  auto oozing = make_buff<stat_buff_t>( effect.player, "oozing_wound", effect.player->find_spell( 54697 ), effect.item );
+  auto wracking = make_buff( effect.player, "wracking_pains", effect.player->find_spell( 54696 ) )
+                    ->set_stack_change_callback( [ oozing ]( buff_t*, int, int now ) { if ( now == 0 ) oozing->expire(); } );
+  effect.name_str = "wracking_pains";
+  effect.custom_buff = wracking;
+  effect.disable_action();
+  new dbc_proc_callback_t( effect.item, effect );
+
+  auto* extra = new special_effect_t( effect.player );
+  extra->name_str     = "oozing_wound";
+  extra->type         = SPECIAL_EFFECT_EQUIP;
+  extra->source       = SPECIAL_EFFECT_SOURCE_ITEM;
+  extra->item         = effect.item;
+  extra->spell_id     = 54696;
+  extra->proc_flags_  = PF_MELEE | PF_MELEE_ABILITY | PF_RANGED | PF_RANGED_ABILITY;
+  extra->proc_flags2_ = PF2_ALL_HIT;
+  extra->proc_chance_ = 1.0;
+  extra->ppm_         = 0;
+  extra->disable_action();
+  extra->disable_buff();
+  effect.player->special_effects.push_back( extra );
+  struct cb_t : public dbc_proc_callback_t
+  {
+    buff_t *gate, *stack;
+    cb_t( const special_effect_t& e, buff_t* g, buff_t* s ) : dbc_proc_callback_t( e.player, e ), gate( g ), stack( s ) {}
+    void execute( const spell_data_t*, player_t*, action_state_t* ) override
+    {
+      if ( gate->check() )
+        stack->trigger();
+    }
+  };
+  new cb_t( *extra, wracking, oozing );
+}
+
+// Apparatus of Khaz'goroth: melee crits give Titanic Power (96923, 5 stacks, 30 sec); the use (96934) spends 5 for
+// 5 x $s1 of the highest of Critical Strike, Haste or Mastery for 15 sec (96927's duration). Used at 5 stacks only.
+static void apparatus_titanic_power( special_effect_t& effect )
+{
+  effect.name_str = "titanic_power";
+  buff_t* b = buff_t::find( effect.player, "titanic_power" );
+  if ( !b )
+    b = make_buff( effect.player, "titanic_power", effect.player->find_spell( 96923 ) );
+  effect.custom_buff = b;
+  effect.disable_action();
+  effect.proc_flags2_ = PF2_CRIT;
+  new dbc_proc_callback_t( effect.item, effect );
+}
+struct blessing_of_khazgoroth_t : public generic_proc_t
+{
+  buff_t* power;
+  std::vector<std::pair<stat_e, buff_t*>> buffs;
+  blessing_of_khazgoroth_t( const special_effect_t& e ) : generic_proc_t( e, "blessing_of_khazgoroth", spell_data_t::nil() )
+  {
+    callbacks = may_crit = may_miss = harmful = false;
+    background = true;
+    power = buff_t::find( e.player, "titanic_power" );
+    if ( !power )
+      power = make_buff( e.player, "titanic_power", e.player->find_spell( 96923 ) );
+    const double amount = e.driver()->effectN( 1 ).average( e.item ) * power->max_stack();
+    for ( auto [ st, tag ] : { std::pair{ STAT_CRIT_RATING, "crit" }, std::pair{ STAT_HASTE_RATING, "haste" }, std::pair{ STAT_MASTERY_RATING, "mastery" } } )
+    {
+      auto b = make_buff<stat_buff_t>( e.player, std::string( "blessing_of_the_shaper_" ) + tag, e.player->find_spell( 96927 ), e.item );
+      b->stats.clear();
+      b->add_stat( st, amount );
+      buffs.emplace_back( st, b );
+    }
+  }
+  bool ready() override
+  {
+    return power->check() >= power->max_stack() && generic_proc_t::ready();
+  }
+  void execute() override
+  {
+    static constexpr stat_e S[] = { STAT_CRIT_RATING, STAT_HASTE_RATING, STAT_MASTERY_RATING };
+    const stat_e best = util::highest_stat( player, S );
+    power->expire();
+    for ( auto& [ st, b ] : buffs )
+      if ( st == best )
+        b->trigger();
+  }
+};
+static void apparatus_blessing( special_effect_t& effect )
+{
+  effect.name_str = "blessing_of_khazgoroth";
+  effect.disable_buff();
+  effect.execute_action = create_proc_action<blessing_of_khazgoroth_t>( "blessing_of_khazgoroth", effect );
+}
+
+// Zandalarian Hero Charm 24658: Unstable Power (24659) - 12 stacks of spell power for 20 sec, one lost per spell cast.
+static void zandalarian_hero_charm( special_effect_t& effect )
+{
+  const spell_data_t* s = effect.player->find_spell( 24659 );
+  auto b = make_buff<stat_buff_t>( effect.player, "unstable_power", s, effect.item );
+  b->set_initial_stack( s->max_stacks() );
+  effect.custom_buff = b;
+  effect.disable_action();
+
+  auto* extra = new special_effect_t( effect.player );
+  extra->name_str     = "unstable_power_cast";
+  extra->type         = SPECIAL_EFFECT_EQUIP;
+  extra->source       = SPECIAL_EFFECT_SOURCE_ITEM;
+  extra->item         = effect.item;
+  extra->spell_id     = 24659;
+  extra->proc_flags_  = PF_MAGIC_SPELL | PF_NONE_HARMFUL | PF_MAGIC_HEAL | PF_NONE_HELPFUL;
+  extra->proc_flags2_ = PF2_ALL_CAST;
+  extra->proc_chance_ = 1.0;
+  extra->ppm_         = 0;
+  extra->disable_action();
+  extra->disable_buff();
+  effect.player->special_effects.push_back( extra );
+  struct cb_t : public dbc_proc_callback_t
+  {
+    buff_t* buff;
+    cb_t( const special_effect_t& e, buff_t* b ) : dbc_proc_callback_t( e.player, e ), buff( b ) {}
+    void execute( const spell_data_t*, player_t*, action_state_t* ) override { buff->decrement(); }
+  };
+  new cb_t( *extra, b );
+}
+
+// Zandalarian Hero Medallion 24661: Restless Strength (24662) - each melee or ranged hit deals $24662m1 x the stacks
+// left more (20 at first), then loses a stack.
+static void zandalarian_hero_medallion( special_effect_t& effect )
+{
+  const spell_data_t* s = effect.player->find_spell( 24662 );
+  auto b = make_buff( effect.player, "restless_strength", s )->set_initial_stack( s->max_stacks() );
+  effect.custom_buff = b;
+  effect.disable_action();
+
+  auto* extra = new special_effect_t( effect.player );
+  extra->name_str     = "restless_strength_hit";
+  extra->type         = SPECIAL_EFFECT_EQUIP;
+  extra->source       = SPECIAL_EFFECT_SOURCE_ITEM;
+  extra->item         = effect.item;
+  extra->spell_id     = 24662;
+  extra->proc_flags_  = PF_MELEE | PF_MELEE_ABILITY | PF_RANGED | PF_RANGED_ABILITY;
+  extra->proc_flags2_ = PF2_ALL_HIT;
+  extra->proc_chance_ = 1.0;
+  extra->ppm_         = 0;
+  extra->disable_action();
+  extra->disable_buff();
+  effect.player->special_effects.push_back( extra );
+  auto hit = flat_item_hit( *extra, "restless_strength", 0, SCHOOL_PHYSICAL, 0, false, s );
+  struct cb_t : public dbc_proc_callback_t
+  {
+    buff_t* buff;
+    action_t* hit;
+    double per;
+    cb_t( const special_effect_t& e, buff_t* b, action_t* h, double p ) : dbc_proc_callback_t( e.player, e ), buff( b ), hit( h ), per( p ) {}
+    void execute( const spell_data_t*, player_t*, action_state_t* s ) override
+    {
+      if ( !buff->check() || !s || !s->target || s->action == hit )
+        return;
+      hit->base_dd_min = hit->base_dd_max = per * buff->check();
+      hit->execute_on_target( s->target );
+      buff->decrement();
+    }
+  };
+  new cb_t( *extra, b, hit, s->effectN( 1 ).average( effect.item ) );
+}
+
+// Ashtongue talismans (Black Temple class trinkets) for the classes not already coded in their own module (Rogue,
+// Hunter): a named ability rolls the talisman's chance. Mana returns are not simmed.
+struct ashtongue_cb_t : public dbc_proc_callback_t
+{
+  struct row_t
+  {
+    std::string spell;
+    double chance;
+    buff_t* buff;
+    action_t* dot;
+  };
+  std::vector<row_t> rows;
+  ashtongue_cb_t( const special_effect_t& e ) : dbc_proc_callback_t( e.item, e ) {}
+  void execute( const spell_data_t*, player_t*, action_state_t* s ) override
+  {
+    if ( !s || !s->action )
+      return;
+    for ( auto& r : rows )
+    {
+      if ( !util::str_compare_ci( s->action->data().name_cstr(), r.spell ) || !rng().roll( r.chance ) )
+        continue;
+      if ( r.buff )
+        r.buff->trigger();
+      if ( r.dot && s->target )
+        r.dot->execute_on_target( s->target );
+    }
+  }
+};
+static ashtongue_cb_t* ashtongue( special_effect_t& effect, const char* name )
+{
+  effect.name_str = name;
+  effect.disable_buff();
+  effect.disable_action();
+  effect.proc_chance_ = 1.0;
+  effect.proc_flags2_ = PF2_ALL_HIT | PF2_PERIODIC_DAMAGE | PF2_PERIODIC_HEAL;
+  return new ashtongue_cb_t( effect );
+}
+static buff_t* ashtongue_buff( special_effect_t& e, unsigned id )
+{
+  const spell_data_t* s = e.player->find_spell( id );
+  return item_stat_buff( e, util::tokenize_fn( s->name_cstr() ), s );
+}
+static void ashtongue_equilibrium( special_effect_t& e )   // Druid: Mangle 40%, Starfire 25%, Rejuvenation 25%
+{
+  auto cb = ashtongue( e, "ashtongue_talisman_of_equilibrium" );
+  cb->rows.push_back( { "Mangle", 0.40, ashtongue_buff( e, 40452 ), nullptr } );
+  cb->rows.push_back( { "Starfire", 0.25, ashtongue_buff( e, 40445 ), nullptr } );
+  cb->rows.push_back( { "Rejuvenation", 0.25, ashtongue_buff( e, 40446 ), nullptr } );
+}
+static void ashtongue_acumen( special_effect_t& e )        // Priest: Shadow Word: Pain / Renew ticks, 10% ($h)
+{
+  auto cb = ashtongue( e, "ashtongue_talisman_of_acumen" );
+  const double h = e.driver()->proc_chance();
+  cb->rows.push_back( { "Shadow Word: Pain", h, ashtongue_buff( e, 40441 ), nullptr } );
+  cb->rows.push_back( { "Renew", h, ashtongue_buff( e, 40440 ), nullptr } );
+}
+static void ashtongue_vision( special_effect_t& e )        // Shaman: Stormstrike 50% attack power
+{
+  auto cb = ashtongue( e, "ashtongue_talisman_of_vision" );
+  cb->rows.push_back( { "Stormstrike", 0.50, ashtongue_buff( e, 40466 ), nullptr } );
+}
+static void ashtongue_zeal( special_effect_t& e )          // Paladin: Judgment 50% - Enduring Judgment 40472, Holy over 8 sec
+{
+  auto cb = ashtongue( e, "ashtongue_talisman_of_zeal" );
+  const spell_data_t* s = e.player->find_spell( 40472 );
+  cb->rows.push_back( { "Judgment", 0.50, nullptr, item_dot( e, "enduring_judgment", s, s->effectN( 1 ).average( e.item ), SCHOOL_HOLY ) } );
+}
+
+
+// Mists of Pandaria Gladiator's two-handers 132586, "Increased PVP Power (2H PVP Weapon Budget)": "Increases your $pri by
+// $s1 (Unique)" - the game shows it as a plain Equip line (Dreadful Gladiator's Greatsword: Primary Stat +39 at item
+// level 15), on in PvE too. Its stat code (67108864) is new to the client data and was read as no stat, so it did
+// nothing. Unique: two of them (Titan's Grip) give it once.
+static void pvp_weapon_budget( special_effect_t& effect )
+{
+  effect.type = SPECIAL_EFFECT_NONE;
+  if ( buff_t::find( effect.player, "gladiators_weapon_primary_stat" ) )
+    return;
+  auto b = make_buff<stat_buff_t>( effect.player, "gladiators_weapon_primary_stat", effect.driver(), effect.item );
+  b->stats.clear();
+  b->add_stat( effect.player->convert_hybrid_stat( STAT_STR_AGI_INT ), effect.driver()->effectN( 1 ).average( effect.item ) );
+  b->set_duration( timespan_t::zero() );
+  effect.player->register_combat_begin( b );
+}
+
+// Fragmented Light Shard 1283377: each proc (5 RPPM, hasted) is a Light Fragment; the $s3th turns them into Blessing
+// Light Shard (1283378) - Primary Stat +$s1 for 15 sec.
+struct light_shard_cb_t : public dbc_proc_callback_t
+{
+  buff_t* fragments;
+  buff_t* blessing;
+  light_shard_cb_t( const special_effect_t& e, buff_t* f, buff_t* b ) : dbc_proc_callback_t( e.item, e ), fragments( f ), blessing( b ) {}
+  void execute( const spell_data_t*, player_t*, action_state_t* ) override
+  {
+    fragments->trigger();
+    if ( fragments->check() >= fragments->max_stack() )
+    {
+      fragments->expire();
+      blessing->trigger();
+    }
+  }
+};
+static void fragmented_light_shard( special_effect_t& effect )
+{
+  effect.name_str = "light_fragment";
+  auto fragments = make_buff( effect.player, "light_fragment", spell_data_t::nil() )
+                     ->set_max_stack( as<int>( effect.driver()->effectN( 3 ).base_value() ) )
+                     ->set_duration( timespan_t::zero() );
+  auto blessing = make_buff<stat_buff_t>( effect.player, "blessing_light_shard", effect.player->find_spell( 1283378 ), effect.item );
+  blessing->stats.clear();
+  blessing->add_stat( effect.player->convert_hybrid_stat( STAT_STR_AGI_INT ), effect.driver()->effectN( 1 ).average( effect.item ) );
+  effect.disable_buff();
+  effect.disable_action();
+  new light_shard_cb_t( effect, fragments, blessing );
+}
+
+// Warlords of Draenor legendary rings (level 40 in this client). Thorasus 187614, Maalus 187615, Nithramus 187611: "increasing
+// damage dealt by ${$<WarlordsTrinketNerf>*$m1/100}% for 15 sec. When this effect ends, each empowered player unleashes a
+// blast ... inflicting damage equal to ${$m1/100}% of all damage they dealt while empowered." WarlordsTrinketNerf is 1 below
+// level 100. $m1 is the use spell's at the ring's level (48 at item level 17: +0.48%). Only the wearer is simmed (the rings
+// of the rest of the group are not), the damage bonus is the wearer's own (not pets'), and the blast is the wearer's own
+// damage only, split between the enemies it hits. Sanctus 187613: Versatility +$m1/100% for 15 sec (the shared damage and
+// healing is not simmed).
+struct savage_hallows_blast_t : public generic_proc_t
+{
+  savage_hallows_blast_t( const special_effect_t& e, const std::string& n, const spell_data_t* s ) : generic_proc_t( e, n, s )
+  {
+    background = true;
+    callbacks = may_crit = false;
+    may_miss = may_dodge = may_parry = may_block = false;
+    aoe = -1;
+    split_aoe_damage = true;
+    spell_power_mod.direct = attack_power_mod.direct = 0;
+  }
+  // The stored damage already carries every multiplier.
+  double composite_da_multiplier( const action_state_t* ) const override { return 1.0; }
+  double composite_player_multiplier( const action_state_t* ) const override { return 1.0; }
+  double composite_versatility( const action_state_t* ) const override { return 1.0; }
+  double composite_persistent_multiplier( const action_state_t* ) const override { return 1.0; }
+  double composite_target_multiplier( player_t* ) const override { return 1.0; }
+  double composite_target_armor( const action_state_t* ) const override { return 0; }
+};
+static void savage_hallows_ring( special_effect_t& effect, unsigned buff_id, unsigned blast_id )
+{
+  const double pct = effect.driver()->effectN( 1 ).average( effect.item ) / 100.0 / 100.0;
+  const std::string name = util::tokenize_fn( effect.driver()->name_cstr() );
+  auto blast = new savage_hallows_blast_t( effect, name + "_blast", effect.player->find_spell( blast_id ) );
+  auto stored = std::make_shared<double>( 0.0 );
+  auto b = make_buff( effect.player, name, effect.player->find_spell( buff_id ) )
+             ->set_default_value( pct )
+             ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
+             ->set_stack_change_callback( [ blast, stored, pct ]( buff_t*, int old, int now ) {
+               if ( old == 0 && now > 0 )
+                 *stored = 0;
+               else if ( now == 0 && *stored > 0 && !blast->player->is_sleeping() && !blast->target->is_sleeping() )
+               {
+                 blast->base_dd_min = blast->base_dd_max = *stored * pct;
+                 blast->execute();
+               }
+             } );
+  effect.player->bracketsim.item_damage_pct_buffs.push_back( b );
+  effect.player->assessor_out_damage.add( assessor::TARGET_DAMAGE + 1, [ b, stored, blast ]( result_amount_type, action_state_t* s ) {
+    if ( b->check() && s->action != blast && s->result_amount > 0 )
+      *stored += s->result_amount;
+    return assessor::CONTINUE;
+  } );
+  effect.custom_buff = b;
+  effect.cooldown_ = timespan_t::from_seconds( 120 );  // "(2 min shared cooldown)" - in the text only
+  effect.disable_action();
+}
+static void thorasus( special_effect_t& e )  { savage_hallows_ring( e, 187619, 187624 ); }
+static void maalus( special_effect_t& e )    { savage_hallows_ring( e, 187620, 187626 ); }
+static void nithramus( special_effect_t& e ) { savage_hallows_ring( e, 187616, 187625 ); }
+static void sanctus( special_effect_t& e )
+{
+  e.custom_buff = make_buff( e.player, "sanctus", e.player->find_spell( 187617 ) )
+                    ->set_default_value( e.driver()->effectN( 1 ).average( e.item ) / 100.0 / 100.0 )
+                    ->set_pct_buff_type( STAT_PCT_BUFF_VERSATILITY );
+  e.cooldown_ = timespan_t::from_seconds( 120 );
+  e.disable_action();
 }
 
 // Dragonwrath, Tarecgosa's Rest, item 71086 - the Firelands caster legendary.
@@ -9135,6 +9941,60 @@ void unique_gear::register_special_effects()
   register_special_effect( 224169,  huntmasters_injector ); /* Huntmaster's Injector 140533 */
   register_special_effect( 224164,  mountain_rage_shaker ); /* Mountain Rage Shaker 121806 */
   register_special_effect( 231943,  fluctuating_arc_capacitor ); /* Fluctuating Arc Capacitor 140035 */
+  // 5 Nov 2026, batch 2: the next ~45 items outside the Loot Finder (see item_spell_stats above for the list left out).
+  register_special_effect( 310362,  purified_corruption );        /* Corrupted Rings 174050-174057: Purified */
+  register_special_effect( 378315,  savage_inspiration );         /* Savage Bow 193495 */
+  register_special_effect( 26596,   item_weapon_damage );         /* Bronze Band of Force 30804 */
+  register_special_effect( 25901,   item_weapon_damage );         /* Might of Cenarius 21189 */
+  register_special_effect( 26598,   item_weapon_damage );         /* Opal Necklace of Impact 21766 */
+  register_special_effect( 33488,   item_weapon_damage );         /* Braided Eternium Chain 24114 */
+  register_special_effect( 331993,  call_of_the_shadows );        /* Nathrezim Acolyte's Band 180349 */
+  register_special_effect( 308911,  therazanes_touch );           /* Therazane's Touch 172134 */
+  register_special_effect( 28142,   power_of_the_guardian );      /* Atiesh 22589 */
+  register_special_effect( 28143,   power_of_the_guardian );      /* Atiesh 22630 */
+  register_special_effect( 28144,   power_of_the_guardian );      /* Atiesh 22631 */
+  register_special_effect( 28145,   power_of_the_guardian );      /* Atiesh 22632 */
+  register_special_effect( 25207,   jewelcrafted_party_buff );    /* Amulet of the Moon 20830 */
+  register_special_effect( 25211,   jewelcrafted_party_buff );    /* Heavy Golden Necklace of Battle 20831 */
+  register_special_effect( 25607,   jewelcrafted_party_buff );    /* Jade Pendant of Blasting 20966 */
+  register_special_effect( 31033,   jewelcrafted_party_buff );    /* Eye of the Night 24116 */
+  register_special_effect( 31026,   jewelcrafted_party_buff );    /* Embrace of the Dawn 24117 */
+  register_special_effect( 31035,   jewelcrafted_party_buff );    /* Chain of the Twilight Owl 24121 */
+  register_special_effect( 31025,   jewelcrafted_party_buff );    /* Braided Eternium Chain 24114 */
+  register_special_effect( 56184,   twilight_serpent );           /* Figurine - Twilight Serpent 42395 */
+  register_special_effect( 428791,  gigantifier );                /* Gigantifier 211346 */
+  register_special_effect( 428803,  knick_of_time );              /* Knick of Time 211345 */
+  register_special_effect( 127793,  alerages_reserve_keg );       /* Alerage's Reserve Keg 88369 */
+  register_special_effect( 408915,  magma_serpent_lure );         /* Magma Serpent Lure 205229 */
+  register_special_effect( 445165,  arathi_demolition_charge );   /* Arathi Demolition Charge 220118 */
+  register_special_effect( 1214941, blastmaster3000 );            /* Blastmaster3000 234717 */
+  register_special_effect( 406459,  friendship_censer );          /* Friendship Censer 204728 */
+  register_special_effect( 1297145, spirit_rending_poison );      /* Spirit-Rending Poison 274497 */
+  register_special_effect( 308776,  brain_damage_308776 );        /* The Lobotomizer 172137 */
+  register_special_effect( 1283380, puzzling_crypt_relic );       /* Puzzling Crypt Relic 252677 */
+  register_special_effect( 408609,  volatile_crystal_shard );     /* Volatile Crystal Shard 205192 */
+  register_special_effect( 408631,  drakeforged_magma_charm );    /* Drakeforged Magma Charm 205195 */
+  register_special_effect( 449541,  deephunters_bloody_hook );    /* Deephunter's Bloody Hook 221233 */
+  register_special_effect( 1216398, bashful_book );               /* Bashful Book 235283 */
+  register_special_effect( 406743,  suspended_sulfuric_droplet ); /* Suspended Sulfuric Droplet 204805 */
+  register_special_effect( 376801,  ekrazathals_colored_fang );   /* Ekrazathal's Colored Fang 194333 */
+  register_special_effect( 328603,  glowing_endmire_stinger );    /* Glowing Endmire Stinger 179927 */
+  register_special_effect( 444410,  blade_of_hatred );            /* Blade of Hatred 219919 / 219923 */
+  register_special_effect( 54695,   death_knights_anguish );      /* Death Knight's Anguish 38212 */
+  register_special_effect( 96924,   apparatus_titanic_power );    /* Apparatus of Khaz'goroth 68972 / 69113 */
+  register_special_effect( 96934,   apparatus_blessing );         /* Apparatus of Khaz'goroth: the use */
+  register_special_effect( 24658,   zandalarian_hero_charm );     /* Zandalarian Hero Charm 19950 */
+  register_special_effect( 24661,   zandalarian_hero_medallion ); /* Zandalarian Hero Medallion 19949 */
+  register_special_effect( 40442,   ashtongue_equilibrium );      /* Ashtongue Talisman of Equilibrium 32486 */
+  register_special_effect( 40438,   ashtongue_acumen );           /* Ashtongue Talisman of Acumen 32490 */
+  register_special_effect( 40463,   ashtongue_vision );           /* Ashtongue Talisman of Vision 32491 */
+  register_special_effect( 40470,   ashtongue_zeal );             /* Ashtongue Talisman of Zeal 32489 */
+  register_special_effect( 132586,  pvp_weapon_budget );          /* the 105 Mists of Pandaria Gladiator's two-handers */
+  register_special_effect( 1283377, fragmented_light_shard );     /* Fragmented Light Shard 251882 */
+  register_special_effect( 187614,  thorasus );                   /* Thorasus, the Stone Heart of Draenor 124634 */
+  register_special_effect( 187615,  maalus );                     /* Maalus, the Blood Drinker 124636 */
+  register_special_effect( 187611,  nithramus );                  /* Nithramus, the All-Seer 124635 */
+  register_special_effect( 187613,  sanctus );                    /* Sanctus, Sigil of the Unbroken 124637 */
   register_special_effect( 97119,   item::variable_pulse_lightning_capacitor ); /* VPLC (heroic) - wowsims cata */
   register_special_effect( 469933,  item::molten_ironfoe ); /* Molten Ironfoe - Molten Strike */
   register_special_effect( 259006,  "259014Trigger"  ); /* Venomstrike - Venom Shot */
