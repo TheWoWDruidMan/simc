@@ -2347,6 +2347,114 @@ void item::variable_pulse_lightning_capacitor( special_effect_t& effect )
   new vplc_cb_t( effect, charges, bolt );
 }
 
+// BracketSim (5 Nov 2026): The Lightning Capacitor (28785), driver 37657: "You gain an Electrical Charge each time
+// you cause a non-periodic damaging spell critical strike. When you reach 3 Electrical Charges, they will release,
+// firing a Lightning Bolt". The driver's proc trigger is the placeholder 18350, so nothing happened. From the data:
+// Magic Hostile Spell, crits only, 2.5 sec internal cooldown, 3 charges (effect #1), Lightning Bolt 37661 scaled
+// by the trinket's item level. (Old SimC: "OnSpellCrit_750Nature_3Stack_2.5Cd", the same rule.)
+struct lightning_capacitor_cb_t : public dbc_proc_callback_t
+{
+  buff_t* charges;
+  action_t* bolt;
+  lightning_capacitor_cb_t( const special_effect_t& e, buff_t* c, action_t* b ) :
+    dbc_proc_callback_t( e.item, e ), charges( c ), bolt( b ) {}
+  void execute( const spell_data_t*, player_t* target, action_state_t* s ) override
+  {
+    charges->trigger();
+    if ( charges->at_max_stacks() )
+    {
+      charges->expire();
+      bolt->execute_on_target( target ? target : ( s && s->target ? s->target : listener->target ) );
+    }
+  }
+};
+
+static void the_lightning_capacitor( special_effect_t& effect )
+{
+  effect.name_str     = "lightning_capacitor";
+  effect.proc_flags_  = PF_MAGIC_SPELL;
+  effect.proc_flags2_ = PF2_CRIT;
+  effect.proc_chance_ = 1.0;
+  effect.ppm_         = 0;
+  int need = std::max( 1, as<int>( effect.driver()->effectN( 1 ).base_value() ) );
+  auto charges = buff_t::find( effect.player, "electrical_charge_capacitor" );
+  if ( !charges )
+    charges = make_buff( effect.player, "electrical_charge_capacitor", spell_data_t::nil() )
+                  ->set_max_stack( need )
+                  ->set_duration( timespan_t::zero() );
+  auto bolt = create_proc_action<generic_proc_t>( "lightning_capacitor_bolt", effect, effect.player->find_spell( 37661 ) );
+  new lightning_capacitor_cb_t( effect, charges, bolt );
+}
+
+// BracketSim (5 Nov 2026): Talon of Al'ar (30448), driver 37507: "Your Arcane Shot ability increases the damage dealt
+// by all other damaging shots by N for 6 sec" (Shot Power 37508, N its effect #1 at the trinket's item level). The
+// flat bonus has no ability list in this client, so it lands as its own physical hit on each other ranged ability
+// while the buff is up, doubled when that shot crits.
+struct talon_arm_cb_t : public dbc_proc_callback_t
+{
+  talon_arm_cb_t( const special_effect_t& e ) : dbc_proc_callback_t( e.item, e ) {}
+  void execute( const spell_data_t*, player_t*, action_state_t* s ) override
+  {
+    if ( s && s->action && util::str_compare_ci( s->action->data().name_cstr(), "Arcane Shot" ) )
+      proc_buff->trigger();
+  }
+};
+
+struct talon_hit_cb_t : public dbc_proc_callback_t
+{
+  buff_t* buff;
+  action_t* hit;
+  talon_hit_cb_t( const special_effect_t& e, buff_t* b, action_t* a ) : dbc_proc_callback_t( e.player, e ), buff( b ), hit( a ) {}
+  void execute( const spell_data_t*, player_t*, action_state_t* s ) override
+  {
+    if ( !buff->check() || !s || !s->target || !s->action || s->action == hit ||
+         util::str_compare_ci( s->action->data().name_cstr(), "Arcane Shot" ) || s->result_amount <= 0 )
+      return;
+    hit->base_dd_min = hit->base_dd_max = buff->check_value() * ( s->result == RESULT_CRIT ? 2.0 : 1.0 );
+    hit->execute_on_target( s->target );
+  }
+};
+
+static void talon_of_alar( special_effect_t& effect )
+{
+  effect.name_str     = "talon_of_alar";
+  effect.proc_flags_  = PF_RANGED_ABILITY;
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  effect.proc_chance_ = 1.0;
+  effect.ppm_         = 0;
+  const spell_data_t* power = effect.player->find_spell( 37508 );
+  auto buff = buff_t::find( effect.player, "shot_power" );
+  if ( !buff )
+    buff = make_buff( effect.player, "shot_power", power, effect.item )
+               ->set_default_value( power->effectN( 1 ).average( effect.item ) );
+  effect.custom_buff = buff;
+  effect.disable_action();
+  new talon_arm_cb_t( effect );
+
+  auto hit_effect          = new special_effect_t( effect.player );
+  hit_effect->name_str     = "shot_power_damage";
+  hit_effect->item         = effect.item;
+  hit_effect->proc_flags_  = PF_RANGED_ABILITY;
+  hit_effect->proc_flags2_ = PF2_ALL_HIT;
+  hit_effect->proc_chance_ = 1.0;
+  hit_effect->ppm_         = 0;
+  hit_effect->disable_action();
+  hit_effect->disable_buff();
+  effect.player->special_effects.push_back( hit_effect );
+  struct shot_power_hit_t : public generic_proc_t
+  {
+    shot_power_hit_t( const special_effect_t& e ) : generic_proc_t( e, "shot_power_hit", e.player->find_spell( 37508 ) )
+    {
+      school   = SCHOOL_PHYSICAL;
+      may_crit = false;
+      callbacks = false;
+      base_dd_min = base_dd_max = 1;
+    }
+  };
+  action_t* hit = create_proc_action<shot_power_hit_t>( "shot_power_hit", *hit_effect );
+  new talon_hit_cb_t( *hit_effect, buff, hit );
+}
+
 // Dragonwrath, Tarecgosa's Rest, item 71086 - the Firelands caster legendary.
 //
 // the author, 12 September 2026: "can you also code into the engine wrath of
@@ -7277,6 +7385,61 @@ void unique_gear::initialize_special_effect( special_effect_t& effect, unsigned 
     if (!special_effect::usable_proc( effect ))
     {
       effect.type = SPECIAL_EFFECT_NONE;
+
+      // BracketSim (5 Nov 2026): an on-equip spell that only changes the wearer's own abilities ("Increases the damage
+      // dealt by your Crusader Strike by 5%", "Reduces the cooldown of ...") is not a proc, so it used to be dropped.
+      // The engine's passive-effect parser applies exactly those (tier sets and meta gems go through it), so a driver
+      // that is nothing but such auras is parsed as a passive item effect instead. Legendaries never get here.
+      const spell_data_t* d = p->find_spell( effect.spell_id );
+      bool mods = false, other = false;
+      for ( const auto& e : d->effects() )
+      {
+        if ( e.type() == E_NONE )
+          continue;
+        if ( e.type() != E_APPLY_AURA )
+        {
+          other = true;
+          continue;
+        }
+        switch ( e.subtype() )
+        {
+          case A_ADD_FLAT_MODIFIER:
+          case A_ADD_PCT_MODIFIER:
+          case A_ADD_FLAT_LABEL_MODIFIER:
+          case A_ADD_PCT_LABEL_MODIFIER:
+            mods = true;
+            break;
+          case A_DUMMY:
+          case A_PERIODIC_DUMMY:  // the Hellfire Citadel class trinkets carry an empty 10 sec one
+            break;
+          default:
+            other = true;
+            break;
+        }
+      }
+      if ( mods && !other && d->proc_flags() == 0 && effect.source == SPECIAL_EFFECT_SOURCE_ITEM )
+      {
+        // A value that scales with the item ("Scales with Casting Item's Level") is read at the item's own level,
+        // not the wearer's: it is fixed into the effect before parsing.
+        for ( const auto& e : d->effects() )
+        {
+          if ( e.type() != E_APPLY_AURA || e.m_coefficient() == 0 || e.scaling_class() == 0 || !effect.item )
+            continue;
+          double v = e.average( effect.item );
+          p->sim->print_debug( "{} item '{}' {} effect #{}: {} at item level {} (was {} at player level)", p->name(),
+                               effect.item->name(), d->name_cstr(), e.index() + 1, v, effect.item->item_level(),
+                               e.average( p ) );
+          auto ov = const_cast<dbc_override_t*>( p->dbc_override );
+          ov->register_effect( *p->dbc, e.id(), "coefficient", 0 );
+          ov->register_effect( *p->dbc, e.id(), "scaling_class", 0 );
+          ov->register_effect( *p->dbc, e.id(), "base_value", v );
+        }
+        d = p->find_spell( effect.spell_id );
+        p->sim->print_debug( "{} item '{}' applies passive ability modifiers from {}", p->name(),
+                             effect.item ? effect.item->name() : "?", *d );
+        p->parse_passive_item_effect( d );
+        effect.type = SPECIAL_EFFECT_PASSIVE;
+      }
     }
   }
 
@@ -8637,6 +8800,8 @@ void unique_gear::register_special_effects()
   register_special_effect( 144230, legacy_coh_1031 ); /* Reclaimed Thunderstrike */
   register_special_effect( 250765, ampoule_of_pure_void );    /* Ampoule of Pure Void 151312 - use: 10 sec Shadow pool */
   register_special_effect( 96887,   item::variable_pulse_lightning_capacitor ); /* VPLC - wowsims cata */
+  register_special_effect( 37657,   the_lightning_capacitor ); /* The Lightning Capacitor 28785 - 3 crit charges, Lightning Bolt */
+  register_special_effect( 37507,   talon_of_alar ); /* Talon of Al'ar 30448 - Arcane Shot -> Shot Power */
   register_special_effect( 97119,   item::variable_pulse_lightning_capacitor ); /* VPLC (heroic) - wowsims cata */
   register_special_effect( 469933,  item::molten_ironfoe ); /* Molten Ironfoe - Molten Strike */
   register_special_effect( 259006,  "259014Trigger"  ); /* Venomstrike - Venom Shot */

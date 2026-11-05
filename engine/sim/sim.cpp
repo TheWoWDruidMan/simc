@@ -296,10 +296,43 @@ bool parse_optimal_raid( sim_t*             sim,
 
 // parse_player =============================================================
 
+// BracketSim (5 Nov 2026): copy= keeps the source's BracketSim options. player_t::copy_from and the class copy_from
+// predate them, so a copy of a level 60 character lost its covenant, conduits, soulbind and legacy switches (a 60 Outlaw
+// copy simmed 17% low; a 60 Fire Mage copy failed on Deathborne). Every option whose name says "legacy" or "bracketsim"
+// is replayed from the source onto the copy after the copy's own options exist.
+static void bracketsim_copy_options( sim_t* sim, player_t* source, player_t* target )
+{
+  auto text = []( const option_t& o ) { return fmt::format( "{}", o ); };
+  for ( const auto& so : source->options )
+  {
+    std::string n( so->name() );
+    if ( n.find( "legacy" ) == std::string::npos && n.rfind( "bracketsim", 0 ) != 0 )
+      continue;
+    for ( const auto& to : target->options )
+    {
+      if ( to->name() != so->name() )
+        continue;
+      std::string sv = text( *so ), tv = text( *to );
+      if ( sv == tv || sv.rfind( n, 0 ) != 0 )
+        break;
+      auto v = util::string_view( sv ).substr( n.size() );
+      bool append = v.substr( 0, 2 ) == "+=";
+      v = v.substr( append ? 2 : 1 );
+      while ( !v.empty() && ( v.back() == '\n' || v.back() == '\r' ) )
+        v.remove_suffix( 1 );
+      if ( append && !tv.empty() && tv != n + "+=\n" )
+        break;  // never double an append the copy already carries
+      to->parse( sim, n, v );
+      break;
+    }
+  }
+}
+
 bool parse_player( sim_t*             sim,
                           util::string_view name,
                           util::string_view value )
 {
+  player_t* copy_source = nullptr;
   if ( name == "pet" || name == "guardian" )
   {
     std::string::size_type cut_pt = value.find( ',' );
@@ -348,7 +381,10 @@ bool parse_player( sim_t*             sim,
     sim -> active_player = module_t::get( source -> type ) -> create_player( sim, player_name );
 
     if ( sim -> active_player != nullptr )
+    {
       sim -> active_player -> copy_from ( source );
+      copy_source = source;
+    }
   }
   else
   {
@@ -378,7 +414,11 @@ bool parse_player( sim_t*             sim,
 
   // Create options for player
   if ( sim -> active_player )
+  {
     sim -> active_player -> create_options();
+    if ( copy_source )
+      bracketsim_copy_options( sim, copy_source, sim -> active_player );
+  }
 
   return sim -> active_player != nullptr;
 }
