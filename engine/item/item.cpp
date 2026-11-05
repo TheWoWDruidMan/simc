@@ -2365,6 +2365,11 @@ static bool is_restored_chance_on_hit( unsigned spell_id )
     case 24254:  // Sceptre of Smiting, Sceptre of Hexing
     case 18205:  // Arlokk's Grasp, Gurubashi's Grasp
     case 144230: // Reclaimed Thunderstrike
+    // 5 Nov 2026 - outside the Loot Finder, see the registrations "reuse a handler" in unique_gear.cpp.
+    case 21179:  // Reinforced Thunderstrike 49497
+    case 59043:  // The Dusk Blade 43613
+    case 95678:  // The Twilight Blade 68163
+    case 127890: // The Gloaming Blade 88149
     // 14 Oct 2026 - rates from wowsims classic / tbc, see legacy_coh_spell in unique_gear.cpp.
     case 21151:  // Gutgore Ripper       17071
     case 69180:  // Rusted Gutgore Ripper 49437

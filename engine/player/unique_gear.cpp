@@ -1539,9 +1539,16 @@ void item::heartrazor( special_effect_t& effect )
  */
 // 2 Nov 2026 (the author): two Night Blades share ONE The Dark of Night buff - the second blade only adds rolls (more uptime),
 // unlike two Untamed Blades. A 1 Nov change that gave each blade its own buff was reverted; no log showed two buffs.
-void item::night_blade( special_effect_t& effect )
+/*
+ * 5 Nov 2026 (the author: "code in things that aren't in our loot finder"): The Night Blade's successors - The Dusk Blade
+ * (43613, The Darkest Night 59043), The Twilight Blade (68163, 95678) and The Gloaming Blade (88149, 127890) - carry the
+ * same effect: N critical strike for 10 sec, 3 stacks, chance on hit, and no rate in any source (wowsims has none; the
+ * AzerothCore row is 0). ASSUMPTION, labelled: they use The Night Blade's measured rate and poison rule. Each has its own
+ * buff (its own spell), and the amount is its own driver's at its item level.
+ */
+static void night_blade_family( special_effect_t& effect, const std::string& name )
 {
-  weapon_stat_proc( effect, "the_dark_of_night", 0.85, 1.8, true );  // 0.85 PPM x 1.8 sec = 2.55% a hit
+  weapon_stat_proc( effect, name, 0.85, 1.8, true );  // 0.85 PPM x 1.8 sec = 2.55% a hit
 
   buff_t* buff = effect.custom_buff;
   player_t* p = effect.player;
@@ -1552,6 +1559,11 @@ void item::night_blade( special_effect_t& effect )
         buff->trigger();
     } );
 }
+
+void item::night_blade( special_effect_t& effect ) { night_blade_family( effect, "the_dark_of_night" ); }
+static void dusk_blade( special_effect_t& effect )     { night_blade_family( effect, "the_darkest_night" ); }
+static void twilight_blade( special_effect_t& effect ) { night_blade_family( effect, "the_deepest_night_twilight" ); }
+static void gloaming_blade( special_effect_t& effect ) { night_blade_family( effect, "the_deepest_night" ); }
 
 // 8 Oct 2026: The Untamed Blade rolls on every melee hit, either hand, at its own 1 PPM x 3.4 sec rate. A level 30 Fury
 // dummy log (Untamed Blade main hand, The Jackhammer off hand): 89 procs from 891 main-hand and 797 off-hand hits - 96
@@ -2017,6 +2029,7 @@ static constexpr legacy_coh_row_t LEGACY_COH_1031[] = {
   { 203806, "gurubashi_crusher",                   1.5, 0       , false }, // wowsims sod (as Jeklik's Crusher) (also: wowsims classic (as Jeklik's Crusher) 4; AzerothCore (as Jeklik's Crusher) 3; CMaNGOS (as Jeklik's Crusher) 4)
   { 159840, "teebus_scorching_straight_sword",       1, 0       , false }, // wowsims classic (as Teebu's Blazing Longsword) (also: AzerothCore (as Teebu's Blazing Longsword) 1.4; CMaNGOS (as Teebu's Blazing Longsword) 1)
   {  49301, "reclaimed_thunderstrike",               1, 0       , false }, // CMaNGOS (as Thunderstrike) (also: wowsims classic (as Thunderstrike) 1.5; AzerothCore (as Thunderstrike) 2)
+  {  49497, "reinforced_thunderstrike",              1, 0       , false }, // 5 Nov 2026: the heroic remake, driver 21179 - Reclaimed's sources (as Thunderstrike)
 };
 
 static void legacy_coh_1031( special_effect_t& effect )
@@ -2369,21 +2382,301 @@ struct lightning_capacitor_cb_t : public dbc_proc_callback_t
   }
 };
 
-static void the_lightning_capacitor( special_effect_t& effect )
+// Thunder Capacitor (38072, 5 Nov 2026), driver 54841, is the same device: "You gain a Thunder Charge each time you cause a
+// damaging spell critical strike. When you reach N Thunder Charges, they will release, firing a Lightning Bolt" (54843),
+// the same 2.5 sec internal cooldown and placeholder trigger 18350. Its charge count is its own effect #1.
+static void capacitor_effect( special_effect_t& effect, const char* name, const char* charge_name, unsigned bolt_id )
 {
-  effect.name_str     = "lightning_capacitor";
+  effect.name_str     = name;
   effect.proc_flags_  = PF_MAGIC_SPELL;
   effect.proc_flags2_ = PF2_CRIT;
   effect.proc_chance_ = 1.0;
   effect.ppm_         = 0;
   int need = std::max( 1, as<int>( effect.driver()->effectN( 1 ).base_value() ) );
-  auto charges = buff_t::find( effect.player, "electrical_charge_capacitor" );
+  auto charges = buff_t::find( effect.player, charge_name );
   if ( !charges )
-    charges = make_buff( effect.player, "electrical_charge_capacitor", spell_data_t::nil() )
+    charges = make_buff( effect.player, charge_name, spell_data_t::nil() )
                   ->set_max_stack( need )
                   ->set_duration( timespan_t::zero() );
-  auto bolt = create_proc_action<generic_proc_t>( "lightning_capacitor_bolt", effect, effect.player->find_spell( 37661 ) );
+  auto bolt = create_proc_action<generic_proc_t>( std::string( name ) + "_bolt", effect, effect.player->find_spell( bolt_id ) );
   new lightning_capacitor_cb_t( effect, charges, bolt );
+}
+
+static void the_lightning_capacitor( special_effect_t& effect )
+{
+  capacitor_effect( effect, "lightning_capacitor", "electrical_charge_capacitor", 37661 );
+}
+
+static void thunder_capacitor( special_effect_t& effect )
+{
+  capacitor_effect( effect, "thunder_capacitor", "thunder_charge", 54843 );
+}
+
+/*
+ * BracketSim (5 Nov 2026, the author: "keep looking there's tens of thousands of items ... you can code in things that aren't
+ * in our loot finder"). Items outside the Loot Finder whose driver the generic builder cannot use ("No constructible
+ * buff or action"): the damage sits in the driver's own numbers, or one spell further on (a missile, an area trigger, a
+ * periodic aura), or the proc is "Proc Trigger Damage" - extra damage on each hit. Each handler below takes the amount
+ * from the client's data at the item's own level and the proc rate, flags and cooldown from the driver. What the data
+ * cannot give (a missing-health bonus, an area trigger's movement) is left out and named, so these under-count rather
+ * than over-count.
+ */
+struct flat_item_hit_t : public generic_proc_t
+{
+  flat_item_hit_t( const special_effect_t& e, util::string_view n, const spell_data_t* s, double amount, school_e sch,
+                   int targets, bool split )
+    : generic_proc_t( e, n, s )
+  {
+    base_dd_min = base_dd_max = amount;
+    spell_power_mod.direct = attack_power_mod.direct = 0;
+    if ( sch != SCHOOL_NONE )
+      school = sch;
+    aoe = targets;
+    split_aoe_damage = split;
+    may_crit = true;
+  }
+};
+
+static action_t* flat_item_hit( special_effect_t& effect, const std::string& name, double amount, school_e school,
+                                int targets = 0, bool split = false, const spell_data_t* spell = nullptr )
+{
+  action_t* a = effect.player->find_action( name );
+  if ( !a )
+    a = create_proc_action<flat_item_hit_t>( name, effect, spell ? spell : effect.driver(), amount, school, targets, split );
+  return a;
+}
+
+// One flat hit each time the driver procs.
+static void item_proc_hit( special_effect_t& effect, const std::string& name, double amount, school_e school,
+                           int targets = 0, bool split = false )
+{
+  effect.name_str = name;
+  effect.disable_buff();
+  effect.execute_action = flat_item_hit( effect, name, amount, school, targets, split );
+  new dbc_proc_callback_t( effect.player, effect );
+}
+
+// N hits, `gap` apart, each time the driver procs (a short periodic aura).
+struct item_repeat_cb_t : public dbc_proc_callback_t
+{
+  action_t* hit;
+  int count;
+  timespan_t gap;
+  item_repeat_cb_t( const special_effect_t& e, action_t* h, int n, timespan_t g ) : dbc_proc_callback_t( e.item, e ), hit( h ), count( n ), gap( g ) {}
+  void execute( const spell_data_t*, player_t* target, action_state_t* s ) override
+  {
+    player_t* t = target ? target : ( s && s->target ? s->target : listener->target );
+    hit->execute_on_target( t );
+    for ( int i = 1; i < count; i++ )
+      make_event( *listener->sim, gap * i, [ this, t ]() { if ( !t->is_sleeping() ) hit->execute_on_target( t ); } );
+  }
+};
+
+static void item_proc_repeat( special_effect_t& effect, const std::string& name, double amount, school_e school, int count,
+                              timespan_t gap, int targets = 0, timespan_t delay = timespan_t::zero() )
+{
+  effect.name_str = name;
+  effect.disable_buff();
+  auto hit = flat_item_hit( effect, name, amount, school, targets );
+  if ( delay > timespan_t::zero() )
+  {
+    // Nether Conductors: one hit, `delay` after the proc.
+    struct delayed_cb_t : public dbc_proc_callback_t
+    {
+      action_t* hit; timespan_t delay;
+      delayed_cb_t( const special_effect_t& e, action_t* h, timespan_t d ) : dbc_proc_callback_t( e.item, e ), hit( h ), delay( d ) {}
+      void execute( const spell_data_t*, player_t* target, action_state_t* s ) override
+      {
+        player_t* t = target ? target : ( s && s->target ? s->target : listener->target );
+        make_event( *listener->sim, delay, [ this, t ]() { hit->execute_on_target( t->is_sleeping() ? listener->target : t ); } );
+      }
+    };
+    new delayed_cb_t( effect, hit, delay );
+    return;
+  }
+  new item_repeat_cb_t( effect, hit, count, gap );
+}
+
+// "Proc Trigger Damage": extra damage on each qualifying hit, optionally only while a buff is up and only for one school.
+struct item_extra_hit_cb_t : public dbc_proc_callback_t
+{
+  action_t* hit;
+  buff_t* gate;
+  school_e only;
+  item_extra_hit_cb_t( const special_effect_t& e, action_t* h, buff_t* g, school_e o ) :
+    dbc_proc_callback_t( e.player, e ), hit( h ), gate( g ), only( o ) {}
+  void execute( const spell_data_t*, player_t*, action_state_t* s ) override
+  {
+    if ( !s || !s->target || !s->action || s->action == hit || ( gate && !gate->check() ) )
+      return;
+    if ( only != SCHOOL_NONE && ( s->result_type != result_amount_type::DMG_DIRECT || !dbc::is_school( s->action->get_school(), only ) ) )
+      return;
+    hit->execute_on_target( s->target );
+  }
+};
+
+// Nightfall weapons (Cut of the Curseblade 1224456): "Your autoattacks do an additional N Shadow damage".
+static void cut_of_the_curseblade( special_effect_t& effect )
+{
+  effect.name_str = "cut_of_the_curseblade";
+  effect.disable_buff();
+  effect.disable_action();
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  auto hit = flat_item_hit( effect, "cut_of_the_curseblade", effect.driver()->effectN( 1 ).average( effect.item ), SCHOOL_SHADOW );
+  new item_extra_hit_cb_t( effect, hit, nullptr, SCHOOL_NONE );
+}
+
+// The four Tomes (172129-172132): "Your direct damage <school> spells deal an additional N <school> damage".
+static void school_tome( special_effect_t& effect, const char* name, school_e school )
+{
+  effect.name_str = name;
+  effect.disable_buff();
+  effect.disable_action();
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  auto hit = flat_item_hit( effect, name, effect.driver()->effectN( 1 ).average( effect.item ), school );
+  new item_extra_hit_cb_t( effect, hit, nullptr, school );
+}
+static void tome_fiery_arcana( special_effect_t& e )  { school_tome( e, "fiery_arcana", SCHOOL_FIRE ); }
+static void tome_ice_lord( special_effect_t& e )      { school_tome( e, "ice_lords_touch", SCHOOL_FROST ); }
+static void tome_shadow_force( special_effect_t& e )  { school_tome( e, "shadow_force", SCHOOL_SHADOW ); }
+static void tome_arcane( special_effect_t& e )        { school_tome( e, "touch_of_the_arcane", SCHOOL_ARCANE ); }
+
+// Vibrant Temple Masonry 202911 / Temple Priestess' Charm 202916: Wrath of Elune (202912 / 202917) for 15 sec, during
+// which each attack (Masonry) or damaging spell (Charm) inflicts N additional Holy damage - the buff's own proc flags.
+static void wrath_of_elune( special_effect_t& effect )
+{
+  const spell_data_t* buff_spell = effect.trigger();
+  const std::string name = effect.spell_id == 202916 ? "wrath_of_elune_spell" : "wrath_of_elune";
+  effect.name_str = name;
+  buff_t* buff = buff_t::find( effect.player, name );
+  if ( !buff )
+    buff = make_buff( effect.player, name, buff_spell );
+  effect.custom_buff = buff;
+  new dbc_proc_callback_t( effect.item, effect );
+
+  auto* extra = new special_effect_t( effect.player );
+  extra->name_str     = name + "_damage";
+  extra->type         = SPECIAL_EFFECT_EQUIP;
+  extra->source       = SPECIAL_EFFECT_SOURCE_ITEM;
+  extra->item         = effect.item;
+  extra->spell_id     = buff_spell->id();
+  extra->proc_flags_  = buff_spell->proc_flags();
+  extra->proc_flags2_ = PF2_ALL_HIT;
+  extra->proc_chance_ = 1.0;
+  extra->ppm_         = 0;
+  extra->disable_action();
+  extra->disable_buff();
+  effect.player->special_effects.push_back( extra );
+  auto hit = flat_item_hit( *extra, name + "_damage", buff_spell->effectN( 1 ).average( effect.item ), SCHOOL_HOLY );
+  new item_extra_hit_cb_t( *extra, hit, buff, SCHOOL_NONE );
+}
+
+static void pocket_void_portal( special_effect_t& e )   // Vortex Bomb 224162: arcane, the target and nearby enemies
+{ item_proc_hit( e, "vortex_bomb", e.player->find_spell( 224162 )->effectN( 1 ).average( e.item ), SCHOOL_ARCANE, -1 ); }
+static void nether_conductors( special_effect_t& e )    // Nether Energy: 5 sec after the proc, 224155 to nearby enemies
+{ item_proc_repeat( e, "nether_energy", e.player->find_spell( 224155 )->effectN( 1 ).average( e.item ), SCHOOL_ARCANE, 1,
+                    timespan_t::zero(), -1, e.player->find_spell( 224154 )->duration() ); }
+static void stellagosas_breath( special_effect_t& e )   // "${$202841s1*3} damage over 2 sec", a cone: 3 hits 1 sec apart
+{ item_proc_repeat( e, "stellagosas_breath", e.player->find_spell( 202841 )->effectN( 1 ).average( e.item ), SCHOOL_FIRE, 3,
+                    timespan_t::from_seconds( 1 ), -1 ); }
+static void lightning_tether( special_effect_t& e )     // 255586 every 0.5 sec for 3 sec (its second chain target left out)
+{ item_proc_repeat( e, "lightning_jolt", e.player->find_spell( 255586 )->effectN( 1 ).average( e.item ), SCHOOL_NATURE, 6,
+                    timespan_t::from_seconds( 0.5 ) ); }
+static void beogokas_tooth_and_claw( special_effect_t& e )  // "up to $s1*1.15" by missing health: the base $s1 only
+{ item_proc_hit( e, "algetis_gaping_maw", e.driver()->effectN( 1 ).average( e.item ), SCHOOL_PHYSICAL ); }
+static void versatile_storm_lure( special_effect_t& e )     // the damage half ($s2); the heal half is not simmed
+{ item_proc_hit( e, "versatile_storm_lure", e.driver()->effectN( 2 ).average( e.item ), SCHOOL_NATURE ); }
+static void sharp_axe_holster( special_effect_t& e )        // $s1; the bonus below 40% health is left out
+{ item_proc_hit( e, "sharp_axe_holster", e.driver()->effectN( 1 ).average( e.item ), SCHOOL_PHYSICAL ); }
+static void lucky_lynx_locket( special_effect_t& e )        // $s1 split between nearby enemies; the per-target bonus left out
+{ item_proc_hit( e, "lucky_lynx_locket", e.driver()->effectN( 1 ).average( e.item ), SCHOOL_PHYSICAL, -1, true ); }
+static void tempest_arc( special_effect_t& e )              // $s1 split between the target and up to $s2 more
+{ item_proc_hit( e, "arcing_blast", e.driver()->effectN( 1 ).average( e.item ), SCHOOL_NATURE,
+                 1 + as<int>( e.driver()->effectN( 2 ).base_value() ), true ); }
+static void vengeful_fire_spirit( special_effect_t& e )     // ${$<rolemult>*$s1}: 0.66 for tank and healer specs
+{
+  const role_e r = e.player->primary_role();
+  item_proc_hit( e, "vengeful_fire_spirit", e.driver()->effectN( 1 ).average( e.item ) * ( r == ROLE_TANK || r == ROLE_HEAL ? 0.66 : 1.0 ), SCHOOL_FIRE );
+}
+static void fetid_dartfrog_idol( special_effect_t& e )      // "a total of ${$s2*7} damage over 3 sec": one hit of it
+{ item_proc_hit( e, "fetid_dartfrog_idol", e.driver()->effectN( 2 ).average( e.item ) * 7, SCHOOL_NATURE ); }
+static void gruffys_dented_horn( special_effect_t& e )      // $s1 to the target (others he passes through left out)
+{ item_proc_hit( e, "gruffys_charge", e.driver()->effectN( 1 ).average( e.item ), SCHOOL_PHYSICAL ); }
+static void memory_of_nulltheria( special_effect_t& e )     // $s1 split between all nearby enemies
+{ item_proc_hit( e, "voidtouched_horror", e.driver()->effectN( 1 ).average( e.item ), SCHOOL_SHADOW, -1, true ); }
+static void unstable_arcane_cell( special_effect_t& e )     // "can vary ... up to $s1*1.4": $s1, the size is not in the data
+{ item_proc_hit( e, "unstable_arcane_cell", e.driver()->effectN( 1 ).average( e.item ), SCHOOL_ARCANE ); }
+static void crude_wind_charm( special_effect_t& e )         // $s1 Nature over 384584's 8 sec, as one hit
+{ item_proc_hit( e, "deathly_gusts", e.driver()->effectN( 1 ).average( e.item ), SCHOOL_NATURE ); }
+
+// Huntmaster's Injector 224169: "increase your Critical Strike, Haste, or Mastery by $s2 for 10 sec, whichever is highest".
+struct huntmasters_cb_t : public dbc_proc_callback_t
+{
+  std::vector<std::pair<stat_e, buff_t*>> buffs;
+  huntmasters_cb_t( const special_effect_t& e ) : dbc_proc_callback_t( e.item, e ) {}
+  void execute( const spell_data_t*, player_t*, action_state_t* ) override
+  {
+    static constexpr stat_e S[] = { STAT_CRIT_RATING, STAT_HASTE_RATING, STAT_MASTERY_RATING };
+    const stat_e best = util::highest_stat( listener, S );
+    for ( auto& [ st, b ] : buffs )
+      if ( st == best )
+        b->trigger();
+  }
+};
+static void huntmasters_injector( special_effect_t& effect )
+{
+  effect.name_str = "huntmasters_infusion";
+  effect.disable_buff();
+  effect.disable_action();
+  const double amount = effect.driver()->effectN( 2 ).average( effect.item );
+  auto cb = new huntmasters_cb_t( effect );
+  for ( auto [ st, tag ] : { std::pair{ STAT_CRIT_RATING, "crit" }, std::pair{ STAT_HASTE_RATING, "haste" }, std::pair{ STAT_MASTERY_RATING, "mastery" } } )
+  {
+    auto b = make_buff<stat_buff_t>( effect.player, std::string( "huntmasters_infusion_" ) + tag, effect.player->find_spell( 224170 ), effect.item );
+    b->set_stat( st, amount );
+    cb->buffs.emplace_back( st, b );
+  }
+}
+
+// Mountain Rage Shaker 224164: Ettin's Brawn, a Strength stack (224167) every 0.5 sec for 10 sec, each lasting 10 sec.
+static void mountain_rage_shaker( special_effect_t& effect )
+{
+  effect.name_str = "ettins_brawn";
+  effect.disable_buff();
+  effect.disable_action();
+  auto stack = make_buff<stat_buff_t>( effect.player, "ettins_brawn", effect.player->find_spell( 224167 ), effect.item );
+  struct cb_t : public dbc_proc_callback_t
+  {
+    buff_t* stack;
+    cb_t( const special_effect_t& e, buff_t* s ) : dbc_proc_callback_t( e.item, e ), stack( s ) {}
+    void execute( const spell_data_t*, player_t*, action_state_t* ) override
+    {
+      for ( int i = 1; i <= 20; i++ )
+        make_event( *listener->sim, timespan_t::from_seconds( 0.5 * i ), [ this ]() { stack->trigger(); } );
+    }
+  };
+  new cb_t( effect, stack );
+}
+
+// Fluctuating Arc Capacitor 231943: Strength from Lesser, Even or Greater Arc (231945-231947), one at random, 20 sec.
+static void fluctuating_arc_capacitor( special_effect_t& effect )
+{
+  effect.name_str = "fluctuating_arc_capacitor";
+  effect.disable_buff();
+  effect.disable_action();
+  struct cb_t : public dbc_proc_callback_t
+  {
+    std::vector<buff_t*> arcs;
+    cb_t( const special_effect_t& e ) : dbc_proc_callback_t( e.item, e ) {}
+    void execute( const spell_data_t*, player_t*, action_state_t* ) override
+    {
+      arcs[ listener->rng().range( arcs.size() ) ]->trigger();
+    }
+  };
+  auto cb = new cb_t( effect );
+  for ( unsigned id : { 231945u, 231946u, 231947u } )
+    cb->arcs.push_back( make_buff<stat_buff_t>( effect.player, util::tokenize_fn( effect.player->find_spell( id )->name_cstr() ),
+                                                effect.player->find_spell( id ), effect.item ) );
 }
 
 // BracketSim (5 Nov 2026): Talon of Al'ar (30448), driver 37507: "Your Arcane Shot ability increases the damage dealt
@@ -4386,6 +4679,13 @@ void item::tiny_abomination_in_a_jar( special_effect_t& effect )
    * 85 seconds against the log's 56 in 66.
    */
   effect.proc_chance_ = 1.0;
+  /*
+   * Minuscule Abomination in a Jar (183650, Timewalking, 5 Nov 2026), driver 348249: the same jar, 8 motes (71432) and
+   * Manifest Anger, but its own driver reads 50% and a 1 sec internal cooldown. No log of it, so its own data rules: the
+   * 50% here, the cooldown from the driver (special_effect_t::cooldown).
+   */
+  if ( effect.spell_id == 348249 )
+    effect.proc_chance_ = effect.driver()->proc_chance();
   effect.proc_flags_ |= PF_MAGIC_SPELL;  // see lands_as_melee_hit
 
   const unsigned mote_count = effect.spell_id == 71545 ? 7U : 8U;
@@ -8802,6 +9102,39 @@ void unique_gear::register_special_effects()
   register_special_effect( 96887,   item::variable_pulse_lightning_capacitor ); /* VPLC - wowsims cata */
   register_special_effect( 37657,   the_lightning_capacitor ); /* The Lightning Capacitor 28785 - 3 crit charges, Lightning Bolt */
   register_special_effect( 37507,   talon_of_alar ); /* Talon of Al'ar 30448 - Arcane Shot -> Shot Power */
+  // 5 Nov 2026: items outside the Loot Finder that reuse a handler above.
+  register_special_effect( 54841,   thunder_capacitor ); /* Thunder Capacitor 38072 - crit charges, Lightning Bolt 54843 */
+  register_special_effect( 348249,  item::tiny_abomination_in_a_jar ); /* Minuscule Abomination in a Jar 183650 (Timewalking) */
+  register_special_effect( 18138,   deathbringer_bolt ); /* Deathbringer 17068 (on-equip row) - 1.0 PPM, wowsims classic */
+  register_special_effect( 21179,   legacy_coh_1031 ); /* Reinforced Thunderstrike 49497 */
+  register_special_effect( 59043,   dusk_blade ); /* The Dusk Blade 43613 - Night Blade rate (assumed) */
+  register_special_effect( 95678,   twilight_blade ); /* The Twilight Blade 68163 */
+  register_special_effect( 127890,  gloaming_blade ); /* The Gloaming Blade 88149 */
+  register_special_effect( 1224456, cut_of_the_curseblade ); /* Nightfall weapons 237775 etc. */
+  register_special_effect( 308913,  tome_fiery_arcana ); /* Tome of Fiery Arcana 172132 */
+  register_special_effect( 308912,  tome_ice_lord ); /* Tome of the Ice Lord 172131 */
+  register_special_effect( 308914,  tome_shadow_force ); /* Tome of Shadow Force 172130 */
+  register_special_effect( 308915,  tome_arcane ); /* Tome of Arcane Domination 172129 */
+  register_special_effect( 202911,  wrath_of_elune ); /* Vibrant Temple Masonry 121649 */
+  register_special_effect( 202916,  wrath_of_elune ); /* Temple Priestess' Charm 121647 */
+  register_special_effect( 224158,  pocket_void_portal ); /* Pocket Void Portal 121810 */
+  register_special_effect( 224153,  nether_conductors ); /* Nether Conductors 121808 */
+  register_special_effect( 202840,  stellagosas_breath ); /* Stellagosa's Breath 132964 */
+  register_special_effect( 256067,  lightning_tether ); /* Lightning Tether 158681 */
+  register_special_effect( 391525,  beogokas_tooth_and_claw ); /* Beogoka's Tooth and Claw 200673 */
+  register_special_effect( 387459,  versatile_storm_lure ); /* Versatile Storm Lure 199555 */
+  register_special_effect( 1307781, sharp_axe_holster ); /* Sharp Axe Holster 280123 */
+  register_special_effect( 1273106, lucky_lynx_locket ); /* Lucky Lynx Locket 265027 */
+  register_special_effect( 389082,  tempest_arc ); /* Tempest Arc 200139 */
+  register_special_effect( 442701,  vengeful_fire_spirit ); /* Vengeful Fire Spirit 219014 */
+  register_special_effect( 1260244, fetid_dartfrog_idol ); /* Fetid Dartfrog Idol 256326 */
+  register_special_effect( 392008,  gruffys_dented_horn ); /* Gruffy's Dented Horn 200755 */
+  register_special_effect( 389302,  memory_of_nulltheria ); /* Memory of Nulltheria 200236 */
+  register_special_effect( 392090,  unstable_arcane_cell ); /* Unstable Arcane Cell 200760 */
+  register_special_effect( 384580,  crude_wind_charm ); /* Crude Wind Charm 198432 */
+  register_special_effect( 224169,  huntmasters_injector ); /* Huntmaster's Injector 140533 */
+  register_special_effect( 224164,  mountain_rage_shaker ); /* Mountain Rage Shaker 121806 */
+  register_special_effect( 231943,  fluctuating_arc_capacitor ); /* Fluctuating Arc Capacitor 140035 */
   register_special_effect( 97119,   item::variable_pulse_lightning_capacitor ); /* VPLC (heroic) - wowsims cata */
   register_special_effect( 469933,  item::molten_ironfoe ); /* Molten Ironfoe - Molten Strike */
   register_special_effect( 259006,  "259014Trigger"  ); /* Venomstrike - Venom Shot */
