@@ -155,8 +155,10 @@ public:
   template <typename T, typename = std::enable_if_t<!std::numeric_limits<T>::is_signed>>
   T exgauss( T gauss_mean, T gauss_stddev, T exp_nu )
   {
-    return static_cast<T>( gauss_a( static_cast<double>( gauss_mean ), static_cast<double>( gauss_stddev ), 0.0 ) +
-                           exponential( static_cast<double>( exp_nu ) ) );
+    // BracketSim (5 Nov 2026): exponential first, then the gaussian - the order MSVC and GCC already used. As one
+    // expression the order was the compiler's choice, and clang (the WASM build) drew the other way round.
+    double e = exponential( static_cast<double>( exp_nu ) );
+    return static_cast<T>( gauss_a( static_cast<double>( gauss_mean ), static_cast<double>( gauss_stddev ), 0.0 ) + e );
   }
 
   /// Timespan uniform distribution in the range [min..max)
@@ -372,7 +374,10 @@ double basic_rng_t<Engine>::exponential( double nu )
 template <typename Engine>
 double basic_rng_t<Engine>::exgauss( double gauss_mean, double gauss_stddev, double exp_nu )
 {
-  return gauss( gauss_mean, gauss_stddev ) + exponential( exp_nu );
+  // BracketSim (5 Nov 2026): exponential first, then the gaussian - the order MSVC and GCC already used. As one
+  // expression the order was the compiler's choice, and clang (the WASM build) drew the other way round.
+  double e = exponential( exp_nu );
+  return gauss( gauss_mean, gauss_stddev ) + e;
 }
 
 /// Timespan uniform distribution in the range [min..max)
@@ -427,7 +432,10 @@ timespan_t basic_rng_t<Engine>::exponential( timespan_t nu )
 template <typename Engine>
 timespan_t basic_rng_t<Engine>::exgauss( timespan_t mean, timespan_t stddev, timespan_t nu )
 {
-  return gauss( mean, stddev ) + exponential( nu );
+  // BracketSim (5 Nov 2026): exponential first, then the gaussian - the order MSVC and GCC already used. As one
+  // expression the order was the compiler's choice, and clang (the WASM build) drew the other way round.
+  timespan_t e = exponential( nu );
+  return gauss( mean, stddev ) + e;
 }
 
 template <typename Engine>
@@ -449,7 +457,10 @@ timespan_t basic_rng_t<Engine>::gauss( truncated_gauss_t& g )
 template <typename Engine>
 timespan_t basic_rng_t<Engine>::exgauss( truncated_gauss_t& g, timespan_t nu )
 {
-  return gauss( g ) + exponential( nu );
+  // BracketSim (5 Nov 2026): exponential first, then the gaussian - the order MSVC and GCC already used. As one
+  // expression the order was the compiler's choice, and clang (the WASM build) drew the other way round.
+  timespan_t e = exponential( nu );
+  return gauss( g ) + e;
 }
 
 template <typename Engine>
