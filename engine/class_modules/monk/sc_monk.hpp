@@ -639,6 +639,9 @@ public:
     buff_t *legacy_iron_fists;
     buff_t *legacy_fury_of_xuen_stacks;
     buff_t *legacy_fury_of_xuen_haste;
+    // BracketSim legacy compatibility (5 Nov 2026): Thunder Focus Tea (Mistweaver) and Secret Infusion.
+    buff_t *legacy_thunder_focus_tea;
+    buff_t *legacy_secret_infusion;
     buff_t *legacy_dance_of_chiji;
     buff_t *legacy_fit_to_burst;
     buff_t *legacy_sunrise_technique;
@@ -675,7 +678,13 @@ public:
     azerite_power_t strength_of_spirit;
     azerite_power_t sunrise_technique;
     azerite_power_t sweep_the_leg;
+
+    // Mistweaver (5 Nov 2026)
+    azerite_power_t secret_infusion;
   } legacy_azerite;
+
+  // BracketSim legacy compatibility (5 Nov 2026): Mistweaver's Thunder Focus Tea, which the engine had no action for.
+  const spell_data_t *legacy_thunder_focus_tea_spell = nullptr;
 
   // BracketSim legacy compatibility: Shadowlands Runecarving powers. Midnight
   // has no runeforge DBC, so each one is switched on by the bonus id its

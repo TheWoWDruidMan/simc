@@ -1312,9 +1312,21 @@ struct rising_sun_kick_t : monk_melee_attack_t
 
   void execute() override
   {
+    // BracketSim legacy compatibility (5 Nov 2026): an empowered Rising Sun Kick (Thunder Focus Tea) - Secret
+    // Infusion's Versatility goes up BEFORE the kick, as the stat applies to the spell that consumed the tea.
+    const bool tea = p()->buff.legacy_thunder_focus_tea && p()->buff.legacy_thunder_focus_tea->check();
+    if ( tea && p()->legacy_azerite.secret_infusion.ok() )
+      p()->buff.legacy_secret_infusion->trigger();
+
     monk_melee_attack_t::execute();
 
     rising_sun_kick->execute_on_target( target );
+
+    if ( tea )
+    {
+      p()->buff.legacy_thunder_focus_tea->expire();
+      p()->cooldown.rising_sun_kick->adjust( timespan_t::from_millis( p()->find_spell( 116680 )->effectN( 1 ).base_value() ) );
+    }
 
     if ( p()->specialization() == MONK_WINDWALKER )
       p()->action.flurry_strikes->execute( flurry_strikes_t::WISDOM_OF_THE_WALL );
@@ -6035,6 +6047,24 @@ struct legacy_faeline_stomp_t : public monk_spell_t
       p()->get_target_data( target )->debuff.legacy_fae_exposure->trigger();
   }
 };
+// BracketSim legacy compatibility (5 Nov 2026): Thunder Focus Tea (116680) for a Mistweaver wearing Secret Infusion.
+struct legacy_thunder_focus_tea_t : monk_spell_t
+{
+  legacy_thunder_focus_tea_t( monk_t *p, std::string_view options_str )
+    : monk_spell_t( p, "thunder_focus_tea", p->legacy_thunder_focus_tea_spell )
+  {
+    parse_options( options_str );
+    harmful     = false;
+    trigger_gcd = 0_ms;
+    may_combo_strike = false;
+  }
+
+  void execute() override
+  {
+    monk_spell_t::execute();
+    p()->buff.legacy_thunder_focus_tea->trigger();
+  }
+};
 }  // namespace actions
 
 action_t *monk_t::create_action( std::string_view name, std::string_view options_str )
@@ -6050,6 +6080,9 @@ action_t *monk_t::create_action( std::string_view name, std::string_view options
     return new legacy_fallen_order_t( this, options_str );
   if ( name == "faeline_stomp" && legacy_covenant.faeline_stomp->ok() )
     return new legacy_faeline_stomp_t( this, options_str );
+  if ( name == "thunder_focus_tea" && specialization() == MONK_MISTWEAVER && legacy_thunder_focus_tea_spell &&
+       legacy_thunder_focus_tea_spell->ok() )
+    return new legacy_thunder_focus_tea_t( this, options_str );
   // Monk
   if ( name == "snapshot_stats" )
     return new monk_snapshot_stats_t( this, options_str );
@@ -6387,6 +6420,15 @@ void monk_t::init_spells()
   legacy_azerite.open_palm_strikes  = find_azerite_spell( "Open Palm Strikes" );
   legacy_azerite.pressure_point     = find_azerite_spell( "Pressure Point" );
   legacy_azerite.swift_roundhouse   = find_azerite_spell( "Swift Roundhouse" );
+
+  // BracketSim legacy compatibility (5 Nov 2026, the author: model Secret Infusion): "After using Thunder Focus Tea, your
+  // next spell gives X of a stat for 10 sec" - Rising Sun Kick gives Versatility (287837). The engine had no Thunder
+  // Focus Tea action, so a Mistweaver wearing the trait gets one (the game's own button: 30 s, off the GCD, its next
+  // Rising Sun Kick comes back 9 s sooner) and has it pressed on cooldown. Nobody else's rotation changes.
+  legacy_azerite.secret_infusion = find_azerite_spell( "Secret Infusion" );
+  legacy_thunder_focus_tea_spell = find_talent_spell( talent_tree::SPECIALIZATION, "Thunder Focus Tea", MONK_MISTWEAVER );
+  if ( specialization() == MONK_MISTWEAVER && legacy_azerite.secret_infusion.ok() && legacy_thunder_focus_tea_spell->ok() )
+    legacy_apl_actions.emplace_back( "thunder_focus_tea" );
 
   if ( legacy_azerite.boiling_brew.ok() )
     legacy_boiling_brew_rppm = get_rppm( "legacy_boiling_brew", legacy_azerite.boiling_brew.spell() );
@@ -7210,6 +7252,14 @@ void monk_t::create_buffs()
   buff.legacy_fury_of_xuen_haste =
       make_buff<stat_buff_t>( this, "legacy_fury_of_xuen_haste", find_spell( 287063 ) )
           ->add_stat( STAT_HASTE_RATING, legacy_azerite.fury_of_xuen.value() );
+
+  // BracketSim legacy compatibility (5 Nov 2026): Thunder Focus Tea's empowerment (30 s, the next spell) and
+  // Secret Infusion's Versatility from an empowered Rising Sun Kick (287837, 10 s).
+  buff.legacy_thunder_focus_tea = make_buff( this, "thunder_focus_tea", find_spell( 116680 ) )
+      ->set_cooldown( 0_ms );
+  buff.legacy_secret_infusion =
+      make_buff<stat_buff_t>( this, "secret_infusion", find_spell( 287837 ) )
+          ->add_stat( STAT_VERSATILITY_RATING, legacy_azerite.secret_infusion.value() );
 
   // Legacy Azerite: Iron Fists raises Fists of Fury's crit chance when it lands
   // on enough targets.

@@ -113,6 +113,7 @@ namespace item
   void annihilator( special_effect_t& );
   void nibelung( special_effect_t& );
   void dislodged_foreign_object( special_effect_t& );
+  void black_bruise( special_effect_t& );
   void stack_per_cast_use( special_effect_t& );
   void dragonspine_trophy( special_effect_t& );
   void houndmasters_weapons( special_effect_t& );
@@ -3167,6 +3168,40 @@ struct window_stack_cb_t final : public dbc_proc_callback_t
       stacks->bump( 1 );
   }
 };
+
+/*
+ * BLACK BRUISE (5 Nov 2026 special-items sweep). The driver (309563, 2 RPPM on melee) grants Necrotic Touch (309566),
+ * 10 sec: "Your melee attacks deal an additional X damage as Shadow damage" (309567). It was registered as
+ * "309567Trigger" - ONE Shadow hit per proc, about 10 hits a fight (0.05% of damage). Now the proc gives the 10 sec
+ * buff and every melee hit while it is up deals the Shadow damage.
+ */
+void item::black_bruise( special_effect_t& effect )
+{
+  player_t* p = effect.player;
+  // Two Black Bruises are one aura in game (the same spell): the second weapon's procs refresh the first's buff, and
+  // the per-hit damage exists once.
+  buff_t* shared = buff_t::find( p, "necrotic_touch" );
+  auto buff      = shared ? shared : make_buff( p, "necrotic_touch", p->find_spell( 309566 ) );
+  effect.custom_buff = buff;
+  new dbc_proc_callback_t( p, effect );
+  if ( shared )
+    return;
+  auto damage = create_proc_action<generic_proc_t>( "necrotic_touch", effect, p->find_spell( 309567 ) );
+
+  auto hits          = new special_effect_t( p );
+  hits->name_str     = "necrotic_touch_hits";
+  hits->type         = SPECIAL_EFFECT_EQUIP;
+  hits->source       = SPECIAL_EFFECT_SOURCE_ITEM;
+  hits->spell_id     = 309566;
+  hits->cooldown_    = 0_ms;
+  hits->proc_chance_ = 1.0;
+  hits->proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
+  hits->proc_flags2_ = PF2_ALL_HIT;
+  hits->execute_action = damage;
+  p->special_effects.push_back( hits );
+  auto cb = new dbc_proc_callback_t( p, *hits );
+  cb->activate_with_buff( buff );
+}
 
 void item::dislodged_foreign_object( special_effect_t& effect )
 {
@@ -8426,7 +8461,7 @@ void unique_gear::register_special_effects()
    * proc instead of ten stacks for twenty seconds. See item::dislodged_foreign_object. */
   register_special_effect( 71602,   item::dislodged_foreign_object   );
   register_special_effect( 71645,   item::dislodged_foreign_object   );
-  register_special_effect( 309563,  "309567Trigger"  ); /* Black Bruise - Necrotic Touch */
+  register_special_effect( 309563,  item::black_bruise ); /* Black Bruise - Necrotic Touch: a 10 s buff, every melee hit */
   register_special_effect( 97138,   "97139Trigger"   ); /* Matrix Restabilizer */
   /* Blackened Naaru Sliver. Was "45041Trigger", which skips Battle Trance (45040,
    * the 20s window) and points straight at Combat Insight (45041), whose duration

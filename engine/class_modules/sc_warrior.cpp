@@ -8859,6 +8859,15 @@ void warrior_t::init_spells()
   talents.protection.defenders_aegis        = find_talent_spell( talent_tree::SPECIALIZATION, "Defender's Aegis" );
   talents.protection.impenetrable_wall      = find_talent_spell( talent_tree::SPECIALIZATION, "Impenetrable Wall" );
   talents.protection.last_stand             = find_talent_spell( talent_tree::SPECIALIZATION, "Last Stand", WARRIOR_PROTECTION );
+
+  // BracketSim legacy compatibility (5 Nov 2026): Unnerving Focus (conduit 49) raises Rage generation while Last Stand
+  // is up (warrior_t::resource_gain). In Midnight, Last Stand is the Protection talent that rides on Shield Wall, and
+  // SimulationCraft's own action list never presses Shield Wall, so the conduit had no window at all. A Protection
+  // warrior wearing it, with the Last Stand talent, gets Shield Wall pressed on cooldown.
+  if ( specialization() == WARRIOR_PROTECTION && legacy_conduits.has( 49 ) && talents.protection.last_stand->ok() &&
+       talents.protection.shield_wall->ok() )
+    legacy_apl_actions.emplace_back( "shield_wall" );
+
   talents.protection.bloodborne             = find_talent_spell( talent_tree::SPECIALIZATION, "Bloodborne", WARRIOR_PROTECTION );
   talents.protection.sudden_death           = find_talent_spell( talent_tree::SPECIALIZATION, "Sudden Death", WARRIOR_PROTECTION );
   talents.protection.punish                 = find_talent_spell( talent_tree::SPECIALIZATION, "Punish" );
@@ -10852,6 +10861,10 @@ double warrior_t::resource_gain( resource_e r, double a, gain_t* g, action_t* ac
         a *= 1.0 + spell.recklessness_buff->effectN( 1 ).percent();
     }
   }
+  // BracketSim legacy compatibility (5 Nov 2026): Unnerving Focus (conduit 49): "Last Stand increases your Rage
+  // generation by {v}%" - the conduit table's value is the percent (rank 1 = 30%).
+  if ( r == RESOURCE_RAGE && a > 0 && legacy_conduits.has( 49 ) && buff.last_stand && buff.last_stand->check() )
+    a *= 1.0 + legacy_conduits.percent( 49 );
   return parse_player_effects_t::resource_gain( r, a, g, action );
 }
 
