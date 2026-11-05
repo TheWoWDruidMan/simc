@@ -3771,6 +3771,13 @@ struct arcane_missiles_tick_t final : public custom_state_spell_t<arcane_mage_sp
     // Midnight Arcane Missiles is a Clearcast one (ready() needs Clearcasting), so every channel ramps.
     p()->buffs.arcane_pummeling->trigger();
 
+    // BracketSim legacy (5 Nov 2026): the conduit Arcane Prodigy (34) - "Each wave of a Clearcast Arcane Missiles
+    // reduces the cooldown of Arcane Power by X sec" (X = value x 0.1, as Shadowlands SimulationCraft read it). Midnight
+    // has no Arcane Power, so it goes onto Arcane Surge, the cooldown that replaced it (the same host rule as Secret
+    // Infusion and Unnerving Focus). Every Midnight Arcane Missiles is a Clearcast one (above).
+    if ( p()->legacy_conduits.has( 34 ) )
+      p()->get_cooldown( "arcane_surge" )->adjust( -timespan_t::from_seconds( 0.1 * p()->legacy_conduits.value( 34 ) ), false );
+
     p()->buffs.cumulative_power->trigger();
 
     p()->trigger_arcane_salvo( salvo_source );
@@ -8362,6 +8369,17 @@ std::unique_ptr<expr_t> mage_t::create_action_expression( action_t& action, std:
 
 std::unique_ptr<expr_t> mage_t::create_expression( std::string_view name )
 {
+  // BracketSim legacy (5 Nov 2026): legacy_conduit.<id> is 1 when that Shadowlands conduit is socketed, so a rotation
+  // line can change only for a character wearing it (Arcane Prodigy, 34).
+  {
+    auto splits = util::string_split<std::string_view>( name, "." );
+    if ( splits.size() == 2 && util::str_compare_ci( splits[ 0 ], "legacy_conduit" ) )
+    {
+      unsigned id = util::to_unsigned( splits[ 1 ] );
+      return expr_t::create_constant( name, legacy_conduits.has( id ) ? 1.0 : 0.0 );
+    }
+  }
+
   if ( util::str_compare_ci( name, "comet_storm_remains" ) )
   {
     std::vector<action_t*> in_flight_list;
