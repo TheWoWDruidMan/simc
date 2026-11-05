@@ -6470,6 +6470,12 @@ double player_t::composite_player_target_multiplier( player_t* t, school_e /* sc
   // the target rather than off the player.
   m *= legacy_soulbinds.target_multiplier( this, t );
 
+  // BracketSim legacy (5 Nov 2026): Vigilant Protector (Strength of the Warden major, rank 3) - the enemies it taunted
+  // take more damage from this player. Looked up only for a player whose major is that essence.
+  if ( t && azerite_essence && azerite_essence->major_essence_id() == 34 )
+    if ( auto vp = buff_t::find( t, "vigilant_protector", const_cast<player_t*>( this ) ) )
+      m *= 1.0 + vp->check_value();
+
   auto td = find_target_data( t );
   if ( td )
   {

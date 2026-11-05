@@ -5918,6 +5918,49 @@ void touch_of_the_everlasting( special_effect_t& effect )
   register_essence_corruption_resistance( effect );
 }
 
+// BracketSim legacy (5 Nov 2026): Vigilant Protector, the major of Strength of the Warden (essence 34). Taunts the
+// enemies within 8 yds for 6 sec; at rank 3 (310599, +50 to effect 3) they take 50% more damage from the caster for
+// that time. Effect 4 (the caster's pets) is not raised by any rank, so pets gain nothing. Upstream never had the
+// button, so a tank wearing it pressed nothing. The damage bonus is read in player_t::composite_player_target_multiplier.
+struct vigilant_protector_t : public azerite_essence_major_t
+{
+  double bonus;
+
+  vigilant_protector_t( player_t* p, util::string_view options_str ) :
+    azerite_essence_major_t( p, "vigilant_protector", p->find_spell( 310592 ) ), bonus( 0 )
+  {
+    parse_options( options_str );
+    harmful = may_miss = may_crit = false;
+    bonus = essence.spell_ref( 3U, essence_spell::UPGRADE, essence_type::MAJOR ).effectN( 1 ).percent();
+  }
+
+  void init_finished() override
+  {
+    azerite_essence_major_t::init_finished();
+    if ( background || bonus <= 0 )
+      return;
+    for ( auto t : sim->target_list )
+    {
+      if ( !buff_t::find( t, "vigilant_protector", player ) )
+        make_buff( actor_pair_t( t, player ), "vigilant_protector", &data() )
+          ->set_default_value( bonus )
+          ->set_cooldown( 0_ms );
+    }
+  }
+
+  // Below rank 3 it is a taunt and nothing else: never worth a global cooldown in a damage sim.
+  bool ready() override
+  { return bonus > 0 && azerite_essence_major_t::ready(); }
+
+  void execute() override
+  {
+    azerite_essence_major_t::execute();
+    for ( auto t : sim->target_non_sleeping_list )
+      if ( auto b = buff_t::find( t, "vigilant_protector", player ) )
+        b->trigger();
+  }
+};
+
 } // Namespace azerite essences ends
 
 // BracketSim legacy compatibility.
@@ -5949,6 +5992,7 @@ std::string_view major_action_name( unsigned essence_id )
     case 27: return "memory_of_lucid_dreams";
     case 28: return "the_unbound_force";
     case 35: return "reaping_flames";
+    case 34: return "vigilant_protector";  // BracketSim legacy, 5 Nov 2026
     default: return {};
   }
 }
@@ -5998,6 +6042,10 @@ action_t* create_action( player_t* player, util::string_view name, util::string_
   else if ( util::str_compare_ci( name, "reaping_flames" ) )
   {
     return new azerite_essences::reaping_flames_t( player, options );
+  }
+  else if ( util::str_compare_ci( name, "vigilant_protector" ) )
+  {
+    return new azerite_essences::vigilant_protector_t( player, options );
   }
   // "Heart Essence" is a proxy action, generating whatever the user has for the major action
   // selected

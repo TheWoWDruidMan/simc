@@ -8796,6 +8796,7 @@ void unique_gear::register_special_effects()
   register_special_effect( 250093, dragons_call );         /* Dragon's Call 10847 */
   register_special_effect( 250092, book_of_the_dead );     /* Book of the Dead 13353 */
   register_special_effect( 282131, vanquished_clutches );  /* Vanquished Clutches of Yogg-Saron 46312 */
+  register_special_effect( 64981, vanquished_clutches );   /* Vanquished Clutches of Yogg-Saron 156458 (same spell, same tentacle) */
 
   /* Wrath of the Lich King */
   register_special_effect(  59620, "1PPM"                               ); /* Berserking */
