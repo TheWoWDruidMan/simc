@@ -132,6 +132,7 @@ namespace item
   void golganneths_vitality( special_effect_t&         );
   void khazgoroths_courage( special_effect_t&          );
   void norgannons_prowess( special_effect_t&           );
+  void garothi_feedback_conduit( special_effect_t&     );
   void prototype_personnel_decimator( special_effect_t& );
   void acrid_catalyst_injector( special_effect_t&      );
   void vitality_resonator( special_effect_t&           );
@@ -1532,6 +1533,20 @@ void item::norgannons_prowess( special_effect_t& effect )
   effect.custom_buff = effect.create_buff();
 
   // BracketSim (26 Sep 2026): same gap as Khaz'goroth's Courage - no callback, so it never procced.
+  new dbc_proc_callback_t( effect.item, effect );
+}
+
+// Garothi Feedback Conduit ================================================
+
+/*
+ * BracketSim (5 Nov 2026, being-hit sort): Feedback Loop (253268) - "Your healing effects have a chance to increase your
+ * Haste by X for 8 sec, stacking up to 5 times." The driver's only effect is a Dummy, so no proc was built and the trinket
+ * did nothing. The driver keeps its own RPPM (10; 5 for tanks and damage specs) and heal proc flags; the Haste is 253269,
+ * scaled by the item. "More likely when you heal allies at low health" is not modelled - the data has no formula for it.
+ */
+void item::garothi_feedback_conduit( special_effect_t& effect )
+{
+  effect.custom_buff = make_buff<stat_buff_t>( effect.player, "feedback_loop", effect.player -> find_spell( 253269 ), effect.item );
   new dbc_proc_callback_t( effect.item, effect );
 }
 
@@ -5818,6 +5833,7 @@ void unique_gear::register_special_effects_legion()
   register_special_effect( 256819, item::golganneths_vitality      );
   register_special_effect( 256825, item::khazgoroths_courage       );
   register_special_effect( 256827, item::norgannons_prowess        );
+  register_special_effect( 253268, item::garothi_feedback_conduit  ); /* BracketSim: Feedback Loop, heals -> Haste */
   register_special_effect( 253242, item::prototype_personnel_decimator );
   register_special_effect( 253259, item::acrid_catalyst_injector   );
   register_special_effect( 253258, item::vitality_resonator        );
