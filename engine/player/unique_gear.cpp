@@ -3445,9 +3445,14 @@ static void ashtongue_zeal( special_effect_t& e )          // Paladin: Judgment 
 // $s1 (Unique)" - the game shows it as a plain Equip line (Dreadful Gladiator's Greatsword: Primary Stat +39 at item
 // level 15), on in PvE too. Its stat code (67108864) is new to the client data and was read as no stat, so it did
 // nothing. Unique: two of them (Titan's Grip) give it once.
+// 5 Nov 2026 (the author, the same night): "the mist gladiator pvp two handers don't work ingame so disable that its bugged" -
+// the weapons' own stats work, this Equip line does nothing in the live game. Switched off; the code is kept below.
 static void pvp_weapon_budget( special_effect_t& effect )
 {
   effect.type = SPECIAL_EFFECT_NONE;
+  static constexpr bool works_in_game = false;  // see above
+  if ( !works_in_game )
+    return;
   if ( buff_t::find( effect.player, "gladiators_weapon_primary_stat" ) )
     return;
   auto b = make_buff<stat_buff_t>( effect.player, "gladiators_weapon_primary_stat", effect.driver(), effect.item );
@@ -3514,8 +3519,22 @@ struct savage_hallows_blast_t : public generic_proc_t
   double composite_target_multiplier( player_t* ) const override { return 1.0; }
   double composite_target_armor( const action_state_t* ) const override { return 0; }
 };
+// 5 Nov 2026: the Use works at level 40 and below only - the game shows it red, "(Requires level 40 or below)", on the author's
+// level 50 warrior; the spell's data says the same (Max Aura Level 40). Above that the ring is its stats alone.
+static bool savage_hallows_too_high( special_effect_t& effect )
+{
+  const unsigned cap = effect.driver()->max_aura_level();
+  if ( cap > 0 && as<unsigned>( effect.player->true_level ) > cap )
+  {
+    effect.type = SPECIAL_EFFECT_NONE;
+    return true;
+  }
+  return false;
+}
 static void savage_hallows_ring( special_effect_t& effect, unsigned buff_id, unsigned blast_id )
 {
+  if ( savage_hallows_too_high( effect ) )
+    return;
   const double pct = effect.driver()->effectN( 1 ).average( effect.item ) / 100.0 / 100.0;
   const std::string name = util::tokenize_fn( effect.driver()->name_cstr() );
   auto blast = new savage_hallows_blast_t( effect, name + "_blast", effect.player->find_spell( blast_id ) );
@@ -3547,6 +3566,8 @@ static void maalus( special_effect_t& e )    { savage_hallows_ring( e, 187620, 1
 static void nithramus( special_effect_t& e ) { savage_hallows_ring( e, 187616, 187625 ); }
 static void sanctus( special_effect_t& e )
 {
+  if ( savage_hallows_too_high( e ) )
+    return;
   e.custom_buff = make_buff( e.player, "sanctus", e.player->find_spell( 187617 ) )
                     ->set_default_value( e.driver()->effectN( 1 ).average( e.item ) / 100.0 / 100.0 )
                     ->set_pct_buff_type( STAT_PCT_BUFF_VERSATILITY );
@@ -6113,24 +6134,28 @@ void item::spellbound_runic_band( special_effect_t& effect )
   const spell_data_t* driver = p -> find_spell( effect.spell_id );
   buff_t* buff = nullptr;
 
-  // Need to test which procs on off-spec rings, assume correct proc for now.
+  // BracketSim, 5 Nov 2026: the buff spells (177175 Strength, 177172 Agility, 177176 Intellect) are not in this client's
+  // data, so the buff was built from nothing and did nothing. Built by hand: "Increases Strength by 15% for 10 sec" by its
+  // tooltip, but the author's level 50 Fury log (Spellbound Runic Band of Elemental Power, item level 17) measures +13.46%:
+  // attack power 379 -> 430 for exactly 10.0 sec (23:36:59.552 -> 23:37:09.565). Where the two disagree the lower is used
+  // (the author, 1 Nov). Agility and Intellect assumed the same - not measured.
+  const double greater_pct = 430.0 / 379.0 - 1.0;
+  stat_pct_buff_type pct_type = STAT_PCT_BUFF_STRENGTH;
+  unsigned shown_id = 177175;
   switch( p -> convert_hybrid_stat( STAT_STR_AGI_INT ) )
   {
-    case STAT_STRENGTH:
-      buff = create_buff<buff_t>( p, p->find_spell( 177175 ) )
-        ->set_pct_buff_type_from_data( true );
-      break;
-    case STAT_AGILITY:
-      buff = create_buff<buff_t>( p, p->find_spell( 177172 ) )
-        ->set_pct_buff_type_from_data( true );
-      break;
-    case STAT_INTELLECT:
-      buff = create_buff<buff_t>( p, p->find_spell( 177176 ) )
-        ->set_pct_buff_type_from_data( true );
-      break;
-    default:
-      break;
+    case STAT_STRENGTH:  pct_type = STAT_PCT_BUFF_STRENGTH;  shown_id = 177175; break;
+    case STAT_AGILITY:   pct_type = STAT_PCT_BUFF_AGILITY;   shown_id = 177172; break;
+    case STAT_INTELLECT: pct_type = STAT_PCT_BUFF_INTELLECT; shown_id = 177176; break;
+    default: break;
   }
+  if ( p->find_spell( shown_id )->ok() )
+    buff = create_buff<buff_t>( p, p->find_spell( shown_id ) )->set_pct_buff_type_from_data( true );
+  else
+    buff = create_buff<buff_t>( p, "archmages_greater_incandescence" )
+             ->set_duration( timespan_t::from_seconds( 10 ) )
+             ->set_default_value( greater_pct )
+             ->set_pct_buff_type( pct_type );
 
   effect.ppm_ = -1.0 * driver -> real_ppm();
   effect.custom_buff = buff;

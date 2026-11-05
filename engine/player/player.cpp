@@ -4686,13 +4686,42 @@ void player_t::create_actions()
     // 14 Oct 2026 (the author: "yeah do" it): on-use RINGS too - no action list presses a ring (Mark of the Dragon Lord's
     // Versatility worked and was never used). A use with no buff or action (a teleport) builds nothing and is never pressed.
     // 5 Nov 2026: and NECKS - Gigantifier and Knick of Time (damage / haste for 15 sec) were never pressed either.
+    // 5 Nov 2026: a use_items line counted as pressing every slot, but on 5 lists it never does - "slots=trinket1" (Rogue
+    // Subtlety, Guardian, Marksmanship) or only when named trinkets are worn ("variable.nonsteroid_trinket_equipped",
+    // Fire and Arcane Mage). Nithramus on a level 40 Fire Mage was never pressed. A use_items line now covers the slot
+    // only when it has no slots= without this slot and is not gated by a *_trinket_equipped variable.
+    auto use_items_covers = [ this ]( const std::string& slot_name ) {
+      auto covers = []( const std::string& a, const std::string& slot_name ) {
+        if ( !util::str_prefix_ci( a, "use_items" ) )
+          return false;
+        auto sp = a.find( "slots=" );
+        if ( sp != std::string::npos )
+        {
+          auto end = a.find( ',', sp );
+          std::string slots = a.substr( sp + 6, end == std::string::npos ? std::string::npos : end - sp - 6 );
+          if ( !util::str_in_str_ci( slots, slot_name ) )
+            return false;
+        }
+        return !util::str_in_str_ci( a, "trinket_equipped" );
+      };
+      for ( auto apl : action_priority_list )
+      {
+        for ( const auto& ap : apl->action_list )
+          if ( covers( ap.action_, slot_name ) )
+            return true;
+        for ( const auto& a : util::string_split<std::string>( apl->action_list_str, "/" ) )
+          if ( covers( a, slot_name ) )
+            return true;
+      }
+      return false;
+    };
     for ( auto slot : { SLOT_MAIN_HAND, SLOT_OFF_HAND, SLOT_FINGER_1, SLOT_FINGER_2, SLOT_NECK } )
     {
       const auto& it = items[ slot ];
       if ( !it.active() || !it.has_use_special_effect() )
         continue;
       std::string slot_name = util::slot_type_string( slot );
-      if ( mentioned( "use_items" ) || mentioned( "slot=" + slot_name ) || mentioned( "name=" + it.name_str ) )
+      if ( use_items_covers( slot_name ) || mentioned( "slot=" + slot_name ) || mentioned( "name=" + it.name_str ) )
         continue;
       std::string action = "use_item,slot=" + slot_name;
       if ( range::find( legacy_apl_actions, action ) == legacy_apl_actions.end() )
