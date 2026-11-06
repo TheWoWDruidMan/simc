@@ -10905,6 +10905,7 @@ struct use_item_t : public action_t
   cooldown_t* cooldown_group;
   timespan_t cooldown_group_duration;
   std::string item_name, item_slot, effect_name;
+  bool bracketsim_manual_skip = false;
 
   use_item_t( player_t* player, util::string_view options_str ) :
     action_t( ACTION_OTHER, "use_item", player ),
@@ -11013,6 +11014,17 @@ struct use_item_t : public action_t
 
     if ( !item )
     {
+      action_t::init();
+      erase_action( apl );
+      background = true;
+      return;
+    }
+
+    // BracketSim, 6 Nov 2026: a manual-only item (unique_gear.cpp bs_item_channel_t) is pressed by a line naming it,
+    // never by slot=, effect_name=, use_items or the auto-press.
+    if ( item_name.empty() && range::contains( player->bracketsim.manual_use_items, item->parsed.data.id ) )
+    {
+      bracketsim_manual_skip = true;
       action_t::init();
       erase_action( apl );
       background = true;
@@ -11143,7 +11155,7 @@ struct use_item_t : public action_t
 
   bool ready() override
   {
-    if ( !item )
+    if ( !item || bracketsim_manual_skip )
       return false;
 
     if ( cooldown_group && cooldown_group->remains() > timespan_t::zero() )

@@ -376,6 +376,8 @@ struct player_t : public actor_t
     // haste (Knick of Time) - read while up, and spell power for one school only (Nathrezim Acolyte's Band: Shadow).
     std::vector<buff_t*> item_damage_pct_buffs, item_haste_pct_buffs;
     std::array<double, SCHOOL_MAX> school_spell_power{};
+    // 6 Nov 2026: on-use items pressed ONLY by a use_item,name= line (channels that out-damage nothing) - item ids.
+    std::vector<unsigned> manual_use_items;
     // "<percent>/<duration seconds>/<period seconds>", e.g. "15/40/300" for
     // Drums of Fury. A raid-wide HASTE percentage, which no stat buff can
     // express: Bloodlust is a level 48 spell (the engine's own data says so, and

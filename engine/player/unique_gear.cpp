@@ -3575,6 +3575,121 @@ static void sanctus( special_effect_t& e )
   e.disable_action();
 }
 
+/*
+ * BracketSim, 6 Nov 2026 - CHANNELLED ITEMS (the author: "i want the channeled items coded in anyway even if the sim doesn't
+ * press it ... if they ever do become good we just have to add it into the APL or people who do their own custom APLs
+ * can at least have them pressed"). Each is a channel: the player does nothing else and auto attacks pause while it
+ * runs. They deal less than the player's own rotation in the same seconds, so they are MANUAL ONLY: never pressed by a
+ * slot line, use_items or the auto-press - only by a line naming the item (use_item,name=torrent_callers_shell). The
+ * amounts are the client's at the item's own level; what the data cannot give is named in each comment.
+ */
+struct bs_item_channel_t : public generic_proc_t
+{
+  action_t* finisher = nullptr;
+  bs_item_channel_t( const special_effect_t& e, util::string_view n, const spell_data_t* s, timespan_t duration,
+                     timespan_t period, bool tick_zero_, action_t* tick )
+    : generic_proc_t( e, n, s )
+  {
+    channeled = true;
+    harmful = false;
+    may_miss = may_crit = false;
+    base_dd_min = base_dd_max = 0;
+    spell_power_mod.direct = attack_power_mod.direct = 0;
+    dot_duration = duration;
+    base_tick_time = period;
+    tick_zero = want_tick_zero = tick_zero_;
+    tick_action = tick;
+    tick->dual = true;
+    tick->stats = stats;
+  }
+  bool want_tick_zero = false;
+  void init() override
+  {
+    generic_proc_t::init();
+    tick_zero = want_tick_zero; tick_on_application = false;  // the data's "Extra Initial Period" flag would add one; the count is set per item
+  }
+  void execute() override
+  {
+    generic_proc_t::execute();
+    event_t::cancel( player->readying );
+    player->reset_auto_attacks( composite_dot_duration( execute_state ) );
+  }
+  void last_tick( dot_t* d ) override
+  {
+    bool was_channeling = player->channeling == this;
+    generic_proc_t::last_tick( d );
+    if ( finisher && d->remains() <= timespan_t::zero() )
+      finisher->execute_on_target( d->target );
+    if ( was_channeling && !player->readying )
+      player->schedule_ready( rng().gauss( sim->channel_lag ) );
+  }
+};
+static void bs_manual_only( special_effect_t& effect )
+{
+  if ( effect.item )
+    effect.player->bracketsim.manual_use_items.push_back( effect.item->parsed.data.id );
+}
+
+// Torrent Caller's Shell 200552, Use 390458 (2.5 min): "Channel torrents around you dealing ${$s1*($390459d/$390459t1)}
+// nature damage to nearby enemies over 3 sec. Then unleash a powerful blast dealing $s2 nature damage split between all
+// nearby enemies." Six ticks of $s1 (the text's count; the channel's extra first tick is not counted), then $s2 split.
+static void torrent_callers_shell( special_effect_t& effect )
+{
+  bs_manual_only( effect );
+  const spell_data_t* chan = effect.player->find_spell( 390459 );
+  auto tick = flat_item_hit( effect, "torrent_callers_shell_tick", effect.driver()->effectN( 1 ).average( effect.item ),
+                             SCHOOL_NATURE, -1, false, effect.player->find_spell( 390497 ) );
+  auto c = new bs_item_channel_t( effect, "torrent_callers_shell", chan, 3_s, 500_ms, false, tick );
+  c->finisher = flat_item_hit( effect, "torrent_callers_shell_blast", effect.driver()->effectN( 2 ).average( effect.item ),
+                               SCHOOL_NATURE, -1, true, effect.driver() );
+  effect.disable_buff();
+  effect.execute_action = c;
+}
+
+// Brimming Ember Shard 175733 / 181360, Use 336866 Ember Focus (1.5 min): a 6 sec channel, a tick every 1.2 sec with
+// one at the start (6 ticks), "dealing up to ${$343538s1} Holy damage over 6 sec split amongst enemies caught in the
+// beam" - $s1 / 6 a tick on the target. "Increased slightly for each target hit" is not simmed (no amount given).
+static void brimming_ember_shard( special_effect_t& effect )
+{
+  bs_manual_only( effect );
+  const double total = effect.player->find_spell( 343538 )->effectN( 1 ).average( effect.item );
+  auto tick = flat_item_hit( effect, "ember_focus_tick", total / 6.0, SCHOOL_HOLY, 0, false,
+                             effect.player->find_spell( 343540 ) );
+  effect.disable_buff();
+  effect.execute_action = new bs_item_channel_t( effect, "ember_focus", effect.driver(), 6_s, 1200_ms, true, tick );
+}
+
+// Goblin Dragon Gun 10727, Use 13183 (5 min): a 10 sec channel, "Deals $13184s1 fire damage" every second to all
+// targets in a cone. "That is unless it explodes" - the chance is not in the data, so it never explodes here.
+static void goblin_dragon_gun( special_effect_t& effect )
+{
+  bs_manual_only( effect );
+  const spell_data_t* d = effect.player->find_spell( 13184 );
+  auto tick = flat_item_hit( effect, "goblin_dragon_gun_tick", d->effectN( 1 ).average( effect.item ), SCHOOL_FIRE, -1,
+                             false, d );
+  effect.disable_buff();
+  effect.execute_action = new bs_item_channel_t( effect, "goblin_dragon_gun", effect.driver(), 10_s, 1_s, false, tick );
+}
+
+// Hargal's Favorite Trinket 140161, Use 222634 Bladestorm: 6 sec, a tick every second with one at the start (the text's
+// 7 hits), each "$225308s1 Physical" to all within 8 yards with the main hand, plus "$225307" with the off hand when
+// the wearer dual wields (Fury). Only defensives can be used during it; haste shortens it and its ticks alike, so the
+// 7 hits stay 7. Armor applies.
+static void hargals_bladestorm( special_effect_t& effect )
+{
+  bs_manual_only( effect );
+  double per_tick = effect.player->find_spell( 225308 )->effectN( 1 ).average( effect.item );
+  if ( effect.player->items[ SLOT_OFF_HAND ].active() &&
+       effect.player->items[ SLOT_OFF_HAND ].parsed.data.item_class == ITEM_CLASS_WEAPON )
+    per_tick += effect.player->find_spell( 225307 )->effectN( 1 ).average( effect.item );
+  auto tick = flat_item_hit( effect, "hargals_bladestorm_tick", per_tick, SCHOOL_PHYSICAL, -1, false,
+                             effect.player->find_spell( 225308 ) );
+  auto c = new bs_item_channel_t( effect, "hargals_bladestorm", effect.driver(), 6_s, 1_s, true, tick );
+  c->hasted_ticks = true;
+  effect.disable_buff();
+  effect.execute_action = c;
+}
+
 // Dragonwrath, Tarecgosa's Rest, item 71086 - the Firelands caster legendary.
 //
 // the author, 12 September 2026: "can you also code into the engine wrath of
@@ -10020,6 +10135,11 @@ void unique_gear::register_special_effects()
   register_special_effect( 187615,  maalus );                     /* Maalus, the Blood Drinker 124636 */
   register_special_effect( 187611,  nithramus );                  /* Nithramus, the All-Seer 124635 */
   register_special_effect( 187613,  sanctus );                    /* Sanctus, Sigil of the Unbroken 124637 */
+  // 6 Nov 2026: channelled items, pressed only by a line that names them (see bs_item_channel_t).
+  register_special_effect( 390458,  torrent_callers_shell );      /* Torrent Caller's Shell 200552 */
+  register_special_effect( 336866,  brimming_ember_shard );       /* Brimming Ember Shard 175733, 181360 */
+  register_special_effect( 13183,   goblin_dragon_gun );          /* Goblin Dragon Gun 10727 */
+  register_special_effect( 222634,  hargals_bladestorm );         /* Hargal's Favorite Trinket 140161 */
   register_special_effect( 97119,   item::variable_pulse_lightning_capacitor ); /* VPLC (heroic) - wowsims cata */
   register_special_effect( 469933,  item::molten_ironfoe ); /* Molten Ironfoe - Molten Strike */
   register_special_effect( 259006,  "259014Trigger"  ); /* Venomstrike - Venom Shot */
