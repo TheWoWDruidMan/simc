@@ -4632,10 +4632,13 @@ void dark_rangers_quiver( special_effect_t& effect )
   };
 
   auto cleave = create_proc_action<withering_fire_t>( "withering_fire", effect );
-  auto buff = buff_t::find( effect.player, "withering_fire" );
+  // BracketSim, 6 Nov 2026: hunters already own a buff named "withering_fire" (the Dark Ranger hero talent), made
+  // before items, so the find below picked it up. The quiver's shots stacked that buff, which cannot start without the
+  // talent, and the volley never fired. The quiver's stacks get their own name.
+  auto buff = buff_t::find( effect.player, "dark_rangers_quiver" );
   if ( !buff )
   {
-    buff = make_buff( effect.player, "withering_fire", effect.trigger() );
+    buff = make_buff( effect.player, "dark_rangers_quiver", effect.trigger() );
     buff->set_stack_change_callback( [ cleave ]( buff_t* buff, int, int cur ) {
       if ( cur == buff->max_stack() )
       {
@@ -4690,7 +4693,13 @@ void soulwarped_seal_of_wrynn( special_effect_t& effect )
       // Appears to be roughly 2 rppm + hasted above 30% HP
       // Below that it will just be 20 rppm + hasted
       // BUG: https://github.com/SimCMinMax/WoW-BugTracker/issues/886
-      if ( s->target->health_percentage() >= 30 && !effect.player->bugs )
+      // BracketSim, 6 Nov 2026: the bug above (20 rppm at any health) was measured in 2022 and is not confirmed in
+      // Midnight; no Midnight log shows the ring. By the lower-number rule the ring runs as described in the tooltip:
+      // 2 rppm above 30% target health, 20 below, whatever the bugs option says.
+      // A spell that damages its own caster (the Shadow Word: Death backlash) targets nobody: in a damage sim the
+      // priest is never healed and sits below 30% health, and that backlash kept the ring at 20 rppm.
+      bool self_hit = s->target == effect.player && s->action && s->action->harmful;
+      if ( s->target->health_percentage() >= 30 || self_hit )
       {
         mod = 0.1;
       }
