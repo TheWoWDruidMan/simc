@@ -3977,7 +3977,38 @@ static void bs_judgment_gloves( special_effect_t& effect )
 // Shaman PvP gloves (Chancellor's / Gladiator's / Grand Marshal's Linked Gauntlets...), Equip 33020: "Increases the damage
 // done by your Lightning Shield by 8%" - 8% at every item level (shaman lightning shield damage actions). the author, 6 Nov 2026:
 // works in game.
-// Circle of Flame: a self-channel that turns your own health into mana - never pressed (it stops casting for 10 sec).
+// Spark of Hope 45703 / 156277, equip 65010: "Reduces the base mana cost of your spells by $s1" (Modify Power Cost,
+// magic schools). The value is the client's at the item's level; applied in action_t::cost() before cost multipliers.
+static void bs_spark_of_hope( special_effect_t& effect )
+{
+  effect.player->bracketsim.flat_mana_cost_reduction += std::fabs( effect.driver()->effectN( 1 ).average( effect.item ) );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+// Circle of Flame 231412, Use 470626 (1 min): "Channels $s2 health into $s1 mana every $t1 sec for $d" - a 10 sec channel,
+// 10 ticks of $s1 mana (the client's at the item's level). The health cost is not simmed (no healing is). Like the other
+// channels it stops casting while it runs, so it is MANUAL ONLY: pressed only by a line naming it.
+struct bs_mana_tick_t : public generic_proc_t
+{
+  double amount; gain_t* g;
+  bs_mana_tick_t( const special_effect_t& e, util::string_view n, double a )
+    : generic_proc_t( e, n, e.driver() ), amount( a ), g( e.player->get_gain( n ) )
+  {
+    harmful = false; may_miss = may_crit = callbacks = false;
+    base_dd_min = base_dd_max = 0; spell_power_mod.direct = attack_power_mod.direct = 0;
+    base_td = 0; dot_duration = 0_ms; base_tick_time = 0_ms; channeled = false;
+  }
+  void execute() override { generic_proc_t::execute(); player->resource_gain( RESOURCE_MANA, amount, g, this ); }
+};
+static void bs_circle_of_flame( special_effect_t& effect )
+{
+  bs_manual_only( effect );
+  auto tick = new bs_mana_tick_t( effect, "circle_of_flame_mana", effect.driver()->effectN( 1 ).average( effect.item ) );
+  effect.execute_action = new bs_item_channel_t( effect, "circle_of_flame", effect.driver(), 10_s, 1_s, false, tick );
+  effect.disable_buff();
+}
+
+// Circle of Flame (classic copy 11808, spell 17447): its spell is missing from the client data - no effect.
 static void bs_no_effect( special_effect_t& effect )
 { effect.type = SPECIAL_EFFECT_NONE; }
 
@@ -10472,7 +10503,8 @@ void unique_gear::register_special_effects()
   register_special_effect( 144310,  bs_judgment_gloves<4, 4830, 35> );
   register_special_effect( 33020,   bs_lightning_shield_gloves );   /* Shaman PvP gloves: +8% Lightning Shield */
   register_special_effect( 17447,   bs_no_effect );   /* Circle of Flame (health to mana, self channel) */
-  register_special_effect( 470626,  bs_no_effect );   /* Circle of Flame (Legacy copy) */
+  register_special_effect( 470626,  bs_circle_of_flame );   /* Circle of Flame: health -> mana channel, manual only */
+  register_special_effect( 65010,   bs_spark_of_hope );     /* Spark of Hope: base mana cost - N */
   register_special_effect( 97119,   item::variable_pulse_lightning_capacitor ); /* VPLC (heroic) - wowsims cata */
   register_special_effect( 469933,  item::molten_ironfoe ); /* Molten Ironfoe - Molten Strike */
   register_special_effect( 259006,  "259014Trigger"  ); /* Venomstrike - Venom Shot */

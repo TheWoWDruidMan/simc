@@ -1219,6 +1219,9 @@ double action_t::cost() const
 
   auto base = bc.base;
   auto add = bc.flat_add + cost_flat_modifier();
+  // BracketSim: "Reduces the base mana cost of your spells by N" (Spark of Hope, 65010; magic schools only).
+  if ( cr == RESOURCE_MANA && base > 0 && player->bracketsim.flat_mana_cost_reduction > 0 && dbc::has_common_school( get_school(), SCHOOL_MAGIC ) )
+    add -= std::min( base + add, player->bracketsim.flat_mana_cost_reduction );
   double c = ( base + add ) * mul;
 
   // For now, treat secondary cost as "maximum of player current resource, min + max cost". Entirely possible we need to

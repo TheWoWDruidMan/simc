@@ -382,6 +382,7 @@ struct player_t : public actor_t
     double pet_crit_pct = 0, pet_damage_pct = 0;
     // 6 Nov 2026: Paladin PvP gloves (+Holy damage to Judgment) and Shaman PvP gloves (+8% Lightning Shield damage).
     double judgment_holy_bonus = 0, lightning_shield_pct = 0;
+    double flat_mana_cost_reduction = 0;  // Spark of Hope: off each magic spell's BASE mana cost
     // "<percent>/<duration seconds>/<period seconds>", e.g. "15/40/300" for
     // Drums of Fury. A raid-wide HASTE percentage, which no stat buff can
     // express: Bloodlust is a level 48 spell (the engine's own data says so, and
