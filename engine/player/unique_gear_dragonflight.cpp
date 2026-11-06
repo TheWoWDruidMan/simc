@@ -8799,6 +8799,11 @@ void thriving_thorns( special_effect_t& effect )
 
     void execute( const spell_data_t*, player_t* t, action_state_t* s ) override
     {
+      // BracketSim, 6 Nov 2026: a proc with no action state (or no target) read s->result_type and crashed the sim -
+      // every run for a level 70 Fury Warrior wearing Toxic Thorn Footwraps. Same guard as Bronzed Grip Wrappings.
+      if ( !t || !s || t->is_sleeping() )
+        return;
+
       if ( s->result_type == result_amount_type::HEAL_DIRECT || s->result_type == result_amount_type::HEAL_OVER_TIME ||
            t->is_enemy() == listener->is_enemy() )
       {
