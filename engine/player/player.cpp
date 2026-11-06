@@ -4715,24 +4715,15 @@ void player_t::create_actions()
       }
       return false;
     };
-    // 6 Nov 2026 (batch 3): on-use ARMOR whose spell is missing from the client data and is now built by hand (Helm of
-    // Fire, Cloak of Fire, Bulwark of Kings, Cloudkeeper Legplates) - those items only, by their use spell; other
-    // armor on-use items are unchanged.
-    auto batch3_armor_use = []( const item_t& it ) {
-      static constexpr unsigned ids[] = { 10578, 18364, 144300, 18787 };
-      for ( const auto& e : it.parsed.data.effects )
-        for ( unsigned id : ids )
-          if ( e.spell_id == id )
-            return true;
-      return false;
-    };
+    // 6 Nov 2026 (the author: "yes all armor as long as it doesnt affect others and only benefits those wearing these slots"):
+    // on-use ARMOR too (Cloudkeeper Legplates, Helm of Fire...) - any slot but the trinkets, which the action lists press
+    // themselves. Only a character wearing such an item is affected.
     for ( slot_e slot = SLOT_MIN; slot < SLOT_MAX; slot++ )
     {
       const auto& it = items[ slot ];
       if ( !it.active() || !it.has_use_special_effect() )
         continue;
-      if ( slot != SLOT_MAIN_HAND && slot != SLOT_OFF_HAND && slot != SLOT_FINGER_1 && slot != SLOT_FINGER_2 &&
-           slot != SLOT_NECK && !batch3_armor_use( it ) )
+      if ( slot == SLOT_TRINKET_1 || slot == SLOT_TRINKET_2 )
         continue;
       std::string slot_name = util::slot_type_string( slot );
       if ( use_items_covers( slot_name ) || mentioned( "slot=" + slot_name ) || mentioned( "name=" + it.name_str ) )

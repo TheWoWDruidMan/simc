@@ -5186,6 +5186,10 @@ struct lightning_shield_damage_t : public shaman_spell_t
     background = true;
     callbacks  = false;
   }
+
+  // BracketSim, 6 Nov 2026: Shaman PvP gloves, "Increases the damage done by your Lightning Shield by 8%".
+  double action_multiplier() const override
+  { return shaman_spell_t::action_multiplier() * ( 1.0 + p()->bracketsim.lightning_shield_pct ); }
 };
 
 struct lightning_shield_defense_damage_t : public shaman_spell_t
@@ -5196,6 +5200,10 @@ struct lightning_shield_defense_damage_t : public shaman_spell_t
     background = true;
     callbacks  = false;
   }
+
+  // BracketSim, 6 Nov 2026: Shaman PvP gloves, "Increases the damage done by your Lightning Shield by 8%".
+  double action_multiplier() const override
+  { return shaman_spell_t::action_multiplier() * ( 1.0 + p()->bracketsim.lightning_shield_pct ); }
 };
 
 struct imbuement_mastery_t : public shaman_spell_t  // Imbuement Mastery damage

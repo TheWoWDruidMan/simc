@@ -1591,6 +1591,9 @@ double judgment_t::bonus_da( const action_state_t* s ) const
     }
   }
 
+  // BracketSim, 6 Nov 2026: Paladin PvP gloves, "Increases the Holy damage of your Judgments by N".
+  da += p()->bracketsim.judgment_holy_bonus;
+
   return da;
 }
 

@@ -3963,6 +3963,30 @@ static void bs_beastmasters_boots( special_effect_t& effect )
   effect.type = SPECIAL_EFFECT_NONE;
 }
 
+// Paladin PvP gloves (23: Crusader's, Grand Marshal's / High Warlord's, Marshal's / General's, Chancellor's, Blood Guard's /
+// Knight-Lieutenant's, Gladiator's and replicas): "Increases the Holy damage of your Judgments by N" - added to Judgment's hit
+// (paladin judgment_t::bonus_da). Six spells, each fitted to its tooltip at item levels 13-80 (every level rounds to the
+// tooltip): 23300 4 at 30, 144306 7, 144307 5, 144308 7, 144309 8, 144310 4. the author, 6 Nov 2026: they work in game.
+template <int COL, int C10000, unsigned FLOOR>
+static void bs_judgment_gloves( special_effect_t& effect )
+{
+  effect.player->bracketsim.judgment_holy_bonus += bs_legacy_amount( effect, COL, C10000 / 10000.0, FLOOR );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+// Shaman PvP gloves (Chancellor's / Gladiator's / Grand Marshal's Linked Gauntlets...), Equip 33020: "Increases the damage
+// done by your Lightning Shield by 8%" - 8% at every item level (shaman lightning shield damage actions). the author, 6 Nov 2026:
+// works in game.
+// Circle of Flame: a self-channel that turns your own health into mana - never pressed (it stops casting for 10 sec).
+static void bs_no_effect( special_effect_t& effect )
+{ effect.type = SPECIAL_EFFECT_NONE; }
+
+static void bs_lightning_shield_gloves( special_effect_t& effect )
+{
+  effect.player->bracketsim.lightning_shield_pct += 0.08;
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
 // Dragonwrath, Tarecgosa's Rest, item 71086 - the Firelands caster legendary.
 //
 // the author, 12 September 2026: "can you also code into the engine wrath of
@@ -6527,7 +6551,9 @@ void item::spellbound_runic_band( special_effect_t& effect )
   // tooltip, but the author's level 50 Fury log (Spellbound Runic Band of Elemental Power, item level 17) measures +13.46%:
   // attack power 379 -> 430 for exactly 10.0 sec (23:36:59.552 -> 23:37:09.565). Where the two disagree the lower is used
   // (the author, 1 Nov). Agility and Intellect assumed the same - not measured.
-  const double greater_pct = 430.0 / 379.0 - 1.0;
+  // 6 Nov 2026: the author's character sheet settles it - Strength 325 -> 374 with the buff (+15.08%; attack power also has a
+  // part that is not Strength, which is why it rose less). The tooltip's 15% is used (the lower of 15 and 15.08).
+  const double greater_pct = 0.15;
   stat_pct_buff_type pct_type = STAT_PCT_BUFF_STRENGTH;
   unsigned shown_id = 177175;
   switch( p -> convert_hybrid_stat( STAT_STR_AGI_INT ) )
@@ -10438,6 +10464,15 @@ void unique_gear::register_special_effects()
   register_special_effect( 16550,   bs_bonespike_shoulder );        /* Bonespike Shoulder 12588 */
   register_special_effect( 27043,   bs_beastmasters_gloves );       /* Beastmaster's Gloves 22015 */
   register_special_effect( 27206,   bs_beastmasters_boots );        /* Beastmaster's Boots 22061 */
+  register_special_effect( 23300,   bs_judgment_gloves<3, 4315, 22> );  /* Paladin PvP gloves: +Holy damage to Judgment */
+  register_special_effect( 144306,  bs_judgment_gloves<4, 8630, 22> );
+  register_special_effect( 144307,  bs_judgment_gloves<3, 4495, 35> );
+  register_special_effect( 144308,  bs_judgment_gloves<4, 9365, 27> );
+  register_special_effect( 144309,  bs_judgment_gloves<2, 5640, 22> );
+  register_special_effect( 144310,  bs_judgment_gloves<4, 4830, 35> );
+  register_special_effect( 33020,   bs_lightning_shield_gloves );   /* Shaman PvP gloves: +8% Lightning Shield */
+  register_special_effect( 17447,   bs_no_effect );   /* Circle of Flame (health to mana, self channel) */
+  register_special_effect( 470626,  bs_no_effect );   /* Circle of Flame (Legacy copy) */
   register_special_effect( 97119,   item::variable_pulse_lightning_capacitor ); /* VPLC (heroic) - wowsims cata */
   register_special_effect( 469933,  item::molten_ironfoe ); /* Molten Ironfoe - Molten Strike */
   register_special_effect( 259006,  "259014Trigger"  ); /* Venomstrike - Venom Shot */

@@ -380,6 +380,8 @@ struct player_t : public actor_t
     std::vector<unsigned> manual_use_items;
     // 6 Nov 2026 (batch 3): Beastmaster's Gloves / Boots - +pet crit chance and +pet damage (pets, not guardians).
     double pet_crit_pct = 0, pet_damage_pct = 0;
+    // 6 Nov 2026: Paladin PvP gloves (+Holy damage to Judgment) and Shaman PvP gloves (+8% Lightning Shield damage).
+    double judgment_holy_bonus = 0, lightning_shield_pct = 0;
     // "<percent>/<duration seconds>/<period seconds>", e.g. "15/40/300" for
     // Drums of Fury. A raid-wide HASTE percentage, which no stat buff can
     // express: Bloodlust is a level 48 spell (the engine's own data says so, and
