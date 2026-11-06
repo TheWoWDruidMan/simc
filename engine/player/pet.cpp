@@ -422,7 +422,9 @@ double pet_t::hit_exp() const
 
 double pet_t::pet_crit() const
 {
-  return std::max( current_pet_stats.composite_melee_crit, current_pet_stats.composite_spell_crit );
+  // BracketSim: Beastmaster's Gloves (6 Nov 2026), +pet crit chance.
+  return std::max( current_pet_stats.composite_melee_crit, current_pet_stats.composite_spell_crit ) +
+         ( owner ? owner->bracketsim.pet_crit_pct : 0.0 );
 }
 
 double pet_t::composite_melee_attack_power() const

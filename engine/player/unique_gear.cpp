@@ -3690,6 +3690,279 @@ static void hargals_bladestorm( special_effect_t& effect )
   effect.execute_action = c;
 }
 
+// ---- Batch 3 (6 Nov 2026): items whose own spell is MISSING from the client data the engine ships with, so they did
+// nothing. Every number is the item's tooltip read at item levels 10-100 and fitted to the game's item-level tables:
+// `col` 0 = damage_replace_stat, 1 = damage_secondary, 2-6 = the epic budget columns; the factor fits every level from
+// 30 to 100 within 1-3%. Below the level where the tooltip stops falling (`floor`) the floor's value is used. Proc rates,
+// cooldowns and durations are the tooltip's. Where the text is vague the narrower reading is used (white swings only for
+// "your weapon attack", melee only for "when struck"), so these err low.
+static double bs_legacy_amount( const special_effect_t& e, int col, double coeff, unsigned floor_ilvl )
+{
+  unsigned il = e.item ? e.item->item_level() : floor_ilvl;
+  il = std::max( il, floor_ilvl );
+  const auto& rp = e.player->dbc->random_property( il );
+  double v = col == 0 ? rp.damage_replace_stat : col == 1 ? rp.damage_secondary : rp.p_epic[ col - 2 ];
+  return coeff * v;
+}
+
+static void bs_nodata_proc( special_effect_t& effect, uint64_t flags, uint64_t flags2, double chance, timespan_t icd )
+{
+  effect.proc_flags_  = flags;
+  effect.proc_flags2_ = flags2;
+  effect.proc_chance_ = chance;
+  effect.ppm_         = 0;
+  effect.cooldown_    = icd;
+}
+
+// A flat hit on a proc (the attacker, for "when struck").
+static void bs_nodata_hit( special_effect_t& effect, const std::string& name, double amount, school_e school,
+                           int targets, uint64_t flags, double chance, timespan_t icd = timespan_t::zero(),
+                           uint64_t flags2 = PF2_ALL_HIT )
+{
+  bs_nodata_proc( effect, flags, flags2, chance, icd );
+  effect.name_str = name;
+  effect.disable_buff();
+  effect.execute_action = flat_item_hit( effect, name, amount, school, targets, false, spell_data_t::nil() );
+  new dbc_proc_callback_t( effect.player, effect );
+}
+
+// A stat buff on a proc.
+static void bs_nodata_stat_proc( special_effect_t& effect, const std::string& name, stat_e stat, double amount,
+                                 timespan_t duration, uint64_t flags, double chance, timespan_t icd )
+{
+  bs_nodata_proc( effect, flags, PF2_ALL_HIT, chance, icd );
+  effect.name_str    = name;
+  effect.custom_buff = create_buff<stat_buff_t>( effect.player, name, spell_data_t::nil(), effect.item )
+                           ->add_stat( stat, amount )
+                           ->set_duration( duration );
+  new dbc_proc_callback_t( effect.player, effect );
+}
+
+// An on-use stat buff (pressed like any on-use item).
+static void bs_nodata_use_stat( special_effect_t& effect, const std::string& name,
+                                const std::vector<std::pair<stat_e, double>>& stats, timespan_t duration,
+                                timespan_t cd )
+{
+  effect.cooldown_ = cd;
+  effect.name_str  = name;
+  auto b = create_buff<stat_buff_t>( effect.player, name, spell_data_t::nil(), effect.item );
+  for ( const auto& s : stats )
+    b->add_stat( s.first, s.second );
+  b->set_duration( duration );
+  effect.custom_buff = b;
+}
+
+// An on-use: an optional first hit, then `n` hits `gap` apart (a short burn), all in one report row.
+struct bs_burst_t : public generic_proc_t
+{
+  action_t* first;
+  action_t* tick;
+  int n;
+  timespan_t gap;
+  bs_burst_t( const special_effect_t& e, util::string_view name, action_t* first_, action_t* tick_, int n_,
+              timespan_t gap_ )
+    : generic_proc_t( e, name, spell_data_t::nil() ), first( first_ ), tick( tick_ ), n( n_ ), gap( gap_ )
+  {
+    harmful = false;
+    may_miss = may_crit = false;
+    base_dd_min = base_dd_max = 0;
+    if ( first )
+      first->stats = stats;
+    if ( tick )
+      tick->stats = stats;
+  }
+  void execute() override
+  {
+    generic_proc_t::execute();
+    player_t* t = target;
+    if ( first )
+      first->execute_on_target( t );
+    for ( int i = 1; i <= n; i++ )
+      make_event( *sim, gap * i, [ this, t ]() {
+        if ( !t->is_sleeping() )
+          tick->execute_on_target( t );
+      } );
+  }
+};
+
+static void bs_nodata_use_hit( special_effect_t& effect, const std::string& name, double amount, school_e school,
+                               int targets, timespan_t cd )
+{
+  effect.cooldown_ = cd;
+  effect.name_str  = name;
+  effect.disable_buff();
+  effect.execute_action = flat_item_hit( effect, name, amount, school, targets, false, spell_data_t::nil() );
+}
+
+// Helm of Fire 8348, Use 10578 (5 min): "Hurls a fiery ball that causes 43 Fire damage and an additional 3 damage over
+// 8 sec" (item level 13; 73 / 6 at 30). The burn is 4 ticks, 2 sec apart, that cannot crit.
+static void bs_helm_of_fire( special_effect_t& effect )
+{
+  effect.cooldown_ = 5_min;
+  effect.disable_buff();
+  auto hit  = flat_item_hit( effect, "helm_of_fire_hit", bs_legacy_amount( effect, 1, 17.9061, 20 ), SCHOOL_FIRE, 0,
+                             false, spell_data_t::nil() );
+  auto burn = flat_item_hit( effect, "helm_of_fire_burn", bs_legacy_amount( effect, 1, 1.4502, 14 ) / 4.0,
+                             SCHOOL_FIRE, 0, false, spell_data_t::nil() );
+  burn->may_crit = false;
+  burn->round_base_dmg = false;  // 1.5 a tick at item level 30 - the engine would round it to 1
+  effect.execute_action = create_proc_action<bs_burst_t>( "helm_of_fire", effect, hit, burn, 4, 2_s );
+}
+
+// Cloak of Fire 14134, Use 18364 (2 min): "Deals 1 Fire damage every 5 sec to all nearby enemies for 15 sec" (13; 3 at
+// 30) - 3 ticks.
+static void bs_cloak_of_fire( special_effect_t& effect )
+{
+  effect.cooldown_ = 2_min;
+  effect.disable_buff();
+  auto tick = flat_item_hit( effect, "cloak_of_fire_tick", bs_legacy_amount( effect, 1, 0.7956, 1 ), SCHOOL_FIRE, -1,
+                             false, spell_data_t::nil() );
+  effect.execute_action = create_proc_action<bs_burst_t>( "cloak_of_fire", effect, nullptr, tick, 3, 5_s );
+}
+
+// Fire Eater's Guide 43660, Use 59197 (2 min): "Breathe fire on enemies in front of you, dealing 19 Fire damage" (13;
+// 47 at 30) - each enemy in front.
+static void bs_fire_eaters_guide( special_effect_t& effect )
+{
+  bs_nodata_use_hit( effect, "fire_eaters_guide", bs_legacy_amount( effect, 0, 11.5381, 17 ), SCHOOL_FIRE, -1, 2_min );
+}
+
+// Stormbound Tome 43663, Use 59199 (2 min): "Shocks an enemy for 33 Nature damage" (13; 54 at 30).
+static void bs_stormbound_tome( special_effect_t& effect )
+{
+  bs_nodata_use_hit( effect, "stormbound_tome", bs_legacy_amount( effect, 0, 13.1152, 21 ), SCHOOL_NATURE, 0, 2_min );
+}
+
+// Manual of Clouds 43664, Use 60060 (5 min): "Increases your Versatility by 29 for 1 min" (13; 33 at 30).
+static void bs_manual_of_clouds( special_effect_t& effect )
+{
+  bs_nodata_use_stat( effect, "manual_of_clouds",
+                      { { STAT_VERSATILITY_RATING, bs_legacy_amount( effect, 4, 4.3052, 20 ) } }, 1_min, 5_min );
+}
+
+// Tome of Kings 43656, Use 59191 (10 min): "Increases your stats by 3 for 1 min" (12; 7 at 30) - Strength, Agility,
+// Intellect and Stamina.
+static void bs_tome_of_kings( special_effect_t& effect )
+{
+  const double a = bs_legacy_amount( effect, 5, 1.008, 1 );
+  bs_nodata_use_stat( effect, "tome_of_kings",
+                      { { STAT_STRENGTH, a }, { STAT_AGILITY, a }, { STAT_INTELLECT, a }, { STAT_STAMINA, a } }, 1_min,
+                      10_min );
+}
+
+// Bulwark of Kings 28484, Use 144300 (30 min): "Temporarily Increases Health by 70 and Strength by 7 for 15 sec" (14; 82
+// / 8 at 30). The health is left out.
+static void bs_bulwark_of_kings( special_effect_t& effect )
+{
+  bs_nodata_use_stat( effect, "bulwark_of_kings", { { STAT_STRENGTH, bs_legacy_amount( effect, 1, 2.011, 23 ) } },
+                      15_s, 30_min );
+}
+
+// Cloudkeeper Legplates 14554, Use 18787 (15 min): "Increases attack power by 47 for 30 sec" (80; 19 at 30).
+static void bs_cloudkeeper_legplates( special_effect_t& effect )
+{
+  bs_nodata_use_stat( effect, "cloudkeeper_legplates",
+                      { { STAT_ATTACK_POWER, bs_legacy_amount( effect, 5, 2.768, 21 ) } }, 30_s, 15_min );
+}
+
+// Circlet of Arcane Might 24123, Equip 32980: "2% chance on successful spellcast to increase your spell power by 13 for
+// 15 sec" (14; 14 at 30) - harmful spells that land.
+static void bs_circlet_of_arcane_might( special_effect_t& effect )
+{
+  bs_nodata_stat_proc( effect, "circlet_of_arcane_might", STAT_SPELL_POWER, bs_legacy_amount( effect, 3, 1.3379, 20 ),
+                       15_s, PF_MAGIC_SPELL | PF_NONE_HARMFUL, 0.02, timespan_t::zero() );
+}
+
+// Robe of the Elder Scribes 28602, Equip 34598: "a chance when your harmful spells land to increase spell power by 130
+// for 10 sec (Proc chance: 20%, 50s cooldown)" - 130 at every item level.
+static void bs_robe_of_the_elder_scribes( special_effect_t& effect )
+{
+  bs_nodata_stat_proc( effect, "power_of_arcanagos", STAT_SPELL_POWER, 130.0, 10_s, PF_MAGIC_SPELL | PF_NONE_HARMFUL,
+                       0.20, 50_s );
+}
+
+// Red Whelp Gloves 7284, Equip 9233: "5% chance of dealing 1 Fire damage on a successful melee attack" (11; 6 at 30).
+static void bs_red_whelp_gloves( special_effect_t& effect )
+{
+  bs_nodata_hit( effect, "red_whelp_gloves", bs_legacy_amount( effect, 1, 1.5588, 1 ), SCHOOL_FIRE, 0,
+                 PF_MELEE | PF_MELEE_ABILITY, 0.05 );
+}
+
+// Fiery Plate Gauntlets 12631, Equip 7721: "Adds 4 fire damage to your weapon attack" - 4 at every item level; each
+// white swing that lands.
+static void bs_fiery_plate_gauntlets( special_effect_t& effect )
+{
+  bs_nodata_hit( effect, "fiery_plate_gauntlets", 4.0, SCHOOL_FIRE, 0, PF_MELEE, 1.0 );
+}
+
+// Storm Gauntlets 12632, Equip 16615: "Adds 3 Lightning damage to your melee attacks" - 3 at every item level; each white
+// swing that lands.
+static void bs_storm_gauntlets( special_effect_t& effect )
+{
+  bs_nodata_hit( effect, "storm_gauntlets", 3.0, SCHOOL_NATURE, 0, PF_MELEE, 1.0 );
+}
+
+// "When struck in combat" shields, off-hands, belts and cloaks: the attacker is hit; melee hits taken only.
+static void bs_grand_marshals_aegis( special_effect_t& effect )  // 18825 + replicas, 13959: 5%, 7 Nature (44; 5 at 30)
+{
+  bs_nodata_hit( effect, "grand_marshals_aegis", bs_legacy_amount( effect, 1, 1.1412, 20 ), SCHOOL_NATURE, 0,
+                 PF_MELEE_TAKEN, 0.05 );
+}
+static void bs_vile_protector( special_effect_t& effect )  // 7747, 7619: 1%, 5 Shadow (12; 25 at 30)
+{
+  bs_nodata_hit( effect, "vile_protector", bs_legacy_amount( effect, 1, 6.1363, 1 ), SCHOOL_SHADOW, 0, PF_MELEE_TAKEN,
+                 0.01 );
+}
+static void bs_totem_of_infliction( special_effect_t& effect )  // 1131, 7617: 1%, 5 Shadow (11; 29 at 30)
+{
+  bs_nodata_hit( effect, "totem_of_infliction", bs_legacy_amount( effect, 0, 7.1498, 1 ), SCHOOL_SHADOW, 0,
+                 PF_MELEE_TAKEN, 0.01 );
+}
+static void bs_girdle_of_reprisal( special_effect_t& effect )  // 11861, 144320: 1%, 5 Shadow (13; 29 at 30)
+{
+  bs_nodata_hit( effect, "girdle_of_reprisal", bs_legacy_amount( effect, 0, 7.1498, 1 ), SCHOOL_SHADOW, 0,
+                 PF_MELEE_TAKEN, 0.01 );
+}
+static void bs_skullflame_drain( special_effect_t& effect )  // 1168, 18815: 3%, "stealing 3 life" (13; 4 at 30)
+{
+  bs_nodata_hit( effect, "skullflame_drain", bs_legacy_amount( effect, 1, 1.0025, 17 ), SCHOOL_SHADOW, 0,
+                 PF_MELEE_TAKEN, 0.03 );
+}
+static void bs_skullflame_fire( special_effect_t& effect )  // 1168, 18816: 1%, 9 Fire to all around (13; 13 at 30)
+{
+  bs_nodata_hit( effect, "skullflame_fire", bs_legacy_amount( effect, 1, 3.0076, 21 ), SCHOOL_FIRE, -1, PF_MELEE_TAKEN,
+                 0.01 );
+}
+static void bs_venomous_tome( special_effect_t& effect )  // 38579, 51414: 15%, 45s cd, 148 Nature (74; 29 at 30)
+{
+  bs_nodata_hit( effect, "venomous_tome", bs_legacy_amount( effect, 1, 7.1429, 1 ), SCHOOL_NATURE, 0, PF_MELEE_TAKEN,
+                 0.15, 45_s );
+}
+static void bs_cloak_of_flames( special_effect_t& effect )  // 3475, 144317: every melee hit taken, 3 Fire (80; ~1 at 30)
+{
+  bs_nodata_hit( effect, "cloak_of_flames", bs_legacy_amount( effect, 1, 0.1, 1 ), SCHOOL_FIRE, 0, PF_MELEE_TAKEN, 1.0 );
+  effect.execute_action->round_base_dmg = false;  // ~0.4 at item level 30 - would round to 0
+}
+static void bs_bonespike_shoulder( special_effect_t& effect )  // 12588, 16550: a melee crit taken, 7 dmg (13; 9 at 30)
+{
+  bs_nodata_hit( effect, "bonespike_shoulder", bs_legacy_amount( effect, 1, 2.2375, 21 ), SCHOOL_PHYSICAL, 0,
+                 PF_MELEE_TAKEN, 1.0, timespan_t::zero(), PF2_CRIT );
+}
+
+// Beastmaster's Gloves 22015 (27043): "Increases your pet's critical strike chance by 2%"; Beastmaster's Boots 22061
+// (27206): "Increases damage dealt by your pet by 3%". Pets only, not guardians. Read in pet_t::pet_crit and
+// player_t::composite_player_pet_damage_multiplier.
+static void bs_beastmasters_gloves( special_effect_t& effect )
+{
+  effect.player->bracketsim.pet_crit_pct += 0.02;
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+static void bs_beastmasters_boots( special_effect_t& effect )
+{
+  effect.player->bracketsim.pet_damage_pct += 0.03;
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
 // Dragonwrath, Tarecgosa's Rest, item 71086 - the Firelands caster legendary.
 //
 // the author, 12 September 2026: "can you also code into the engine wrath of
@@ -10140,6 +10413,31 @@ void unique_gear::register_special_effects()
   register_special_effect( 336866,  brimming_ember_shard );       /* Brimming Ember Shard 175733, 181360 */
   register_special_effect( 13183,   goblin_dragon_gun );          /* Goblin Dragon Gun 10727 */
   register_special_effect( 222634,  hargals_bladestorm );         /* Hargal's Favorite Trinket 140161 */
+  // Batch 3 (6 Nov 2026): items whose spell is missing from the client data (hand-built from the tooltips).
+  register_special_effect( 10578,   bs_helm_of_fire );              /* Helm of Fire 8348 */
+  register_special_effect( 18364,   bs_cloak_of_fire );             /* Cloak of Fire 14134 */
+  register_special_effect( 59197,   bs_fire_eaters_guide );         /* Fire Eater's Guide 43660 */
+  register_special_effect( 59199,   bs_stormbound_tome );           /* Stormbound Tome 43663 */
+  register_special_effect( 60060,   bs_manual_of_clouds );          /* Manual of Clouds 43664 */
+  register_special_effect( 59191,   bs_tome_of_kings );             /* Tome of Kings 43656 */
+  register_special_effect( 144300,  bs_bulwark_of_kings );          /* Bulwark of Kings 28484 */
+  register_special_effect( 18787,   bs_cloudkeeper_legplates );     /* Cloudkeeper Legplates 14554 */
+  register_special_effect( 32980,   bs_circlet_of_arcane_might );   /* Circlet of Arcane Might 24123 */
+  register_special_effect( 34598,   bs_robe_of_the_elder_scribes ); /* Robe of the Elder Scribes 28602 */
+  register_special_effect( 9233,    bs_red_whelp_gloves );          /* Red Whelp Gloves 7284 */
+  register_special_effect( 7721,    bs_fiery_plate_gauntlets );     /* Fiery Plate Gauntlets 12631 */
+  register_special_effect( 16615,   bs_storm_gauntlets );           /* Storm Gauntlets 12632 */
+  register_special_effect( 13959,   bs_grand_marshals_aegis );      /* Grand Marshal's Aegis 18825 + replicas */
+  register_special_effect( 7619,    bs_vile_protector );            /* Vile Protector 7747 */
+  register_special_effect( 7617,    bs_totem_of_infliction );       /* Totem of Infliction 1131 */
+  register_special_effect( 144320,  bs_girdle_of_reprisal );        /* Girdle of Reprisal 11861 */
+  register_special_effect( 18815,   bs_skullflame_drain );          /* Skullflame Shield 1168 */
+  register_special_effect( 18816,   bs_skullflame_fire );           /* Skullflame Shield 1168 */
+  register_special_effect( 51414,   bs_venomous_tome );             /* Venomous Tome 38579 */
+  register_special_effect( 144317,  bs_cloak_of_flames );           /* Cloak of Flames 3475 */
+  register_special_effect( 16550,   bs_bonespike_shoulder );        /* Bonespike Shoulder 12588 */
+  register_special_effect( 27043,   bs_beastmasters_gloves );       /* Beastmaster's Gloves 22015 */
+  register_special_effect( 27206,   bs_beastmasters_boots );        /* Beastmaster's Boots 22061 */
   register_special_effect( 97119,   item::variable_pulse_lightning_capacitor ); /* VPLC (heroic) - wowsims cata */
   register_special_effect( 469933,  item::molten_ironfoe ); /* Molten Ironfoe - Molten Strike */
   register_special_effect( 259006,  "259014Trigger"  ); /* Venomstrike - Venom Shot */

@@ -4715,10 +4715,24 @@ void player_t::create_actions()
       }
       return false;
     };
-    for ( auto slot : { SLOT_MAIN_HAND, SLOT_OFF_HAND, SLOT_FINGER_1, SLOT_FINGER_2, SLOT_NECK } )
+    // 6 Nov 2026 (batch 3): on-use ARMOR whose spell is missing from the client data and is now built by hand (Helm of
+    // Fire, Cloak of Fire, Bulwark of Kings, Cloudkeeper Legplates) - those items only, by their use spell; other
+    // armor on-use items are unchanged.
+    auto batch3_armor_use = []( const item_t& it ) {
+      static constexpr unsigned ids[] = { 10578, 18364, 144300, 18787 };
+      for ( const auto& e : it.parsed.data.effects )
+        for ( unsigned id : ids )
+          if ( e.spell_id == id )
+            return true;
+      return false;
+    };
+    for ( slot_e slot = SLOT_MIN; slot < SLOT_MAX; slot++ )
     {
       const auto& it = items[ slot ];
       if ( !it.active() || !it.has_use_special_effect() )
+        continue;
+      if ( slot != SLOT_MAIN_HAND && slot != SLOT_OFF_HAND && slot != SLOT_FINGER_1 && slot != SLOT_FINGER_2 &&
+           slot != SLOT_NECK && !batch3_armor_use( it ) )
         continue;
       std::string slot_name = util::slot_type_string( slot );
       if ( use_items_covers( slot_name ) || mentioned( "slot=" + slot_name ) || mentioned( "name=" + it.name_str ) )
@@ -6448,6 +6462,8 @@ double player_t::composite_total_corruption() const
 double player_t::composite_player_pet_damage_multiplier( const action_state_t*, bool guardian ) const
 {
   double m = guardian ? current.guardian_damage_multiplier : current.pet_damage_multiplier;
+  if ( !guardian )
+    m *= 1.0 + bracketsim.pet_damage_pct;  // BracketSim: Beastmaster's Boots (6 Nov 2026)
 
   return m;
 }

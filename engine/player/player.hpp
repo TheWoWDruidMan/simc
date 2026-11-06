@@ -378,6 +378,8 @@ struct player_t : public actor_t
     std::array<double, SCHOOL_MAX> school_spell_power{};
     // 6 Nov 2026: on-use items pressed ONLY by a use_item,name= line (channels that out-damage nothing) - item ids.
     std::vector<unsigned> manual_use_items;
+    // 6 Nov 2026 (batch 3): Beastmaster's Gloves / Boots - +pet crit chance and +pet damage (pets, not guardians).
+    double pet_crit_pct = 0, pet_damage_pct = 0;
     // "<percent>/<duration seconds>/<period seconds>", e.g. "15/40/300" for
     // Drums of Fury. A raid-wide HASTE percentage, which no stat buff can
     // express: Bloodlust is a level 48 spell (the engine's own data says so, and
