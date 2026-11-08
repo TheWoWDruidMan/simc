@@ -136,6 +136,8 @@ public:
     // talent stuff
     action_t* background_cons;
     action_t* empyrean_legacy;
+    // BracketSim legacy (8 Nov 2026): Vanquisher's Hammer's empowered Divine Storm (Retribution).
+    action_t* legacy_vanquishers_storm = nullptr;
     action_t* es_explosion;
     action_t* background_blessed_hammer;
     action_t* hammer_of_light_cons;
@@ -252,6 +254,7 @@ public:
     buff_t* divine_resonance;
 
     buff_t* empyrean_legacy;
+    buff_t* legacy_vanquishers_hammer = nullptr;
     buff_t* empyrean_legacy_cooldown;
     buff_t* judge_jury_and_executioner;
 

@@ -10006,6 +10006,10 @@ struct legacy_kindred_spirits_t : public druid_spell_t
     // that describes a different thing.
     cooldown->duration = 60_s;
 
+    // BracketSim legacy (8 Nov 2026): the 2.5 s cast in 326434 is FORMING the bond, which is done once before the
+    // pull; empowering it every minute (Empower Bond, 326446 in Shadowlands data) has no cast time. It keeps its GCD.
+    base_execute_time = 0_ms;
+
     // BracketSim legacy compatibility: the conduit Deep Allegiance (277)
     // shortens that minute. Its rank value is NEGATIVE twenty, so this
     // multiply is a reduction.

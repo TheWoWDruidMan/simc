@@ -2154,13 +2154,14 @@ struct legacy_vanquishers_hammer_t : public paladin_spell_t
     base_multiplier *= 1.0 + p->legacy_conduits.percent( 213 );
 
     // BracketSim legacy compatibility: Duty-Bound Gavel. Effect 1 of the
-    // runeforge is the extra charge. Effects 2 and 3 raise the stacks on the
-    // buff the hammer left behind, which is not modelled here.
+    // runeforge is the extra charge; Shadowlands' engine also gave the buff the
+    // hammer leaves behind that many extra stacks (see execute).
     if ( p->shadowlands_legacy.duty_bound_gavel )
       cooldown->charges += as<int>( p->find_spell( 355099 )->effectN( 1 ).base_value() );
 
-    // The empowered Word of Glory or Templar's Verdict it set up is not
-    // modelled; the hammer's own damage and Holy Power are.
+    // The hammer's own damage and Holy Power. Retribution's empowered Verdict
+    // (an extra Divine Storm) is modelled from 8 Nov 2026 - see execute; the
+    // Word of Glory versions for Holy and Protection are not.
     energize_type = action_energize::ON_CAST;
     energize_resource = RESOURCE_HOLY_POWER;
     energize_amount = data().effectN( 3 ).base_value();
@@ -2176,6 +2177,13 @@ struct legacy_vanquishers_hammer_t : public paladin_spell_t
     // they ride; only the host and its cooldown are class knowledge.
     player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NECROLORD,
                                             cooldown );
+
+    // BracketSim legacy (8 Nov 2026): "empowering your next Templar's Verdict to automatically trigger Divine Storm
+    // with $s2% increased effectiveness" - the buff is spent by the next Verdict (sc_paladin_retribution.cpp).
+    if ( p()->buffs.legacy_vanquishers_hammer )
+      p()->buffs.legacy_vanquishers_hammer->trigger(
+          1 + ( p()->shadowlands_legacy.duty_bound_gavel
+                    ? as<int>( p()->find_spell( 355099 )->effectN( 1 ).base_value() ) : 0 ) );
   }
 };
 

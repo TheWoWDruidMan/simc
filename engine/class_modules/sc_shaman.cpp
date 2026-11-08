@@ -7033,6 +7033,10 @@ struct legacy_vesper_totem_t : public shaman_spell_t
 
 struct legacy_chain_harvest_damage_t : public shaman_spell_t
 {
+  // BracketSim legacy (8 Nov 2026): what the last cast struck, read by legacy_chain_harvest_t.
+  int hits = 0;
+  int crits = 0;
+
   legacy_chain_harvest_damage_t( shaman_t* p )
     : shaman_spell_t( "chain_harvest_damage", p, p->legacy_covenant.chain_harvest_damage )
   {
@@ -7049,6 +7053,10 @@ struct legacy_chain_harvest_damage_t : public shaman_spell_t
   {
     shaman_spell_t::impact( s );
 
+    hits++;
+    if ( s->result == RESULT_CRIT )
+      crits++;
+
     // BracketSim legacy compatibility: Elemental Conduit. A critical harvest
     // leaves Flame Shock on what it hit.
     if ( p()->shadowlands_legacy.elemental_conduit && s->result == RESULT_CRIT &&
@@ -7059,11 +7067,16 @@ struct legacy_chain_harvest_damage_t : public shaman_spell_t
 
 struct legacy_chain_harvest_t : public shaman_spell_t
 {
-  action_t* damage;
+  legacy_chain_harvest_damage_t* damage;
+  double maelstrom_per_target;
+  gain_t* harvest_gain;
 
   legacy_chain_harvest_t( shaman_t* p, util::string_view options_str )
     : shaman_spell_t( "chain_harvest", p, p->legacy_covenant.chain_harvest ),
-      damage( new legacy_chain_harvest_damage_t( p ) )
+      damage( new legacy_chain_harvest_damage_t( p ) ),
+      // "Generates $368583s1 Maelstrom per target damaged or healed" - Elemental only ($?s168534).
+      maelstrom_per_target( p->specialization() == SHAMAN_ELEMENTAL ? p->find_spell( 368583 )->effectN( 1 ).base_value() : 0.0 ),
+      harvest_gain( p->get_gain( "Chain Harvest" ) )
   {
     parse_options( options_str );
     may_miss = false;
@@ -7079,7 +7092,17 @@ struct legacy_chain_harvest_t : public shaman_spell_t
     // they ride; only the host and its cooldown are class knowledge.
     player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_VENTHYR,
                                             cooldown );
+    damage->hits = damage->crits = 0;
     damage->execute_on_target( target );
+
+    // BracketSim legacy (8 Nov 2026): "For each target critically struck, the cooldown of Chain Harvest is reduced by
+    // 5 sec" - enemies struck and allies healed. Solo the only ally healed is the shaman: one heal roll at the spell's
+    // own crit chance, as Shadowlands' engine rolled once per ally (its chain_harvest_allies option).
+    int crits = damage->crits + ( rng().roll( damage->composite_crit_chance() ) ? 1 : 0 );
+    if ( crits > 0 )
+      cooldown->adjust( -5_s * crits );
+    if ( maelstrom_per_target > 0 )
+      p()->resource_gain( RESOURCE_MAELSTROM, maelstrom_per_target * ( damage->hits + 1 ), harvest_gain, this );
   }
 };
 

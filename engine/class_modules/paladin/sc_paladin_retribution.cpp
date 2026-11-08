@@ -915,6 +915,15 @@ struct templars_verdict_t : public holy_power_consumer_t<paladin_melee_attack_t>
       p()->buffs.empyrean_legacy->expire();
     }
 
+    // BracketSim legacy (8 Nov 2026): Vanquisher's Hammer - the empowered Verdict also triggers a Divine Storm.
+    // Like Empyrean Legacy's free storm, it needs Divine Storm known.
+    if ( p()->buffs.legacy_vanquishers_hammer && p()->buffs.legacy_vanquishers_hammer->up() )
+    {
+      if ( p()->active.legacy_vanquishers_storm && p()->talents.divine_storm->ok() )
+        p()->active.legacy_vanquishers_storm->schedule_execute();
+      p()->buffs.legacy_vanquishers_hammer->decrement();
+    }
+
     if ( is_fv )
     {
       double proc_chance = data().effectN( 2 ).percent();
@@ -1360,6 +1369,11 @@ void paladin_t::create_ret_actions()
   if ( legacy_conduits.has( 164 ) )
     active.legacy_conduit_expurgation = new legacy_conduit_expurgation_t( this );
 
+  // BracketSim legacy (8 Nov 2026): Vanquisher's Hammer's storm, effect 2 "increased effectiveness".
+  if ( legacy_covenant.vanquishers_hammer->ok() )
+    active.legacy_vanquishers_storm =
+        new divine_storm_t( this, true, 1.0 + legacy_covenant.vanquishers_hammer->effectN( 2 ).percent() );
+
   if ( talents.empyrean_legacy->ok() )
   {
     double empyrean_legacy_mult = 1.0 + talents.empyrean_legacy->effectN( 2 ).percent();
@@ -1473,6 +1487,11 @@ void paladin_t::create_buffs_retribution()
 
   // legendaries
   buffs.empyrean_legacy = make_buff( this, "empyrean_legacy", find_spell( 387178 ) );
+  // BracketSim legacy (8 Nov 2026): Vanquisher's Hammer's empowerment (328204: 20 s).
+  if ( legacy_covenant.vanquishers_hammer->ok() )
+    buffs.legacy_vanquishers_hammer = make_buff( this, "vanquishers_hammer", legacy_covenant.vanquishers_hammer )
+                                          ->set_cooldown( 0_ms )
+                                          ->set_max_stack( 3 );
 
   buffs.rise_from_ash = make_buff( this, "rise_from_ash", find_spell( 454693 ) );
   buffs.winning_streak = make_buff( this, "winning_streak", find_spell( 1216828 ) )

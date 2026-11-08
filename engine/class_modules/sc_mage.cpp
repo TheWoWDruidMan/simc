@@ -2949,6 +2949,7 @@ struct legacy_shifting_power_t final : public arcane_mage_spell_t
 {
   action_t* pulse;
   timespan_t cdr;
+  std::vector<cooldown_t*> cds;
 
   legacy_shifting_power_t( std::string_view n, mage_t* p, std::string_view options_str )
     : arcane_mage_spell_t( n, p, p->legacy_covenant.shifting_power ),
@@ -2965,6 +2966,27 @@ struct legacy_shifting_power_t final : public arcane_mage_spell_t
     add_child( pulse );
   }
 
+  // BracketSim legacy (8 Nov 2026): "your Mage ability cooldowns are reduced" - every cooldown of a Mage ability the
+  // character presses, as Shadowlands' engine did (every mage spell bar Shifting Power itself). The first port pulled
+  // only Frozen Orb and Fire Blast, so Combustion, Icy Veins, Arcane Surge, Touch of the Magi... never moved.
+  // Background actions are left out: their "cooldowns" are proc limits, not abilities.
+  void init_finished() override
+  {
+    arcane_mage_spell_t::init_finished();
+
+    for ( auto cd : { p()->cooldowns.frozen_orb, p()->cooldowns.fire_blast } )
+      if ( cd && range::find( cds, cd ) == cds.end() )
+        cds.push_back( cd );
+
+    for ( auto a : p()->action_list )
+    {
+      auto m = dynamic_cast<mage_spell_t*>( a );
+      if ( m && !m->background && m->cooldown && m->cooldown != cooldown &&
+           m->cooldown->duration > 0_ms && range::find( cds, m->cooldown ) == cds.end() )
+        cds.push_back( m->cooldown );
+    }
+  }
+
   void tick( dot_t* d ) override
   {
     arcane_mage_spell_t::tick( d );
@@ -2976,9 +2998,8 @@ struct legacy_shifting_power_t final : public arcane_mage_spell_t
     p()->buffs.legacy_heart_of_the_fae->trigger();
 
     // Every pulse pulls the Mage's own cooldowns forward.
-    for ( auto cd : { p()->cooldowns.frozen_orb, p()->cooldowns.fire_blast } )
-      if ( cd )
-        cd->adjust( cdr, false );
+    for ( auto cd : cds )
+      cd->adjust( cdr, false );
   }
 
   void execute() override
@@ -3039,18 +3060,33 @@ struct legacy_deathborne_t final : public arcane_mage_spell_t
   }
 };
 
+// BracketSim legacy (8 Nov 2026): the final mirror - "The final mirror will instead inflict $317589s1 Shadow damage".
+struct legacy_tormenting_backlash_t final : public arcane_mage_spell_t
+{
+  legacy_tormenting_backlash_t( std::string_view n, mage_t* p )
+    : arcane_mage_spell_t( n, p, p->find_spell( 317589 ) )
+  {
+    background = true;
+  }
+};
+
 struct legacy_mirrors_of_torment_t final : public arcane_mage_spell_t
 {
   action_t* backlash;
-  int mirrors;
+  action_t* final_backlash;
+  proc_t* proc_clearcasting;
+  proc_t* proc_brain_freeze;
 
   legacy_mirrors_of_torment_t( std::string_view n, mage_t* p, std::string_view options_str )
     : arcane_mage_spell_t( n, p, p->legacy_covenant.mirrors_of_torment ),
       backlash( new legacy_agonizing_backlash_t( "agonizing_backlash", p ) ),
-      mirrors( as<int>( p->legacy_covenant.mirrors_of_torment->effectN( 2 ).base_value() ) )
+      final_backlash( new legacy_tormenting_backlash_t( "tormenting_backlash", p ) ),
+      proc_clearcasting( p->get_proc( "Clearcasting from Mirrors of Torment" ) ),
+      proc_brain_freeze( p->get_proc( "Brain Freeze from Mirrors of Torment" ) )
   {
     parse_options( options_str );
     add_child( backlash );
+    add_child( final_backlash );
   }
 
   void execute() override
@@ -3063,19 +3099,39 @@ struct legacy_mirrors_of_torment_t final : public arcane_mage_spell_t
     player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_VENTHYR,
                                             cooldown );
 
-    auto period = p()->find_spell( 345977 )->duration();
-    if ( period <= 0_ms || mirrors <= 0 )
-      return;
-
-    // The slow each backlash also applied is not modelled.
-    for ( int i = 1; i <= mirrors; i++ )
+    // BracketSim legacy (8 Nov 2026), as the spell text and Shadowlands' engine: "$n mirrors" is the aura's 3 proc charges
+    // (the first port used effect 2 - which is Fire's 6 SECONDS - as the count, and fired four small hits). A target
+    // that acts consumes the first mirror at once (Shadowlands' engine: 1.5 s), then one per 6 s internal cooldown;
+    // the LAST is Tormenting Backlash. Each consumed mirror gives Arcane a Clearcasting, takes effect 2 seconds off
+    // Fire Blast for Fire, and gives Frost a Brain Freeze. The slow is not modelled.
+    int mirrors = std::max( 1, data().initial_stacks() );
+    timespan_t icd = data().internal_cooldown() > 0_ms ? data().internal_cooldown() : 6_s;
+    timespan_t fire_blast_cdr = timespan_t::from_seconds( data().effectN( 2 ).base_value() );
+    for ( int i = 0; i < mirrors; i++ )
     {
-      if ( period * i > data().duration() )
+      timespan_t at = 1.5_s + icd * i;
+      if ( at > data().duration() )
         break;
-      make_event( *sim, period * i, [ this, t = target ] {
-        backlash->execute_on_target( t );
+      bool last = i == mirrors - 1;
+      make_event( *sim, at, [ this, t = target, last, fire_blast_cdr ] {
+        ( last ? final_backlash : backlash )->execute_on_target( t );
         // BracketSim legacy (4 Oct 2026): Siphoned Malice (conduit 43) - each Mirror consumed stacks spell damage.
         p()->buffs.legacy_siphoned_malice->trigger();
+        switch ( p()->specialization() )
+        {
+          case MAGE_ARCANE:
+            p()->trigger_clearcasting( proc_clearcasting, 1.0, false );
+            break;
+          case MAGE_FIRE:
+            if ( p()->cooldowns.fire_blast )
+              p()->cooldowns.fire_blast->adjust( -fire_blast_cdr );
+            break;
+          case MAGE_FROST:
+            p()->trigger_brain_freeze( 1.0, proc_brain_freeze );
+            break;
+          default:
+            break;
+        }
       } );
     }
   }

@@ -1004,7 +1004,8 @@ using namespace helpers;
       : warlock_spell_t( "Soul Rot", p, p->legacy_covenant.soul_rot, options_str )
     {
       // The self-heal from the drain is not modelled.
-      aoe = -1;
+      // BracketSim legacy (8 Nov 2026): "your current target and up to 3 additional targets" (was every target).
+      aoe = 4;
 
       // BracketSim legacy compatibility: the conduit Soul Eater (220) widens
       // the drain. On a single target this half does nothing, which is correct.
@@ -1012,14 +1013,15 @@ using namespace helpers;
         radius *= 1.0 + p->legacy_conduits.percent( 220 );
     }
 
-    // The other half of Soul Eater: every tick hits harder. Shadowlands also
-    // doubled the primary target's ticks, but that is Soul Rot's own hardcoded
-    // tooltip behaviour and not the conduit's, so it is deliberately not added
-    // here - this port never had it, and slipping it in under a conduit patch
-    // would credit the conduit with someone else's damage.
+    // The other half of Soul Eater: every tick hits harder.
+    // BracketSim legacy (8 Nov 2026): Soul Rot's own rule - the primary target suffers double (the live tooltip reads
+    // 281 primary vs 140 secondary; Shadowlands' engine: chain_target 0 x2). Added on its own, not under the conduit.
     double composite_ta_multiplier( const action_state_t* s ) const override
     {
       double pm = warlock_spell_t::composite_ta_multiplier( s );
+
+      if ( s->chain_target == 0 )
+        pm *= 2.0;
 
       if ( p()->legacy_conduits.has( 220 ) )
         pm *= 1.0 + p()->legacy_conduits.percent( 220 );
