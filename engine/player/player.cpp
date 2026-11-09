@@ -4498,6 +4498,60 @@ void player_t::init_background_actions()
   }
 }
 
+// BracketSim, 9 Nov 2026 (the author: "An APL including a covenant class ability can cause the sim to fail if not using that
+// covenant"): every class makes a legacy covenant button only when legacy_covenant.<x>->ok(), so a rotation naming another
+// covenant's button (decimating_bolt under Venthyr) stopped the whole sim with "Unable to create action". Shadowlands
+// rotations listed every covenant's button behind its own check; here a button the character does not have becomes an
+// action that is never ready - the line is skipped, its expressions still resolve, nothing else changes.
+namespace {
+bool is_legacy_covenant_button( util::string_view name )
+{
+  static constexpr util::string_view buttons[] = {
+    "abomination_limb", "adaptive_swarm", "ancient_aftershock", "ascended_blast", "ascended_nova", "ashen_hallow",
+    "blessing_of_the_seasons", "bonedust_brew", "boon_of_the_ascended", "chain_harvest", "condemn", "conquerors_banner",
+    "death_chakram", "deathborne", "deaths_due", "decimating_bolt", "divine_toll", "door_of_shadows", "echoing_reprimand",
+    "elysian_decree", "fae_guardians", "fae_transfusion", "faeline_stomp", "fallen_order", "flagellation", "flayed_shot",
+    "fleshcraft", "fodder_to_the_flame", "impending_catastrophe", "kindred_spirits", "mindgames", "mirrors_of_torment",
+    "primordial_wave", "radiant_spark", "ravenous_frenzy", "resonating_arrow", "scouring_tithe", "sepsis",
+    "serrated_bone_spike", "shackle_the_unworthy", "shifting_power", "sinful_brand", "soul_rot", "soulshape",
+    "spear_of_bastion", "summon_steward", "swarming_mist", "unholy_nova", "vanquishers_hammer", "vesper_totem",
+    "weapons_of_order", "wild_spirits" };
+  for ( auto b : buttons )
+    if ( name == b )
+      return true;
+  return false;
+}
+
+struct legacy_covenant_absent_t : public action_t
+{
+  legacy_covenant_absent_t( player_t* p, util::string_view name, util::string_view options )
+    : action_t( ACTION_OTHER, name, p )
+  {
+    // The line's own options (if=, target_if=, a class option) belong to an action that is never made: keep what parses.
+    try
+    {
+      parse_options( options );
+    }
+    catch ( const std::exception& )
+    {
+    }
+    quiet = true;
+    harmful = false;
+    ignore_false_positive = true;
+    trigger_gcd = timespan_t::zero();
+  }
+
+  bool ready() override
+  {
+    return false;
+  }
+
+  void execute() override
+  {
+  }
+};
+}  // namespace
+
 void player_t::create_actions()
 {
   if( is_player() && !is_enemy() && !is_pet() )
@@ -4936,6 +4990,12 @@ void player_t::create_actions()
           action_str     = modify_action + "," + modify_action_options;
         }
         a = create_action( action_name, action_options );
+      }
+
+      if ( !a && is_legacy_covenant_button( action_name ) )
+      {
+        sim->print_debug( "{}: '{}' is another covenant's button; it is never pressed.", *this, action_name );
+        a = new legacy_covenant_absent_t( this, action_name, action_options );
       }
 
       if ( !a )
