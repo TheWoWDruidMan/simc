@@ -477,14 +477,28 @@ void effects_t::create_buffs( player_t* p )
                           ->set_default_value( 0.03 )
                           ->set_pct_buff_type( STAT_PCT_BUFF_HASTE );
 
+  // PRIMARY STAT, NOT INTELLECT (audit part 2 E1, 10 Nov 2026). The in-game
+  // text was read on a caster, so it said "Intellect"; the game gives the
+  // character's primary stat, as Shadowlands SimulationCraft had it (Strength,
+  // Agility AND Intellect). A Strength or Agility character got nothing from
+  // Forgeborne Reveries or Built for War.
+  stat_pct_buff_type primary_pct = STAT_PCT_BUFF_INTELLECT;
+  {
+    stat_e prim = p->convert_hybrid_stat( STAT_STR_AGI_INT );
+    if ( prim == STAT_STRENGTH )
+      primary_pct = STAT_PCT_BUFF_STRENGTH;
+    else if ( prim == STAT_AGILITY )
+      primary_pct = STAT_PCT_BUFF_AGILITY;
+  }
+
   // ------------------------------------------------------------- Necrolord --
-  // "Your Intellect and Armor are increased by 1% for each enchantment on your
-  // armor, up to 3%." Only the Intellect half matters for damage.
+  // "Your primary stat and Armor are increased by 1% for each enchantment on
+  // your armor, up to 3%." Only the primary stat half matters for damage.
   forgeborne_reveries = make_buff( p, "forgeborne_reveries" )
                             ->set_max_stack( 3 )
                             ->set_duration( timespan_t::zero() )
                             ->set_default_value( 0.01 )
-                            ->set_pct_buff_type( STAT_PCT_BUFF_INTELLECT );
+                            ->set_pct_buff_type( primary_pct );
 
   // "After landing 10 critical strikes, you gain 18% increased chance to
   // critical strike for 10 sec. May only occur once per 60 sec." Any real
@@ -558,7 +572,7 @@ void effects_t::create_buffs( player_t* p )
                       ->set_max_stack( 5 )
                       ->set_duration( timespan_t::zero() )
                       ->set_default_value( 0.01 )
-                      ->set_pct_buff_type( STAT_PCT_BUFF_INTELLECT );
+                      ->set_pct_buff_type( primary_pct );  // E1: primary stat, see above
 
   // "While in combat, you gain a stack of Thrill Seeker every 2 sec ... At 40
   // stacks Thrill Seeker is consumed to grant you Euphoria."
@@ -643,6 +657,9 @@ void effects_t::create_buffs( player_t* p )
   // "Your spells and abilities have a chance to call Tubbins and Gubbins to
   // your side for 12 sec, parasol in hand." Their parasol is a flat stat gain
   // while it is up; the call is a proc, so it is driven on its average cadence.
+  // That cadence is ONE PER MINUTE (audit part 2 E2, 10 Nov 2026): the
+  // Shadowlands client data for the trait (336239) is 1 proc per minute, about
+  // 20% uptime. It was every 30 s, 41% uptime and about +3% too much.
   soothing_shade = make_buff<stat_buff_t>( p, "soothing_shade" )
                        ->add_stat( STAT_MASTERY_RATING, 138.0 )
                        ->set_duration( 12_s );
@@ -650,7 +667,7 @@ void effects_t::create_buffs( player_t* p )
   soothing_shade_driver = make_buff( p, "soothing_shade_driver" )
                               ->set_quiet( true )
                               ->set_duration( timespan_t::zero() )
-                              ->set_period( 30_s )
+                              ->set_period( 60_s )
                               ->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) {
                                 soothing_shade->trigger();
                               } );
@@ -746,6 +763,13 @@ void effects_t::create_buffs( player_t* p )
                             ->set_duration( timespan_t::from_seconds( cv.wasteland_propriety ) )
                             ->set_default_value( 0.06 )
                             ->set_pct_buff_type( STAT_PCT_BUFF_VERSATILITY );
+  // "You may only serve tea every 1 min." - Warrior and Rogue only (audit part 2
+  // E3, 10 Nov 2026; the author's in-game Warrior tooltip, spell 319983: "Condemn
+  // signals the start of tea time ... Lasts 10 sec. You may only serve tea every
+  // 1 min."). Condemn has no cooldown, so without this the 6% was up ~68% of the
+  // fight on a level 60 Arms; with it, at most 10 s in 60.
+  if ( p->type == WARRIOR || p->type == ROGUE )
+    wasteland_propriety->set_cooldown( 60_s );
 
   // "Volatile Solvent: Humanoid - Mastery increased by 30.2" at level 60, and
   // whatever the same coefficient gives at every other bracket. Fleshcraft
