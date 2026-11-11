@@ -262,6 +262,7 @@ public:
     buff_t* bloodborne;
     buff_t* bounding_stride;
     buff_t* brace_for_impact;
+    buff_t* legacy_brace_for_impact_azerite;  // Audit 4: the Azerite trait's own buff (278124)
     buff_t* charge_movement;
     buff_t* collateral_damage;
     buff_t* champions_spear;
@@ -2778,6 +2779,10 @@ struct gushing_wound_dot_t : public warrior_attack_t
     // Legacy Azerite: Cold Steel Hot Blood supplies the bleed's flat damage. The
     // modern talent's own value is commented out upstream.
     base_td += p->azerite.legacy_cold_steel_hot_blood.value( 2 );
+    // Audit 4 (11 Nov 2026): worn WITHOUT the Midnight talent, the bleed is the trait's own (288091: flat value, no
+    // Attack Power) - it was the talent's 385042 with its 0.405 AP per tick on top, i.e. the talent for free.
+    if ( !p->talents.fury.cold_steel_hot_blood.ok() && p->azerite.legacy_cold_steel_hot_blood.ok() )
+      spell_power_mod.tick = attack_power_mod.tick = 0.0;
   }
 };
 
@@ -7131,7 +7136,8 @@ struct shield_slam_t : public warrior_attack_t
   {
     double da = warrior_attack_t::bonus_da( s );
 
-    da += p()->buff.brace_for_impact->stack() * p()->azerite.legacy_brace_for_impact.value( 2 );
+    // Audit 4 (11 Nov 2026): the trait's own buff, not the Midnight talent's.
+    da += p()->buff.legacy_brace_for_impact_azerite->check() * p()->azerite.legacy_brace_for_impact.value( 2 );
 
     return da;
   }
@@ -7140,10 +7146,12 @@ struct shield_slam_t : public warrior_attack_t
   {
     warrior_attack_t::execute();
 
-    // Legacy Azerite: Brace for Impact stacks off Shield Slam. It shares the
-    // modern talent's buff, so both sources feed the same stacks.
+    // Legacy Azerite: Brace for Impact stacks off Shield Slam. Audit 4 (11 Nov 2026): its OWN buff, 278124 - 9 sec,
+    // every application overlapping (Battle for Azeroth: ASYNCHRONOUS). It used to share the Midnight talent's buff:
+    // with the talent taken every Shield Slam gave that buff 2 stacks (talent +10% per stack held near 5) and the
+    // trait's flat damage was counted 5 times; without the talent it was 1 stack forever.
     if ( p()->azerite.legacy_brace_for_impact.enabled() )
-      p()->buff.brace_for_impact->trigger();
+      p()->buff.legacy_brace_for_impact_azerite->trigger();
 
     // BracketSim legacy compatibility: The Wall.
     if ( p()->shadowlands_legacy.the_wall )
@@ -9486,8 +9494,14 @@ warrior_td_t::warrior_td_t( player_t& target, warrior_t& p ) : actor_target_data
   debuffs_colossus_smash = make_buff( *this , "colossus_smash", p.spell.colossus_smash_debuff );
 
   // BracketSim legacy compatibility: Exploiter (Shadowlands runeforge).
+  // Audit 4 (11 Nov 2026): a Venthyr warrior's Condemn lowers it - Condemn 317320 effect 6 is a flat -14 on Exploiter's
+  // effect 1 (50 -> 36), exactly as Shadowlands built it (exploiter value + condemn_driver effect 6).
   debuffs_legacy_exploiter = make_buff( *this, "legacy_exploiter", p.find_spell( 335452 ) )
-                                 ->set_default_value( p.find_spell( 335451 )->effectN( 1 ).percent() )
+                                 ->set_default_value( p.find_spell( 335451 )->effectN( 1 ).percent() +
+                                                      ( util::str_compare_ci( p.legacy_covenant.chosen, "venthyr" ) &&
+                                                                p.find_spell( 317320 )->ok()
+                                                            ? p.find_spell( 317320 )->effectN( 6 ).percent()
+                                                            : 0.0 ) )
                                  ->set_chance( p.shadowlands_legacy.exploiter ? 1.0 : 0.0 );
 
   // Siegebreaker 280773 (Wowhead): taking 15% increased damage from the warrior. Deathmaker gives it for 6 sec.
@@ -9584,6 +9598,12 @@ void warrior_t::create_buffs()
         ->set_default_value( azerite.pulverizing_blows.value() );
 
     buff.test_of_might = make_buff<stat_buff_t>( this, "test_of_might", find_spell( 275540 ) );
+
+    buff.legacy_brace_for_impact_azerite =
+        make_buff( this, "brace_for_impact_azerite", find_spell( 278124 ) )
+            ->set_stack_behavior( buff_stack_behavior::ASYNCHRONOUS )
+            ->set_max_stack( 99 )
+            ->set_chance( azerite.legacy_brace_for_impact.enabled() ? 1.0 : 0.0 );
 
     buff.legacy_striking_the_anvil =
         make_buff( this, "legacy_striking_the_anvil", find_spell( 288452 ) )

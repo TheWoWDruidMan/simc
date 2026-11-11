@@ -2256,7 +2256,9 @@ struct divine_toll_t : public paladin_spell_t
       // for Retribution and measured a flat 0.00% on Protection with Judgment
       // casts unchanged at 69.2, which is the signature of a hook that never
       // runs rather than of a conduit that does nothing.
-      if ( p()->legacy_conduits.has( 216 ) )
+      // Audit 4 (11 Nov 2026): rolled once per cast on the main target (Shadowlands: execute, "on the main target"),
+      // not once per target Divine Toll hits.
+      if ( p()->legacy_conduits.has( 216 ) && s->chain_target == 0 )
       {
         for ( int extra = 0; extra < 3; extra++ )
         {

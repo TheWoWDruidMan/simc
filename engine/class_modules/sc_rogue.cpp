@@ -398,6 +398,7 @@ public:
     buff_t* legacy_the_first_dance;
     buff_t* legacy_double_dose;
     buff_t* legacy_flagellation;
+    buff_t* legacy_flagellation_persist = nullptr;  // Audit 4: 345569, the Haste kept 12 sec after Flagellation
     // Assassination
     buff_t* envenom;
     // Outlaw
@@ -8748,7 +8749,11 @@ struct vanish_t : public stealth_like_buff_t<buff_t>
         r->cooldowns.keep_it_rolling, r->cooldowns.killing_spree, r->cooldowns.kingsbane,
         r->cooldowns.roll_the_bones, r->cooldowns.secret_technique, r->cooldowns.shadow_blades,
         r->cooldowns.shadow_dance, r->cooldowns.shadowstep, r->cooldowns.shiv, r->cooldowns.sprint,
-        r->cooldowns.thistle_tea
+        r->cooldowns.thistle_tea,
+        // Audit 4 (11 Nov 2026): Shadowlands' list held the covenant abilities too (Sepsis, Flagellation, Serrated
+        // Bone Spike, Echoing Reprimand); this port builds them as actions, so their cooldowns are found by name.
+        r->get_cooldown( "sepsis" ), r->get_cooldown( "flagellation" ), r->get_cooldown( "serrated_bone_spike" ),
+        r->get_cooldown( "echoing_reprimand" )
       };
     }
   }
@@ -10796,6 +10801,17 @@ double rogue_t::composite_damage_versatility() const
 {
   double cdv = player_t::composite_damage_versatility();
 
+  // BracketSim legacy compatibility (audit 4, 11 Nov 2026): Obedience - "Flagellation now also increases your
+  // Versatility" by 323654 effect 5 per stack: 0.5 in the 9.2.7 data (Shadowlands read effectN( 5 ).percent()); this
+  // build's copy of the row shows it rounded to 1, so the archived 0.5 is used. Both the buff and its 12 sec persist.
+  if ( legendary.obedience )
+  {
+    if ( buffs.legacy_flagellation && buffs.legacy_flagellation->check() )
+      cdv += buffs.legacy_flagellation->check() * 0.005;
+    if ( buffs.legacy_flagellation_persist && buffs.legacy_flagellation_persist->check() )
+      cdv += buffs.legacy_flagellation_persist->check() * 0.005;
+  }
+
   return cdv;
 }
 
@@ -12746,6 +12762,21 @@ void rogue_t::create_buffs()
           ->set_default_value_from_effect( 3, 0.01 )
           ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
           ->set_chance( legacy_covenant.flagellation->ok() ? 1.0 : 0.0 );
+
+  // Audit 4 (11 Nov 2026): "persisting 12 sec after their torment fades" (323654's text, buff 345569). Shadowlands:
+  // when Flagellation's buff ends, the same stacks carry on for 12 sec at 1% Haste each. With Obedience both also
+  // give Versatility (composite_damage_versatility).
+  buffs.legacy_flagellation_persist =
+      make_buff( this, "flagellation_persist", legacy_covenant.flagellation->ok() ? find_spell( 345569 ) : spell_data_t::not_found() )
+          ->set_default_value( 0.01 )
+          ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+          ->add_invalidate( CACHE_VERSATILITY )
+          ->set_chance( legacy_covenant.flagellation->ok() ? 1.0 : 0.0 );
+  buffs.legacy_flagellation->add_invalidate( CACHE_VERSATILITY );
+  buffs.legacy_flagellation->set_stack_change_callback( [ this ]( buff_t*, int old_, int new_ ) {
+    if ( new_ == 0 && old_ > 0 )
+      buffs.legacy_flagellation_persist->trigger( old_ );
+  } );
 
   buffs.adrenaline_rush = new buffs::adrenaline_rush_t( this );
   buffs.blade_flurry = new buffs::blade_flurry_t( this );

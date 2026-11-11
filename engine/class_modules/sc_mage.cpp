@@ -5145,6 +5145,15 @@ struct frozen_orb_t final : public frost_mage_spell_t
     timespan_t duration = ( pulse_count - 1 ) * pulse_time;
     p()->ground_aoe_expiration[ AOE_FROZEN_ORB ] = sim->current_time() + duration;
 
+    // Audit 4 (11 Nov 2026): Freezing Winds - "While Frozen Orb is active, you gain Fingers of Frost every 2 sec". The
+    // buff's own 30 sec ran on long after the orb was gone; Shadowlands expired it when the orbs ended. A later orb
+    // pushes ground_aoe_expiration on, so only the last orb's end removes it.
+    if ( p()->buffs.legacy_freezing_winds->check() )
+      make_event( *sim, duration, [ this ] {
+        if ( sim->current_time() >= p()->ground_aoe_expiration[ AOE_FROZEN_ORB ] )
+          p()->buffs.legacy_freezing_winds->expire();
+      } );
+
     make_event<ground_aoe_event_t>( *sim, p(), ground_aoe_params_t()
       .pulse_time( pulse_time )
       .target( s->target )
@@ -9022,11 +9031,11 @@ void mage_t::trigger_deaths_fathom()
   if ( buffs.deathborne->check() )
     buffs.deathborne->current_value += find_spell( 354294 )->effectN( 2 ).percent();
 
+  // Audit 4 (11 Nov 2026): the proc is Death's Fathom's own 8 sec (354294 effect 1) and nothing more - Shadowlands
+  // passed exactly that, so Gift of the Lich (+26.4 sec at rank 13) lengthened only the cast Deathborne. Adding it
+  // here made every proc 34 sec: 60 Arcane had Deathborne up 82% of the fight.
   if ( rppm.deaths_fathom->trigger() )
-    // BracketSim legacy compatibility: the explicit duration here overrides the
-    // buff's configured one, so Gift of the Lich has to be added at both sites.
-    buffs.deathborne->extend_duration_or_trigger(
-        8_s + timespan_t::from_millis( legacy_conduits.value( 39 ) ) );
+    buffs.deathborne->extend_duration_or_trigger( find_spell( 354294 )->effectN( 1 ).time_value() );
 }
 
 void mage_t::trigger_arcane_charge( int stacks )

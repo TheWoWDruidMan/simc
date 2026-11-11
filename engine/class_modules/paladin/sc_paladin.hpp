@@ -1420,8 +1420,12 @@ public:
          ab::result_is_hit( s->result ) && s->result_amount > 0 &&
          p()->legacy_virtuous_command_damage && this != p()->legacy_virtuous_command_damage )
     {
-      static const std::array<util::string_view, 4> commanded = {
-        { "templars_verdict", "crusader_strike", "blade_of_justice", "melee" } };
+      // Audit 4 (11 Nov 2026): the hit is where the damage lands - Templar's Verdict deals it from templars_verdict_dmg,
+      // Final Verdict (Midnight's Templar's Verdict) from final_verdict, and Templar Strike / Templar Slash are the
+      // Crusader Strike button (they replace it). The 60 Retribution list's Verdicts and Strikes never echoed.
+      static const std::array<util::string_view, 8> commanded = {
+        { "templars_verdict", "templars_verdict_dmg", "final_verdict", "crusader_strike", "templar_strike",
+          "templar_slash", "blade_of_justice", "melee" } };
       if ( range::contains( commanded, ab::name_str ) )
       {
         auto vc = p()->legacy_virtuous_command_damage;

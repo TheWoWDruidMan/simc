@@ -839,6 +839,7 @@ public:
     propagate_const<buff_t*> gathering_storm;
     propagate_const<buff_t*> inexorable_assault;
     propagate_const<buff_t*> empower_rune_weapon;
+    propagate_const<buff_t*> legacy_eradicating_blow;  // Audit 4: conduit 83, Obliterate -> next Frost Strike
     propagate_const<buff_t*> killing_machine;
     buff_t* pillar_of_frost;
     propagate_const<buff_t*> remorseless_winter;
@@ -7985,8 +7986,9 @@ struct melee_t : public death_knight_melee_attack_t
           // trigger spell carries a 10s internal cooldown, modelled on the buff.
           if ( p()->azerite.bloody_runeblade.enabled() && p()->buffs.bloody_runeblade->trigger() )
           {
+            // Audit 4 (11 Nov 2026): the Runic Power is 289348 (Energize 5); 289349 is the Haste buff and gave 0.
             p()->resource_gain( RESOURCE_RUNIC_POWER,
-                                p()->find_spell( 289349 )->effectN( 1 ).resource( RESOURCE_RUNIC_POWER ),
+                                p()->find_spell( 289348 )->effectN( 1 ).resource( RESOURCE_RUNIC_POWER ),
                                 p()->gains.legacy_bloody_runeblade );
           }
         }
@@ -10372,13 +10374,22 @@ struct death_coil_damage_t final : public death_coil_damage_base_t
 {
   double legacy_harrowing_decay_amount = 0.0;
 
+  // BracketSim legacy compatibility (audit 4, 11 Nov 2026): Embrace Death raises Death Coil only while Sudden Doom is up
+  // (Shadowlands: death_coil_t::composite_da_multiplier, buffs.sudden_doom->check()). It was every Death Coil.
+  double composite_da_multiplier( const action_state_t* s ) const override
+  {
+    double m = death_coil_damage_base_t::composite_da_multiplier( s );
+    if ( p()->legacy_conduits.has( 89 ) && p()->buffs.sudden_doom->check() )
+      m *= 1.0 + p()->legacy_conduits.percent( 89 );
+    return m;
+  }
+
   death_coil_damage_t( std::string_view name, death_knight_t* p )
     : death_coil_damage_base_t( name, p, p->spell.death_coil_damage )
   {
     background = dual = true;
 
-    // BracketSim legacy compatibility: Embrace Death.
-    base_multiplier *= 1.0 + p->legacy_conduits.percent( 89 );
+    // (Embrace Death: composite_da_multiplier - audit 4, only while Sudden Doom is up.)
 
     // Legacy Azerite: Harrowing Decay lays down its whole value over the dot.
     if ( p->azerite.harrowing_decay.enabled() )
@@ -11429,6 +11440,15 @@ struct frost_strike_strike_t final : public death_knight_melee_attack_t
     double m      = death_knight_melee_attack_t::composite_da_multiplier( state );
     const auto ri = get_td( state->target )->debuff.razorice;
 
+    // BracketSim legacy compatibility (audit 4): Eradicating Blow. Shadowlands also applied it twice to the off-hand
+    // strike (9.2.0 / 9.2.5 live behaviour, its bugs=1 default) - kept.
+    if ( p()->buffs.legacy_eradicating_blow->check() )
+    {
+      m *= 1.0 + p()->buffs.legacy_eradicating_blow->stack_value();
+      if ( p()->bugs && weapon && weapon->slot == SLOT_OFF_HAND )
+        m *= 1.0 + p()->buffs.legacy_eradicating_blow->stack_value();
+    }
+
     if ( sb )
     {
       m *= 1.0 + p()->talent.frost.shattering_blade->effectN( 1 ).percent();
@@ -11678,6 +11698,11 @@ struct frost_strike_t final : public frost_strike_base_t
     // BracketSim legacy compatibility: Unleashed Frenzy (conduit 122) stacks on
     // every Frost Strike (audit 3 C9).
     p()->buffs.legacy_unleashed_frenzy->trigger();
+
+    // Audit 4: Eradicating Blow is spent by this Frost Strike - after its (delayed) strikes have landed.
+    if ( p()->buffs.legacy_eradicating_blow->check() )
+      make_event( *sim, std::max( mh_delay, oh_delay ) + 1_ms,
+                  [ this ] { p()->buffs.legacy_eradicating_blow->expire(); } );
 
     // (Icy Citadel banks its stacks on Obliterate and Frostscythe crits, not
     // Frost Strike - see obliterate_strike_t / frostscythe_base_t, audit 3 C11.)
@@ -12592,8 +12617,7 @@ struct obliterate_strike_t final : public death_knight_melee_attack_t
     may_miss   = false;
     weapon     = w;
 
-    // BracketSim legacy compatibility: Eradicating Blow.
-    base_multiplier *= 1.0 + p->legacy_conduits.percent( 83 );
+    // (Eradicating Blow is NOT here - audit 4, 11 Nov 2026: it raises the next Frost Strike, see frost_strike_strike_t.)
 
     // Legacy Shadowlands: Koltira's Favor. Obliterate's parent action deals no
     // damage of its own, so the bonus has to sit on the strikes.
@@ -12768,6 +12792,11 @@ struct obliterate_t final : public death_knight_melee_attack_t
       p()->sort_undeath_targets( target_list() );
 
     death_knight_melee_attack_t::execute();
+
+    // BracketSim legacy compatibility (audit 4, 11 Nov 2026): Eradicating Blow - "Obliterate increases the damage of
+    // your next Frost Strike by X%, stacks up to 2 times" (337934 / buff 337936: 10 sec, 2 stacks, 0.5 sec ICD).
+    // It sat on Obliterate's own strikes before, every Obliterate.
+    p()->buffs.legacy_eradicating_blow->trigger();
 
     if ( hit_any_target )
     {
@@ -17281,6 +17310,13 @@ void death_knight_t::create_buffs()
     ->set_default_value( legacy_conduits.percent( 122 ) )
     ->set_pct_buff_type( STAT_PCT_BUFF_STRENGTH )
     ->set_chance( legacy_conduits.has( 122 ) ? 1.0 : 0.0 );
+  buffs.legacy_eradicating_blow = make_buff( this, "eradicating_blow" )
+                                      ->set_duration( 10_s )
+                                      ->set_max_stack( 2 )
+                                      ->set_cooldown( 500_ms )
+                                      ->set_default_value( legacy_conduits.percent( 83 ) )
+                                      ->set_chance( legacy_conduits.has( 83 ) ? 1.0 : 0.0 );
+
   buffs.festermight = make_buff<stat_buff_t>( this, "festermight", find_spell( 274373 ) )
     ->add_stat( STAT_STRENGTH, azerite.festermight.value() )
     ->set_refresh_behavior( buff_refresh_behavior::DISABLED );

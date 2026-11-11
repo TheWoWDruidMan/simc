@@ -6850,6 +6850,10 @@ struct chain_lightning_overload_t : public chained_overload_base_t
   {
     chained_overload_base_t::impact( state );
 
+    // Audit 4: Synapse Shock on Chain Lightning's overload too (BfA chain_lightning_overload_t).
+    if ( p()->legacy_azerite.synapse_shock.ok() )
+      p()->buff.synapse_shock->trigger();
+
     // Accumulate Lightning Rod damage from all targets hit by this cast.
     if ( p()->talent.lightning_rod.ok() || p()->talent.conductive_energy.ok() )
     {
@@ -7611,6 +7615,15 @@ struct lava_burst_overload_t : public elemental_overload_spell_t
     affected_by_mid2_dmg   = true;
   }
 
+  // Audit 4 (11 Nov 2026): Igneous Potential's flat damage rides the overload too (BfA lava_burst_overload_t::bonus_da).
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = elemental_overload_spell_t::bonus_da( s );
+    if ( p()->legacy_azerite.igneous_potential.ok() )
+      b += p()->legacy_azerite.igneous_potential.value( 2 );
+    return b;
+  }
+
   static lava_burst_state_t* cast_state( action_state_t* s )
   { return debug_cast<lava_burst_state_t*>( s ); }
 
@@ -8183,6 +8196,11 @@ struct lightning_bolt_overload_t : public elemental_overload_spell_t
     {
       accumulate_lightning_rod_damage( state );
     }
+
+    // Audit 4 (11 Nov 2026): Synapse Shock - "Lightning Bolt and Chain Lightning increase your Agility/Intellect per
+    // target hit" (BfA: Lightning Bolt, Chain Lightning and both overloads). Only Chain Lightning had it.
+    if ( p()->legacy_azerite.synapse_shock.ok() )
+      p()->buff.synapse_shock->trigger();
   }
 };
 
@@ -8359,6 +8377,10 @@ struct lightning_bolt_t : public shaman_spell_t
   void impact( action_state_t* state ) override
   {
     shaman_spell_t::impact( state );
+
+    // Audit 4: Synapse Shock on Lightning Bolt (see lightning_bolt_overload_t).
+    if ( p()->legacy_azerite.synapse_shock.ok() )
+      p()->buff.synapse_shock->trigger();
 
     if ( p()->talent.conductive_energy.ok() || p()->talent.lightning_rod.ok() )
     {
@@ -9397,6 +9419,9 @@ public:
     // Legacy Azerite: Lava Shock.
     if ( p()->legacy_azerite.lava_shock.ok() )
       p()->buff.lava_shock->trigger();
+
+    // Audit 4 (11 Nov 2026): Natural Harmony - Flame Shock's ticks are Fire damage too (BfA flame_shock_t::tick).
+    p()->trigger_legacy_natural_harmony( d->state );
 
     // BracketSim legacy compatibility: Skybreaker's Fiery Demise. Only the
     // critical Flame Shock ticks count.

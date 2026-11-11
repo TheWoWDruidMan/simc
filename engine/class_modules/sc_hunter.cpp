@@ -6763,6 +6763,9 @@ struct raptor_strike_base_t : public melee_focus_spender_t
   {
     // BracketSim legacy (4 Oct 2026): Stinging Strike (conduit 226) - "Raptor Strike's damage is increased by X%".
     base_multiplier *= 1.0 + p->legacy_conduits.percent( 226 );
+    // Audit 4 (11 Nov 2026): Wilderness Survival - "Raptor Strike deals an additional X damage" (effect 3; BfA
+    // raptor_strike_base_t). Only its Wildfire Bomb cooldown half was ported.
+    base_dd_adder += p->legacy_azerite.wilderness_survival.value( 3 );
     if ( p->talents.sanctified_armaments.ok() )
       sanctified_armaments = p->get_background_action<sanctified_armaments_t>( "sanctified_armaments" );
   }
@@ -9210,6 +9213,11 @@ void hunter_t::init_base_stats()
   base.spell_power_per_intellect = 1;
 
   player_t::init_base_stats();
+
+  // Audit 4 (11 Nov 2026): Primeval Intuition - "Your maximum Focus is increased to 120" (288571 effect 2, +20;
+  // BfA hunter_t::init_base_stats). Only its Critical Strike stacks were ported.
+  if ( legacy_azerite.primeval_intuition.ok() )
+    resources.base[ RESOURCE_FOCUS ] += find_spell( 288571 )->effectN( 2 ).base_value();
 
   if ( talents.touch_of_grass.ok() )
   {
