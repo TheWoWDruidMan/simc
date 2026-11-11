@@ -12276,9 +12276,14 @@ void druid_t::create_buffs()
   // BracketSim legacy compatibility: Ravenous Frenzy. Every stack is worth the
   // damage and haste in the covenant aura's own effects; the stacks themselves
   // come from its Cast Successful proc flags, applied in druid_action_t.
+  // 11 Nov 2026: effect 3 is a Periodic Dummy every 0.1 s (the game's "no cast
+  // for 1.5 s -> stunned" check). Left on, every tick added a stack - 10 stacks a
+  // second, 99 within ten seconds, whatever was cast. No period: stacks come only
+  // from casts.
   buff.legacy_ravenous_frenzy =
       make_fallback( legacy_covenant.ravenous_frenzy->ok(), this, "ravenous_frenzy",
-                     legacy_covenant.ravenous_frenzy );
+                     legacy_covenant.ravenous_frenzy )
+        ->set_period( 0_ms );
 
   // BracketSim legacy compatibility: Kindred Empowerment. Ten seconds, measured
   // three times in a live log at 9.924, 9.938 and 9.969 - spell 338142 is not
