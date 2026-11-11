@@ -2306,11 +2306,8 @@ public:
       draught_of_deep_focus_pct = druid->find_spell( 338658 )->effectN( 1 ).percent();
     }
 
-    // BracketSim legacy compatibility: Fury of the Skies (conduit 263) raises
-    // Moonfire and Sunfire. SimulationCraft applied it as a dot debuff on those
-    // two spells, which is the same thing as raising their tick damage.
-    if ( BASE::dot_name == "moonfire" || BASE::dot_name == "sunfire" )
-      BASE::base_td_multiplier *= 1.0 + druid->legacy_conduits.percent( 263 );
+    // Fury of the Skies (conduit 263) lives in druid_spell_t: it is a debuff the
+    // dots put on the target, not a raise to the dots' own ticks.
 
     BASE::init();
   }
@@ -2805,10 +2802,46 @@ struct druid_spell_t : public druid_spell_base_t<spell_t>
 private:
   using ab = druid_spell_base_t<spell_t>;
 
+  // BracketSim legacy compatibility: Fury of the Skies (conduit 263). Moonfire
+  // (164812 effect 3) and Sunfire (164815 effect 3) are "Modify Damage Taken% from
+  // Caster's Spells" debuffs on the target, base 0, that the conduit fills in
+  // (Shadowlands parse_dot_debuffs on both dots). Each dot raises its own list of
+  // spells, copied from the 9.2.7 spell data. 11 Nov 2026: this raised only
+  // Moonfire's and Sunfire's own ticks.
+  double fots_moonfire = 0.0;
+  double fots_sunfire = 0.0;
+
 public:
   druid_spell_t( std::string_view n, druid_t* p, const spell_data_t* s = spell_data_t::nil(), flag_e f = flag_e::NONE )
     : ab( n, p, s, f )
-  {}
+  {
+    if ( p->legacy_conduits.has( 263 ) )
+    {
+      static constexpr unsigned moon[] = { 50286, 78674, 164812, 191034, 191037, 194153, 197626, 197628,
+                                           202347, 202497, 202770, 211545, 274281, 274282, 274283, 365640 };
+      static constexpr unsigned sun[] = { 5176, 50286, 78674, 164815, 190984, 191034, 191037, 197626,
+                                          202347, 202497, 202770, 211545, 274281, 274282, 274283, 365640 };
+      const unsigned id = ab::data().id();
+      if ( range::contains( moon, id ) )
+        fots_moonfire = p->legacy_conduits.percent( 263 );
+      if ( range::contains( sun, id ) )
+        fots_sunfire = p->legacy_conduits.percent( 263 );
+    }
+  }
+
+  double composite_target_multiplier( player_t* t ) const override
+  {
+    double ctm = ab::composite_target_multiplier( t );
+
+    if ( fots_moonfire && ab::get_td( t )->dots.moonfire->is_ticking() )
+      ctm *= 1.0 + fots_moonfire;
+    // Sunfire has no druid_td_t slot; find_dot is null until it was first applied.
+    const dot_t* sunfire = fots_sunfire ? t->find_dot( "sunfire", ab::player ) : nullptr;
+    if ( sunfire && sunfire->is_ticking() )
+      ctm *= 1.0 + fots_sunfire;
+
+    return ctm;
+  }
 
   void execute() override
   {
@@ -2946,13 +2979,21 @@ struct cat_attack_t : public druid_attack_t<melee_attack_t>
   bool snapshot_tigers_fury = false;
 
   // Legacy Azerite: Wild Fleshrending and Untamed Ferocity both add flat damage
-  // to the builders. Wild Fleshrending only pays out into a Thrash.
+  // to the builders. Wild Fleshrending only pays out into a Thrash, and only on the
+  // two abilities its tooltip names (BfA shred_t value 1; swipe_cat_t / brutal_slash_t
+  // value 2). 11 Nov 2026: every cat attack took value 2.
   double bonus_da( const action_state_t* s ) const override
   {
     double da = base_t::bonus_da( s );
 
     if ( p()->legacy_azerite.wild_fleshrending.ok() && get_td( s->target )->dots.thrash->is_ticking() )
-      da += p()->legacy_azerite.wild_fleshrending.value( 2 );
+    {
+      const unsigned id = data().id();
+      if ( id == 5221 )
+        da += p()->legacy_azerite.wild_fleshrending.value( 1 );
+      else if ( id == 106785 || id == 202028 )
+        da += p()->legacy_azerite.wild_fleshrending.value( 2 );
+    }
 
     if ( legacy_untamed_ferocity )
       da += p()->legacy_azerite.untamed_ferocity.value( 2 );
@@ -3209,12 +3250,14 @@ struct bear_attack_t : public druid_attack_t<melee_attack_t>
   }
 
   // Legacy Azerite: Wild Fleshrending pays out into a target already carrying
-  // Thrash. Feral has no Thrash in Midnight, so Guardian is where this lands.
+  // Thrash. Feral has no Thrash in Midnight, so Guardian is where this lands - on
+  // bear Swipe only (BfA swipe_bear_t value 2). 11 Nov 2026: every bear attack took it.
   double bonus_da( const action_state_t* s ) const override
   {
     double da = base_t::bonus_da( s );
 
-    if ( p()->legacy_azerite.wild_fleshrending.ok() && get_td( s->target )->dots.thrash->is_ticking() )
+    if ( p()->legacy_azerite.wild_fleshrending.ok() && data().id() == 213771 &&
+         get_td( s->target )->dots.thrash->is_ticking() )
       da += p()->legacy_azerite.wild_fleshrending.value( 2 );
 
     return da;
@@ -7464,11 +7507,16 @@ public:
     // BracketSim legacy compatibility: Primordial Arcanic Pulsar counts every
     // point of Astral Power spent and hands out a Celestial Alignment window
     // once it fills, and Timeworn Dreambinder stacks off the same casts.
-    if ( p()->shadowlands_legacy.primordial_arcanic_pulsar && last_resource_cost > 0 )
+    // 11 Nov 2026: this ran before the cast paid, so last_resource_cost was the PREVIOUS
+    // cast's cost (a free Starsurge after a paid one counted, a paid one after a free one
+    // did not). cost() is what this cast is about to pay; Shadowlands skipped free casts and
+    // added base_cost() - "pulsar accumulate based on base_cost not last_resource_cost".
+    const bool pays = cost() > 0;
+    if ( p()->shadowlands_legacy.primordial_arcanic_pulsar && pays )
     {
       const spell_data_t* pulsar = p()->find_spell( 338668 );
       p()->buff.legacy_primordial_arcanic_pulsar->trigger( 1, buff_t::DEFAULT_VALUE(), 1.0 );
-      p()->buff.legacy_primordial_arcanic_pulsar->current_value += last_resource_cost;
+      p()->buff.legacy_primordial_arcanic_pulsar->current_value += base_cost();
 
       if ( p()->buff.legacy_primordial_arcanic_pulsar->current_value >= pulsar->effectN( 1 ).base_value() )
       {
@@ -7485,7 +7533,7 @@ public:
 
     // BracketSim legacy compatibility: Oneth's Clear Vision. Each Astral Power
     // spender has a chance to make the other one free.
-    if ( p()->shadowlands_legacy.oneths_clear_vision && last_resource_cost > 0 )
+    if ( p()->shadowlands_legacy.oneths_clear_vision && pays )
     {
       const spell_data_t* oneth = p()->find_spell( 338661 );
       if ( rng().roll( oneth->effectN( 1 ).percent() ) )

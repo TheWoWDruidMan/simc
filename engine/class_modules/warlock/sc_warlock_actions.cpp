@@ -4485,6 +4485,10 @@ using namespace helpers;
         triggers.embers_of_nihilam_1 = p->talents.embers_of_nihilam_1.ok(); // Incinerate FnB hits can trigger Embers of Nihilam 1
 
         base_multiplier *= p->talents.fire_and_brimstone->effectN( 1 ).percent();
+
+        // Audit 4 (11 Nov 2026): Chaos Shards' flat damage rides the Fire and Brimstone hits too (BfA
+        // incinerate_fnb_t::bonus_da), scaled by Fire and Brimstone's share like the rest of the hit.
+        base_dd_adder += p->legacy_azerite.chaos_shards.value( 2 );
       }
 
       void init() override

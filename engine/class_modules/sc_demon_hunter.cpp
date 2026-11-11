@@ -9406,6 +9406,14 @@ struct immolation_aura_buff_t : public demon_hunter_buff_t<buff_t>
     unsigned int growing_inferno_ticks;
     unsigned int growing_inferno_max_ticks;
     double growing_inferno_multiplier;
+    unsigned int growing_inferno_lag;
+
+    // BracketSim legacy compatibility: the step count a damage event reads.
+    double growing_inferno_value() const
+    {
+      unsigned int n = growing_inferno_ticks > growing_inferno_lag ? growing_inferno_ticks - growing_inferno_lag : 0;
+      return 1 + n * growing_inferno_multiplier;
+    }
 
     immolation_aura_functional_buff_t( demon_hunter_t* p, std::string_view name )
       : base_t( *p, name, p->spell.immolation_aura ),
@@ -9416,7 +9424,14 @@ struct immolation_aura_buff_t : public demon_hunter_buff_t<buff_t>
         // BracketSim legacy compatibility: the conduit Growing Inferno (153)
         // stacks with the modern talent of the same name and works without it.
         growing_inferno_multiplier( p->talent.havoc.growing_inferno->effectN( 1 ).percent() +
-                                    p->legacy_conduits.percent( 153 ) )
+                                    p->legacy_conduits.percent( 153 ) ),
+        // The conduit WITHOUT the talent follows Shadowlands' schedule: the stacks were
+        // cleared when Immolation Aura started and each tick added one AFTER it dealt
+        // damage (SL tick callback: execute, then growing_inferno->trigger()), so the
+        // initial hit and the first tick read 0 steps, the second tick 1. Midnight's
+        // talent counts the initial hit as step 1. 11 Nov 2026: the conduit alone took
+        // the talent's schedule - two steps ahead on every hit.
+        growing_inferno_lag( p->talent.havoc.growing_inferno->ok() ? 0 : 2 )
     {
       set_cooldown( timespan_t::zero() );
       set_partial_tick( true );
@@ -9437,7 +9452,7 @@ struct immolation_aura_buff_t : public demon_hunter_buff_t<buff_t>
         p->active.immolation_aura_tick->set_target( p->target );
 
         s->target                     = p->target;
-        s->growing_inferno_multiplier = 1 + growing_inferno_ticks * growing_inferno_multiplier;
+        s->growing_inferno_multiplier = growing_inferno_value();
         s->immolation_aura            = this;
 
         p->active.immolation_aura_tick->snapshot_state( s, p->active.immolation_aura_tick->amount_type( s ) );
@@ -9464,7 +9479,7 @@ struct immolation_aura_buff_t : public demon_hunter_buff_t<buff_t>
 
         dh()->active.immolation_aura_initial->set_target( dh()->target );
 
-        s->growing_inferno_multiplier = 1 + growing_inferno_ticks * growing_inferno_multiplier;
+        s->growing_inferno_multiplier = growing_inferno_value();
         s->immolation_aura            = this;
 
         dh()->active.immolation_aura_initial->snapshot_state( s,
