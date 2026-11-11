@@ -1488,10 +1488,15 @@ void paladin_t::create_buffs_retribution()
   // legendaries
   buffs.empyrean_legacy = make_buff( this, "empyrean_legacy", find_spell( 387178 ) );
   // BracketSim legacy (8 Nov 2026): Vanquisher's Hammer's empowerment (328204: 20 s).
+  // 11 Nov 2026: cap as Shadowlands - the spell's own 1, plus Duty-Bound Gavel's "Spell Max Stacks" (355099 effect 2,
+  // +4) when the Gavel (or Unity) is worn. It was a flat 3.
   if ( legacy_covenant.vanquishers_hammer->ok() )
     buffs.legacy_vanquishers_hammer = make_buff( this, "vanquishers_hammer", legacy_covenant.vanquishers_hammer )
                                           ->set_cooldown( 0_ms )
-                                          ->set_max_stack( 3 );
+                                          ->set_max_stack( std::max( 1, as<int>( legacy_covenant.vanquishers_hammer->max_stacks() ) ) +
+                                                           ( shadowlands_legacy.duty_bound_gavel
+                                                                 ? as<int>( find_spell( 355099 )->effectN( 2 ).base_value() )
+                                                                 : 0 ) );
 
   buffs.rise_from_ash = make_buff( this, "rise_from_ash", find_spell( 454693 ) );
   buffs.winning_streak = make_buff( this, "winning_streak", find_spell( 1216828 ) )
