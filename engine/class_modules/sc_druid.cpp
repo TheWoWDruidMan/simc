@@ -1969,11 +1969,15 @@ public:
   // damage over time effect into a shorter window, which raises its rate
   // without changing its total. Applied as a multiplier rather than by editing
   // dot_duration, which derived constructors set after this one runs.
+  //
+  // A CHANNEL is not a damage over time effect: Convoke the Spirits shortened
+  // this way cast none of its spells (audit 3, 11 Nov 2026: Balance -10.9%,
+  // the Convoke spells at 0 damage), so channels are left alone.
   timespan_t composite_dot_duration( const action_state_t* s ) const override
   {
     auto d = ab::composite_dot_duration( s );
 
-    if ( p_legacy_circle() )
+    if ( p_legacy_circle() && !ab::channeled )
       d *= 1.0 + p()->find_spell( 338657 )->effectN( 1 ).percent();
 
     return d;
@@ -1983,7 +1987,7 @@ public:
   {
     auto t = ab::tick_time( s );
 
-    if ( p_legacy_circle() )
+    if ( p_legacy_circle() && !ab::channeled )
       t *= 1.0 + p()->find_spell( 338657 )->effectN( 1 ).percent();
 
     return t;
@@ -4227,6 +4231,16 @@ public:
     }
 
     p()->buff.tigers_tenacity->consume( this );
+
+    // BracketSim legacy compatibility: Eye of Fearful Symmetry - "Tiger's Fury
+    // causes your next 2 finishing moves to restore 2 combo points" (audit 3
+    // C5, 11 Nov 2026: the stacks went up on Tiger's Fury and nothing spent them).
+    if ( p()->buff.legacy_eye_of_fearful_symmetry->check() )
+    {
+      p()->buff.legacy_eye_of_fearful_symmetry->decrement();
+      p()->resource_gain( RESOURCE_COMBO_POINT, p()->find_spell( 339143 )->effectN( 1 ).base_value(),
+                          p()->get_gain( "Eye of Fearful Symmetry" ) );
+    }
   }
 };
 
@@ -15613,6 +15627,10 @@ void druid_t::parse_action_effects( action_t* action )
   _a->parse_effects( buff.ascendant_fires );  // consumption handled within starfire_base_t/wrath_base_t
   _a->parse_effects( buff.ascendant_stars, CONSUME_BUFF );
   _a->parse_effects( buff.astral_communion );
+
+  // BracketSim legacy compatibility: Timeworn Dreambinder, +10% damage and -10% cost per stack on Starsurge and
+  // Starfall (audit 3 C7, 11 Nov 2026: the buff went up and nothing read it).
+  _a->parse_effects( buff.legacy_timeworn_dreambinder );
 
   // talent data for balance of all things only modifies effect#1 of the buff, and is missing modification to effect#3
   // which is done via hidden script. hack around this by overriding the value instead of normally parsing the talent.

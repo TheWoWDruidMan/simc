@@ -5692,6 +5692,10 @@ struct lava_lash_t : public shaman_attack_t
       m *= 1.0 + data().effectN( 2 ).percent();
     }
 
+    // BracketSim legacy compatibility: Primal Lava Actuators, +12% per stack
+    // (audit 3 C6, 11 Nov 2026: the stacks went up and nothing read them).
+    m *= 1.0 + p()->buff.legacy_primal_lava_actuators->check_stack_value();
+
     return m;
   }
 
@@ -9408,8 +9412,10 @@ public:
     if ( p()->shadowlands_legacy.primal_lava_actuators )
     {
       p()->buff.legacy_primal_lava_actuators->trigger();
+      // The tooltip's "${$m1/10}.1 sec": effect 1 of 335895 is 5 -> 0.5 sec.
+      // (This read effect 2, which does not exist, so it pulled nothing - audit 3 C6.)
       p()->cooldown.lava_lash->adjust(
-          -timespan_t::from_seconds( p()->find_spell( 335895 )->effectN( 2 ).base_value() ), false );
+          -timespan_t::from_seconds( p()->find_spell( 335895 )->effectN( 1 ).base_value() / 10.0 ), false );
     }
 
     if ( p()->spec.lava_surge->ok() )
@@ -14078,7 +14084,7 @@ void shaman_t::create_buffs()
           ->set_chance( shadowlands_legacy.legacy_of_the_frost_witch ? 1.0 : 0.0 );
   buff.legacy_primal_lava_actuators =
       make_buff( this, "legacy_primal_lava_actuators", find_spell( 335896 ) )
-          ->set_default_value_from_effect( 1 )
+          ->set_default_value( find_spell( 335896 )->effectN( 1 ).percent() )
           ->set_chance( shadowlands_legacy.primal_lava_actuators ? 1.0 : 0.0 );
   buff.legacy_windspeakers_lava_resurgence =
       make_buff( this, "legacy_windspeakers_lava_resurgence", find_spell( 336065 ) )

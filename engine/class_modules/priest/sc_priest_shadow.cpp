@@ -84,12 +84,15 @@ struct mind_flay_base_t : public priest_spell_t
     }
 
     // BracketSim legacy compatibility: Eternal Call to the Void rolls off every
-    // Mind Flay tick, at the rate on the runeforge's own spell.
+    // Mind Flay tick, at the rate on the runeforge's own spell, and spawns a
+    // Void Tendril that channels Mind Flay at the target for 15 sec (336216).
+    // It used to execute 336214 itself - a passive dummy that deals nothing -
+    // so no tendril ever appeared (audit 3 C8, 11 Nov 2026).
     if ( priest().rppm.legacy_eternal_call_to_the_void &&
-         priest().background_actions.legacy_eternal_call_to_the_void &&
          priest().rppm.legacy_eternal_call_to_the_void->trigger() )
     {
-      priest().background_actions.legacy_eternal_call_to_the_void->execute_on_target( d->target );
+      priest().procs.void_tendril->occur();
+      priest().pets.void_tendril.spawn( priest().find_spell( 336216 )->duration() + 1_ms );
     }
 
     priest().trigger_idol_of_cthun( d->state );
@@ -2104,10 +2107,14 @@ struct voidform_t final : public priest_buff_t<buff_t>
 
     // Legacy Azerite: Chorus of Insanity converts the Voidform stacks into a
     // decaying critical strike buff.
+    // The trait's own text (278661): "When Voidform ends, gain X Critical
+    // Strike, stacking 20 times. This effect decays every 1 sec." Midnight's
+    // Voidform has 1 stack, so this gave 1 stack that was gone in a second
+    // (audit 3, 11 Nov 2026: up 2.1% of the fight); it now gives the 20.
     if ( priest().legacy_azerite.chorus_of_insanity.enabled() )
     {
       priest().buffs.legacy_chorus_of_insanity->expire();
-      priest().buffs.legacy_chorus_of_insanity->trigger( expiration_stacks );
+      priest().buffs.legacy_chorus_of_insanity->trigger( 20 );
     }
 
     base_t::expire_override( expiration_stacks, remaining_duration );

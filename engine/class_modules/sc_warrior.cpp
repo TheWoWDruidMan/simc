@@ -2317,6 +2317,11 @@ struct melee_t : public warrior_attack_t
     if ( p()->active.legacy_reckless_flurry && result_is_hit( s->result ) )
       p()->active.legacy_reckless_flurry->execute_on_target( s->target );
 
+    // Legacy Azerite: Infinite Fury - "Your auto attacks will refresh the
+    // duration of this effect" (audit 3, 11 Nov 2026: it ran out after 5 s).
+    if ( p()->buff.infinite_fury->check() && result_is_hit( s->result ) )
+      p()->buff.infinite_fury->refresh();
+
     if ( p()->talents.warrior.wild_strikes->ok() && s->result == RESULT_CRIT )
     {
       p()->buff.wild_strikes->trigger();
@@ -5740,6 +5745,11 @@ struct raging_blow_t : public warrior_attack_t
       mh_attack->execute();
       oh_attack->execute();
     }
+
+    // BracketSim legacy compatibility: Will of the Berserker - "Your Raging
+    // Blow will refresh the duration of this effect" (audit 3 C4).
+    if ( p()->buff.legacy_will_of_the_berserker->check() )
+      p()->buff.legacy_will_of_the_berserker->refresh();
 
     // Legacy Azerite: Pulverizing Blows
     if ( p()->azerite.pulverizing_blows.ok() )
@@ -9561,11 +9571,13 @@ void warrior_t::create_buffs()
 
     const spell_data_t* infinite_fury_trigger =
         azerite.infinite_fury.spell()->effectN( 1 ).trigger();
+    // Audit 3 (11 Nov 2026): a plain buff with the rating as its value, which
+    // nothing read - Infinite Fury gave no Critical Strike at all. It is a
+    // Critical Strike rating buff, as the trait's text says.
     buff.infinite_fury =
-        make_buff( this, "infinite_fury", infinite_fury_trigger->effectN( 1 ).trigger() )
-            ->set_trigger_spell( infinite_fury_trigger )
-            ->set_default_value( azerite.infinite_fury.value() )
-            ->add_invalidate( CACHE_CRIT_CHANCE );
+        make_buff<stat_buff_t>( this, "infinite_fury", infinite_fury_trigger->effectN( 1 ).trigger() )
+            ->add_stat( STAT_CRIT_RATING, azerite.infinite_fury.value() )
+            ->set_trigger_spell( infinite_fury_trigger );
 
     buff.pulverizing_blows = make_buff( this, "pulverizing_blows", find_spell( 275672 ) )
         ->set_trigger_spell( azerite.pulverizing_blows.spell_ref().effectN( 1 ).trigger() )
@@ -9791,7 +9803,7 @@ void warrior_t::create_buffs()
   // the 12s window, the crit in effect 1 and the auto-attack crit in effect 2.
   buff.legacy_will_of_the_berserker =
       make_buff( this, "will_of_the_berserker", find_spell( 335597 ) )
-          ->set_default_value_from_effect( 1 )
+          ->set_default_value( find_spell( 335597 )->effectN( 1 ).percent() )
           ->add_invalidate( CACHE_CRIT_CHANCE )
           ->set_chance( shadowlands_legacy.will_of_the_berserker ? 1.0 : 0.0 );
 
@@ -10809,6 +10821,11 @@ double warrior_t::composite_attack_power_multiplier() const
 double warrior_t::composite_melee_crit_chance() const
 {
   double c = parse_player_effects_t::composite_melee_crit_chance();
+
+  // BracketSim legacy compatibility: Will of the Berserker, "your Critical
+  // Strike is increased by 7%" (audit 3 C4: the buff was up and nothing read it).
+  c += buff.legacy_will_of_the_berserker->check_value();
+
   return c;
 }
 
@@ -11126,6 +11143,10 @@ void warrior_t::parse_player_effects()
     parse_target_effects( d_fn( &warrior_td_t::debuffs_demoralizing_shout ), talents.protection.demoralizing_shout );
     parse_target_effects( d_fn( &warrior_td_t::debuffs_punish ), talents.protection.punish->effectN( 2 ).trigger() );
   }
+
+  // BracketSim legacy compatibility: Cadence of Fujieda, 1% Haste per stack
+  // (audit 3 C2: the buff stacked and nothing read it).
+  parse_effects( buff.legacy_cadence_of_fujieda );
 
   // Colossus
   parse_effects( buff.celeritous_conclusion_haste );

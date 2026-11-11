@@ -4702,6 +4702,17 @@ void player_t::create_actions()
        !util::str_compare_ci( legacy_apl_placement, "none" ) )
   {
     auto name = azerite::major_action_name( azerite_essence->major_essence_id() );
+    // Audit 3 (11 Nov 2026): seven majors LOWER the damage when pressed on cooldown - Breath of the Dying -2.0 to
+    // -4.5%, The Crucible of Flame -1.6 to -4.1%, Essence of the Focusing Iris -1.6 to -2.7%, Purification Protocol
+    // -1.1 to -2.4%, Ripple in Space -0.5 to -1.9%, Memory of Lucid Dreams -0.8 to -1.5%, Anima of Life and Death -1.3%.
+    // Their damage scales from the Heart of Azeroth's item level, which is 31 in the game today (every exported
+    // character shows ilevel=31), so the button costs a global worth more than it deals: Concentrated Flame added
+    // 48 DPS and cost 5 Bloodthirsts (-158 DPS) on the level 50 Fury list. A player would not press it, so the
+    // list does not either; the essence's minor and passive parts still apply. A user's own action list may still
+    // press it by name.
+    static constexpr unsigned net_loss_majors[] = { 5, 6, 7, 12, 15, 27, 35 };
+    if ( range::find( net_loss_majors, azerite_essence->major_essence_id() ) != std::end( net_loss_majors ) )
+      name = {};
     if ( !name.empty() && range::find( legacy_apl_actions, name ) == legacy_apl_actions.end() )
     {
       legacy_apl_actions.emplace_back( name );

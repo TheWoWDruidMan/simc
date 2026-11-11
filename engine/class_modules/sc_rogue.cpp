@@ -500,7 +500,7 @@ public:
     buff_t* legacy_finality_black_powder;
     buff_t* legacy_dashing_scoundrel;
     // BracketSim legacy compatibility: Deeper Daggers (conduit 245).
-    damage_buff_t* legacy_deeper_daggers;
+    buff_t* legacy_deeper_daggers;
     // BracketSim legacy compatibility: Perforated Veins (conduit 248).
     buff_t* legacy_perforated_veins;
   } buffs;
@@ -2075,12 +2075,9 @@ public:
     auto_attack_damage_buffs.clear();
     crit_chance_buffs.clear();
 
-    // BracketSim legacy compatibility: second wave of Shadowlands runeforges,
-    // and the Deeper Daggers conduit. WITHOUT this line the buff goes up on
-    // every Eviscerate and sits at 98% uptime while changing nothing, because
-    // no action has been told to read it - which is exactly how it first
-    // measured.
-    register_damage_buff( debug_cast<damage_buff_t*>( p()->buffs.legacy_deeper_daggers ) );
+    // BracketSim legacy compatibility: second wave of Shadowlands runeforges.
+    // (The Deeper Daggers conduit is a player Shadow multiplier now - see
+    // rogue_t::composite_player_multiplier, audit 3 C1.)
     register_damage_buff( debug_cast<damage_buff_t*>( p()->buffs.legacy_deathly_shadows ) );
     register_damage_buff( debug_cast<damage_buff_t*>( p()->buffs.legacy_finality_eviscerate ) );
     register_damage_buff( debug_cast<damage_buff_t*>( p()->buffs.legacy_finality_black_powder ) );
@@ -6483,7 +6480,20 @@ struct shadowstrike_t : public rogue_attack_t
   {
     double b = rogue_attack_t::bonus_da( state );
     b += p()->azerite.inevitability.value( 3 );
+    // Legacy Azerite: Blade In The Shadows - each stack adds the trait's flat
+    // damage to Shadowstrike (audit 3 C10, 11 Nov 2026: it was triggered from
+    // Shuriken Storm and nothing read it).
+    b += p()->buffs.blade_in_the_shadows->stack_value();
     return b;
+  }
+
+  void execute() override
+  {
+    rogue_attack_t::execute();
+
+    // Legacy Azerite: Blade In The Shadows stacks on Shadowstrike, after its hit.
+    if ( !is_secondary_action() )
+      p()->buffs.blade_in_the_shadows->trigger();
   }
 
   void impact( action_state_t* state ) override
@@ -6750,9 +6760,6 @@ struct shuriken_storm_t: public rogue_attack_t
   void execute() override
   {
     rogue_attack_t::execute();
-
-    // Legacy Azerite: Blade in the Shadows
-    p()->buffs.blade_in_the_shadows->trigger();
 
     if ( p()->talent.subtlety.shuriken_tornado->ok() )
     {
@@ -10042,7 +10049,7 @@ void actions::rogue_action_t<Base>::trigger_shadow_blades_attack( const action_s
   if ( p()->buffs.legacy_deeper_daggers->check() &&
        ab::data().id() != p()->talent.subtlety.gloomblade->id() )
   {
-    sb_value *= p()->buffs.legacy_deeper_daggers->value_direct();
+    sb_value *= 1.0 + p()->buffs.legacy_deeper_daggers->check_value();
   }
 
   p()->active.shadow_blades_attack->trigger_residual_action( state, sb_value,
@@ -10834,6 +10841,12 @@ double rogue_t::composite_player_multiplier( school_e school ) const
   if ( legendary.celerity && buffs.adrenaline_rush->check() )
   {
     m *= 1.0 + find_spell( 340087 )->effectN( 1 ).percent();
+  }
+
+  // BracketSim legacy compatibility: Deeper Daggers conduit (audit 3 C1).
+  if ( dbc::is_school( school, SCHOOL_SHADOW ) && buffs.legacy_deeper_daggers->check() )
+  {
+    m *= 1.0 + buffs.legacy_deeper_daggers->check_value();
   }
 
   return m;
@@ -12802,18 +12815,18 @@ void rogue_t::create_buffs()
 
   buffs.roll_the_bones = new buffs::roll_the_bones_t( this );
 
-  // BracketSim legacy compatibility: Deeper Daggers (conduit 245). Spell
-  // 341550 IS in Midnight's data and still carries the family flags that pick
-  // out Shadow damage, so the buff needs no hand-written affected-spell list -
-  // only its value, which lives in the conduit rank table.
-  //
-  // The fourth argument is damage_buff_t's value override. 341550 has exactly
-  // one effect, so overriding "all effects" and overriding "the conduit's
-  // first effect" are the same override here.
-  buffs.legacy_deeper_daggers =
-      make_buff<damage_buff_t>( this, "deeper_daggers", find_spell( 341550 ),
-                                legacy_conduits.percent( 245 ) );
-  buffs.legacy_deeper_daggers->set_chance( legacy_conduits.has( 245 ) ? 1.0 : 0.0 );
+  // BracketSim legacy compatibility: Deeper Daggers (conduit 245): "Eviscerate
+  // and Black Powder increase your Shadow damage dealt by X% for 8 sec".
+  // Spell 341550 is NOT in Midnight's data (spell_query finds nothing), so the
+  // old damage_buff_t built from it had no affected spells and a garbage value
+  // and did nothing (audit 3 C1, 11 Nov 2026). It is now a plain buff carrying
+  // the rank value, read as a player Shadow damage multiplier in
+  // rogue_t::composite_player_multiplier (and by hand for Shadow Blades).
+  buffs.legacy_deeper_daggers = make_buff( this, "deeper_daggers" )
+    ->set_duration( 8_s )
+    ->set_default_value( legacy_conduits.percent( 245 ) )
+    ->set_chance( legacy_conduits.has( 245 ) ? 1.0 : 0.0 )
+    ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER );
 
   // BracketSim legacy compatibility: original Shadowlands Outlaw
   // Runecarving effects, enabled only by their exact item bonus IDs.

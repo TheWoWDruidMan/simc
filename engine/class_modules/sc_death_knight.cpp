@@ -912,6 +912,8 @@ public:
     buff_t* eternal_rune_weapon;
     buff_t* icy_citadel;
     buff_t* icy_citadel_builder;
+    // BracketSim legacy compatibility: Unleashed Frenzy (conduit 122).
+    buff_t* legacy_unleashed_frenzy;
     buff_t* festermight;
     buff_t* bloody_runeblade;
     buff_t* frostwhelps_indignation;
@@ -7385,6 +7387,19 @@ struct pillar_of_frost_buff_t final : public death_knight_buff_t
     {
       trigger_enduring_strength();
     }
+
+    // BracketSim legacy compatibility: Icy Citadel - "When Pillar of Frost
+    // expires, your Strength is increased by X for 6 sec. This effect lasts
+    // 2 sec longer for each Obliterate and Frostscythe critical strike during
+    // Pillar of Frost." The Strength buff was never triggered (audit 3 C11).
+    if ( p()->azerite.icy_citadel.enabled() )
+    {
+      timespan_t extra = p()->buffs.icy_citadel_builder->check() *
+                         timespan_t::from_millis( p()->azerite.icy_citadel.spell()->effectN( 2 ).base_value() );
+      p()->buffs.icy_citadel->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0,
+                                       p()->buffs.icy_citadel->buff_duration() + extra );
+      p()->buffs.icy_citadel_builder->expire();
+    }
   }
 
   void refresh( int stacks, double value, timespan_t duration ) override
@@ -11124,6 +11139,10 @@ struct frostscythe_base_t : public death_knight_melee_attack_t
 
     auto td = get_td( s->target );
 
+    // BracketSim legacy compatibility: Icy Citadel counts Frostscythe crits too (audit 3 C11).
+    if ( p()->azerite.icy_citadel.enabled() && p()->buffs.pillar_of_frost->check() && s->result == RESULT_CRIT )
+      p()->buffs.icy_citadel_builder->trigger();
+
     if ( p()->buffs.inexorable_assault->up() && p()->cooldown.inexorable_assault_icd->is_ready() )
     {
       inexorable_assault->set_target( target );
@@ -11367,9 +11386,6 @@ struct frost_strike_strike_t final : public death_knight_melee_attack_t
     background = special = true;
     weapon               = w;
 
-    // BracketSim legacy compatibility: Unleashed Frenzy. Modelled as a flat
-    // gain rather than the stacking Strength buff, which has no host here.
-    base_multiplier *= 1.0 + p->legacy_conduits.percent( 122 );
   }
 
   // Legacy Azerite: Killer Frost and Latent Chill both add flat damage here.
@@ -11659,13 +11675,12 @@ struct frost_strike_t final : public frost_strike_base_t
     if ( was_replaced )
       return;
 
-    // BracketSim legacy compatibility: Icy Citadel banks a stack whenever Frost
-    // Strike crits while Pillar of Frost is up.
-    if ( p()->azerite.icy_citadel.enabled() && p()->buffs.pillar_of_frost->up() &&
-         execute_state && execute_state->result == RESULT_CRIT )
-    {
-      p()->buffs.icy_citadel_builder->trigger();
-    }
+    // BracketSim legacy compatibility: Unleashed Frenzy (conduit 122) stacks on
+    // every Frost Strike (audit 3 C9).
+    p()->buffs.legacy_unleashed_frenzy->trigger();
+
+    // (Icy Citadel banks its stacks on Obliterate and Frostscythe crits, not
+    // Frost Strike - see obliterate_strike_t / frostscythe_base_t, audit 3 C11.)
 
     auto td = get_td( target );
     if ( p()->talent.frost.shattering_blade.ok() && td->debuff.razorice->at_max_stacks() )
@@ -12640,6 +12655,12 @@ struct obliterate_strike_t final : public death_knight_melee_attack_t
     death_knight_melee_attack_t::impact( state );
 
     auto td = get_td( state->target );
+
+    // BracketSim legacy compatibility: Icy Citadel - each Obliterate critical
+    // strike during Pillar of Frost adds 2 sec to the Strength it grants when
+    // Pillar ends (audit 3 C11).
+    if ( p()->azerite.icy_citadel.enabled() && p()->buffs.pillar_of_frost->check() && state->result == RESULT_CRIT )
+      p()->buffs.icy_citadel_builder->trigger();
 
     if ( p()->talent.frost.enduring_strength.ok() && p()->buffs.pillar_of_frost->up() &&
          p()->cooldown.enduring_strength_icd->is_ready() && state->result == RESULT_CRIT )
@@ -17251,6 +17272,15 @@ void death_knight_t::create_buffs()
     ->add_stat( STAT_STRENGTH, azerite.icy_citadel.value( 1 ) );
   buffs.icy_citadel_builder = make_buff( this, "icy_citadel_builder",
       azerite.icy_citadel.spell()->effectN( 1 ).trigger()->effectN( 1 ).trigger() );
+  // BracketSim legacy compatibility: Unleashed Frenzy (conduit 122) - "Frost Strike increases your Strength by X% for
+  // 6 sec, stacking up to 3 times". Its Shadowlands spell is not in Midnight's data, so duration and stacks are the
+  // conduit text's. It was a flat X% on Frost Strike's damage instead (audit 3 C9, 11 Nov 2026).
+  buffs.legacy_unleashed_frenzy = make_buff( this, "unleashed_frenzy" )
+    ->set_duration( 6_s )
+    ->set_max_stack( 3 )
+    ->set_default_value( legacy_conduits.percent( 122 ) )
+    ->set_pct_buff_type( STAT_PCT_BUFF_STRENGTH )
+    ->set_chance( legacy_conduits.has( 122 ) ? 1.0 : 0.0 );
   buffs.festermight = make_buff<stat_buff_t>( this, "festermight", find_spell( 274373 ) )
     ->add_stat( STAT_STRENGTH, azerite.festermight.value() )
     ->set_refresh_behavior( buff_refresh_behavior::DISABLED );

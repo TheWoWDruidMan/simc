@@ -3450,6 +3450,15 @@ using namespace helpers;
     action_state_t* new_state() override
     { return new demonbolt_state_t( this, target ); }
 
+    // Legacy Azerite: Shadow's Bite - "When your summoned Dreadstalkers fade away, they increase the damage of your
+    // Demonbolt by X for 8 sec" (audit 3 C3: the buff went up and nothing read it).
+    double bonus_da( const action_state_t* s ) const override
+    {
+      double da = warlock_spell_t::bonus_da( s );
+      da += p()->buffs.legacy_shadows_bite->check_value();
+      return da;
+    }
+
     void snapshot_state( action_state_t* s, result_amount_type rt ) override
     {
       debug_cast<demonbolt_state_t*>( s )->core_spent = p()->buffs.demonic_core->up();
@@ -4583,8 +4592,21 @@ using namespace helpers;
       return warlock_spell_t::ready();
     }
 
+    // Legacy Azerite: Chaotic Inferno's proc makes the next Incinerate instant (audit 3 C3: nothing read it).
+    timespan_t execute_time() const override
+    {
+      if ( p()->buffs.legacy_chaotic_inferno->check() )
+        return 0_ms;
+
+      return warlock_spell_t::execute_time();
+    }
+
     void execute() override
     {
+      // The legacy proc is spent by the Incinerate it made instant (the modern talent's buff goes first).
+      if ( p()->buffs.legacy_chaotic_inferno->check() && !p()->buffs.chaotic_inferno->check() )
+        p()->buffs.legacy_chaotic_inferno->decrement();
+
       player_t* inc_target = target;
 
       real_total_target_count = 1;
@@ -4957,6 +4979,16 @@ using namespace helpers;
 
     action_state_t* new_state() override
     { return new chaos_bolt_state_t( this, target ); }
+
+    // Legacy Azerite (audit 3 C3, 11 Nov 2026): Chaotic Inferno "Chaos Bolt deals X additional damage" and Crashing
+    // Chaos "increases the damage of your next 8 Chaos Bolts by X" - both buffs were built and never read.
+    double bonus_da( const action_state_t* s ) const override
+    {
+      double da = warlock_spell_t::bonus_da( s );
+      da += p()->legacy_azerite.chaotic_inferno.value( 2 );
+      da += p()->buffs.legacy_crashing_chaos->check_value();
+      return da;
+    }
 
     bool ready() override
     {
