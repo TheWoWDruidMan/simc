@@ -676,14 +676,21 @@ void effects_t::create_buffs( player_t* p )
   // your damage or healing to it by 1%, increasing by an additional 1% every
   // 3 sec." Five steps of 1% over its 15s, then it restarts, so it averages 3%
   // against a target you never stop hitting.
+  // 11 Nov 2026 (stack audit): it climbed 2 a tick (the tick's own stack plus
+  // the callback's) and then held 5% for the whole fight. Now exactly the cycle
+  // above: 1% at the start, +1% every 3 sec to 5%, and at 15 sec back to 1% (the
+  // 15 sec debuff 352939 ends and the next hit starts it again).
   soulglow_spectrometer = make_buff( p, "soulglow_spectrometer" )
                               ->set_max_stack( 5 )
                               ->set_duration( timespan_t::zero() )
                               ->set_default_value( 0.01 )
                               ->set_period( 3_s )
+                              ->set_freeze_stacks( true )
                               ->set_tick_callback( []( buff_t* b, int, timespan_t ) {
-                                if ( b->check() < 5 )
-                                  b->trigger();
+                                if ( b->check() >= 5 )
+                                  b->decrement( b->check() - 1 );
+                                else
+                                  b->bump();
                               } );
 
   // "Dealing damage or healing a target grants you 1% increased damage or

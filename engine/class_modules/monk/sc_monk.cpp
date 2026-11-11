@@ -198,10 +198,9 @@ void monk_action_t<Base>::apply_debuff_effects()
 {
   parse_target_effects( td_fn( &monk_td_t::debuff_t::mid2_brm_4pc ), p()->tier.mid2.brm_4pc_debuff );
 
-  // BracketSim legacy compatibility: the Weapons of Order mark makes the target
-  // take more of the monk's damage, straight from the debuff's own effects.
-  parse_target_effects( td_fn( &monk_td_t::debuff_t::legacy_weapons_of_order ),
-                        p()->legacy_covenant.weapons_of_order_debuff );
+  // BracketSim legacy compatibility: the Weapons of Order mark is applied in
+  // monk_t::composite_player_target_multiplier (11 Nov 2026) - its effects are
+  // aura 270/381/380, which parse_target_effects does not read.
 
   // BracketSim legacy compatibility: Keefer's Skyreach.
   parse_target_effects( td_fn( &monk_td_t::debuff_t::legacy_keefers_skyreach ),
@@ -3005,6 +3004,12 @@ struct keg_smash_t : monk_melee_attack_t
   {
     monk_melee_attack_t::impact( state );
     get_td( state->target )->debuff.keg_smash->trigger();
+
+    // BracketSim legacy compatibility (11 Nov 2026, stack audit): the Weapons of
+    // Order mark (312106, up to 4 stacks) comes from Keg Smash while Weapons of
+    // Order is up - Brewmaster only, as in Shadowlands (keg_smash_t::impact).
+    if ( p()->buff.legacy_weapons_of_order->up() )
+      get_td( state->target )->debuff.legacy_weapons_of_order->trigger();
   }
 };
 
@@ -5851,13 +5856,9 @@ struct legacy_weapons_of_order_t : public monk_spell_t
     }
   }
 
-  void impact( action_state_t *s ) override
-  {
-    monk_spell_t::impact( s );
-    // The mark that made the target take more of the monk's damage. The brew
-    // cost reduction Rising Sun Kick granted is not modelled.
-    p()->get_target_data( s->target )->debuff.legacy_weapons_of_order->trigger();
-  }
+  // 11 Nov 2026 (stack audit): the cast itself no longer marks the target - every
+  // spec got one stack here. The mark is Brewmaster's, from Keg Smash during the
+  // buff (keg_smash_t::impact). Windwalker's Chi cost cut is not modelled.
 };
 
 struct legacy_bonedust_brew_t : public monk_spell_t
@@ -8146,6 +8147,36 @@ double monk_t::composite_player_target_armor( player_t *target ) const
   double armor = player_t::composite_player_target_armor( target );
 
   return armor;
+}
+
+// BracketSim legacy compatibility (11 Nov 2026, stack audit): the Weapons of Order
+// mark (312106) is +8% damage taken from the monk per stack (effect 1), from the
+// monk's pets (2) and guardians (3). Those are aura subtypes 270/381/380, which
+// parse_target_effects does not read - the mark had done nothing. Applied here as
+// Shadowlands did (monk_t::composite_player_target_multiplier and
+// composite_player_target_pet_damage_multiplier there).
+double monk_t::composite_player_target_multiplier( player_t *target, school_e school ) const
+{
+  double m = base_t::composite_player_target_multiplier( target, school );
+
+  auto td = find_target_data( target );
+  if ( td && td->debuff.legacy_weapons_of_order->check() )
+    m *= 1.0 + td->debuff.legacy_weapons_of_order->check() *
+                   legacy_covenant.weapons_of_order_debuff->effectN( 1 ).percent();
+
+  return m;
+}
+
+double monk_t::composite_player_target_pet_damage_multiplier( player_t *target, bool guardian ) const
+{
+  double m = base_t::composite_player_target_pet_damage_multiplier( target, guardian );
+
+  auto td = find_target_data( target );
+  if ( td && td->debuff.legacy_weapons_of_order->check() )
+    m *= 1.0 + td->debuff.legacy_weapons_of_order->check() *
+                   legacy_covenant.weapons_of_order_debuff->effectN( guardian ? 3 : 2 ).percent();
+
+  return m;
 }
 
 void monk_t::invalidate_cache( cache_e c )

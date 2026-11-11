@@ -9602,7 +9602,8 @@ void warrior_t::create_buffs()
     buff.legacy_brace_for_impact_azerite =
         make_buff( this, "brace_for_impact_azerite", find_spell( 278124 ) )
             ->set_stack_behavior( buff_stack_behavior::ASYNCHRONOUS )
-            ->set_max_stack( 99 )
+            // 11 Nov 2026 (stack audit): no set_max_stack( 99 ) - the trait's buff
+            // caps at 5 (spell data), as BfA used it.
             ->set_chance( azerite.legacy_brace_for_impact.enabled() ? 1.0 : 0.0 );
 
     buff.legacy_striking_the_anvil =

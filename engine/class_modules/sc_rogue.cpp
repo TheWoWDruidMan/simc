@@ -12761,6 +12761,9 @@ void rogue_t::create_buffs()
           ->set_cooldown( timespan_t::zero() )
           ->set_default_value_from_effect( 3, 0.01 )
           ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
+          // 11 Nov 2026 (stack audit): effect 4 is a 1 sec Periodic Dummy; left on,
+          // every tick added a stack of Haste. Shadowlands sets no period, as here.
+          ->set_period( 0_ms )
           ->set_chance( legacy_covenant.flagellation->ok() ? 1.0 : 0.0 );
 
   // Audit 4 (11 Nov 2026): "persisting 12 sec after their torment fades" (323654's text, buff 345569). Shadowlands:

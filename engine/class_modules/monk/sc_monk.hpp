@@ -1349,6 +1349,9 @@ public:
   double composite_attack_power_multiplier() const override;
   double composite_dodge() const override;
   double composite_player_target_armor( player_t *target ) const override;
+  // BracketSim legacy compatibility: the Weapons of Order mark (312106).
+  double composite_player_target_multiplier( player_t *target, school_e school ) const override;
+  double composite_player_target_pet_damage_multiplier( player_t *target, bool guardian ) const override;
 
   // Other
   bool wowv_l( wowv_t value ) const;

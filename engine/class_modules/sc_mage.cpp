@@ -1758,6 +1758,7 @@ struct mage_spell_t : public spell_t
     bool molten_chill_ignite = false;
     bool touch_of_the_magi = true;
     bool spellfire_sphere = false;
+    bool legacy_radiant_spark = false;  // BracketSim: this spell's hits stack Radiant Spark Vulnerability
 
     target_trigger_type_e hot_streak = TT_NONE;
   } triggers;
@@ -1853,6 +1854,19 @@ public:
 
     if ( !harmful )
       default_target = target = player;
+
+    // BracketSim legacy compatibility (11 Nov 2026, stack audit): the spells whose hits add a stack of Radiant Spark
+    // Vulnerability - the ones Shadowlands SimulationCraft marked triggers.radiant_spark (its direct-damage casts;
+    // dots, Ignite, Arcane Echo and other procs never stacked it).
+    if ( p()->legacy_covenant.radiant_spark->ok() )
+    {
+      static const std::array<std::string_view, 25> spark_triggers = {
+        "arcane_barrage", "arcane_blast", "arcane_explosion", "arcane_missiles_tick", "arcane_orb_bolt",
+        "blast_wave", "comet_storm_projectile", "cone_of_cold", "dragons_breath", "ebonbolt", "fireball",
+        "flamestrike", "flurry_bolt", "frostbolt", "frost_nova", "glacial_spike", "ice_lance", "ice_nova",
+        "fire_blast", "meteor_impact", "phoenix_flames_splash", "pyroblast", "ray_of_frost", "scorch", "supernova" };
+      triggers.legacy_radiant_spark = range::contains( spark_triggers, std::string_view( name_str ) );
+    }
   }
 
   void init_finished() override
@@ -2169,6 +2183,28 @@ public:
 
     if ( triggers.ignite )
       trigger_ignite( s );
+
+    // BracketSim legacy compatibility (11 Nov 2026, stack audit): Radiant Spark Vulnerability, as Shadowlands
+    // (mage_spell_t::assess_damage there). While the spark's damage ticks, each hit of a triggering spell adds a
+    // stack (10% each); the hit after the 4th spends them all, and no new stacks come until the spark ends. Before
+    // this, the spark's landing gave one stack that sat at 10% for 8 sec and never grew.
+    if ( triggers.legacy_radiant_spark )
+    {
+      dot_t* spark = s->target->find_dot( "radiant_spark", player );
+      if ( spark && spark->is_ticking() )
+      {
+        buff_t* vuln = get_td( s->target )->debuffs.legacy_radiant_spark_vulnerability;
+        if ( vuln->at_max_stacks() )
+        {
+          vuln->expire();
+          vuln->cooldown->start( spark->remains() );
+        }
+        else
+        {
+          vuln->trigger();
+        }
+      }
+    }
 
     if ( auto td = find_td( s->target ) )
     {
@@ -2917,9 +2953,21 @@ struct legacy_radiant_spark_t final : public arcane_mage_spell_t
   void impact( action_state_t* s ) override
   {
     arcane_mage_spell_t::impact( s );
-    // Effect 3 of the spark is what opens the vulnerability window; the stack
-    // cap, duration and per-stack amount all live on 307454.
-    p()->get_target_data( s->target )->debuffs.legacy_radiant_spark_vulnerability->trigger();
+    // 11 Nov 2026 (stack audit): the spark itself gives no stack - the mage's
+    // spells that hit while it ticks do (mage_spell_t::assess_damage). A new
+    // spark clears old stacks and lets them build again (Shadowlands rule).
+    if ( result_is_hit( s->result ) )
+    {
+      buff_t* vuln = p()->get_target_data( s->target )->debuffs.legacy_radiant_spark_vulnerability;
+      vuln->cooldown->reset( false );
+      vuln->expire();
+    }
+  }
+
+  void last_tick( dot_t* d ) override
+  {
+    arcane_mage_spell_t::last_tick( d );
+    p()->get_target_data( d->target )->debuffs.legacy_radiant_spark_vulnerability->expire();
   }
 
   void execute() override
@@ -6751,6 +6799,8 @@ mage_td_t::mage_td_t( player_t* target, mage_t* mage ) :
           // BracketSim legacy compatibility: Ire of the Ascended (conduit 40)
           // adds to what each stack of the vulnerability is worth.
           ->modify_default_value( mage->legacy_conduits.percent( 40 ) )
+          // A new stack does not restart the timer (Shadowlands: DISABLED).
+          ->set_refresh_behavior( buff_refresh_behavior::DISABLED )
           ->set_chance( mage->legacy_covenant.radiant_spark->ok() ? 1.0 : 0.0 );
 
   debuffs.controlled_destruction = make_buff( *this, "controlled_destruction", mage->find_spell( 453268 ) )
