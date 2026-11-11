@@ -11621,6 +11621,14 @@ void shaman_t::create_pets()
 
 std::unique_ptr<expr_t> shaman_t::create_expression( util::string_view name )
 {
+  // BracketSim legacy (11 Nov 2026): legacy_conduit.<id> as mage_t's - 1 when that Shadowlands conduit is socketed, so a
+  // rotation line changes only for a character wearing it (Chilled to the Core, 112).
+  {
+    auto splits = util::string_split<util::string_view>( name, "." );
+    if ( splits.size() == 2 && util::str_compare_ci( splits[ 0 ], "legacy_conduit" ) )
+      return expr_t::create_constant( name, legacy_conduits.has( util::to_unsigned( splits[ 1 ] ) ) ? 1.0 : 0.0 );
+  }
+
   if ( util::str_compare_ci( name, "rolling_thunder.next_tick" ) )
   {
     return make_fn_expr( name, [ this ]() {

@@ -1576,6 +1576,18 @@ struct blackout_kick_t : overwhelming_force_t<charred_passions_t<teachings_of_th
     CAST_DURING( SPINNING_CRANE_KICK_IDS );
   }
 
+  // BracketSim legacy (11 Nov 2026): Elusive Footwork (278571) - "Blackout Strike deals an additional $s3 damage" (effect
+  // 3, a flat amount). Only its Elusive Brawler half was built; Battle for Azeroth SimulationCraft added value( 3 ) here.
+  double bonus_da( const action_state_t *s ) const override
+  {
+    double b = base_t::bonus_da( s );
+
+    if ( p()->legacy_azerite.elusive_footwork.ok() && p()->specialization() == MONK_BREWMASTER )
+      b += p()->legacy_azerite.elusive_footwork.value( 3 );
+
+    return b;
+  }
+
   void execute() override
   {
     base_t::execute();

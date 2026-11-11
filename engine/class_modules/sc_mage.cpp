@@ -8200,6 +8200,14 @@ double mage_t::composite_player_critical_damage_multiplier( const action_state_t
   if ( buffs.fevered_incantation->has_common_school( school ) )
     m *= 1.0 + buffs.fevered_incantation->check_stack_value();
 
+  // BracketSim legacy (11 Nov 2026): Fevered Incantation (333049) and Disciplinary Command (327371) are "Modify Crit
+  // Damage Done%" auras - critical strike damage, as their tooltips say. They sat in composite_player_multiplier and
+  // raised ALL damage (Disciplinary Command: +20% on every hit for 20 sec of every 30).
+  if ( buffs.legacy_fevered_incantation->has_common_school( school ) )
+    m *= 1.0 + buffs.legacy_fevered_incantation->check_stack_value();
+  if ( buffs.legacy_disciplinary_command->has_common_school( school ) )
+    m *= 1.0 + buffs.legacy_disciplinary_command->check_value();
+
   return m;
 }
 
@@ -8218,11 +8226,8 @@ double mage_t::composite_player_multiplier( school_e school ) const
     m *= 1.0 + buffs.legacy_infernal_cascade->check_stack_value();
   m *= 1.0 + buffs.legacy_siphoned_malice->check_stack_value();
 
-  // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
-  if ( buffs.legacy_fevered_incantation->has_common_school( school ) )
-    m *= 1.0 + buffs.legacy_fevered_incantation->check_stack_value();
-  if ( buffs.legacy_disciplinary_command->has_common_school( school ) )
-    m *= 1.0 + buffs.legacy_disciplinary_command->check_value();
+  // BracketSim legacy: Fevered Incantation and Disciplinary Command are critical strike damage - see
+  // composite_player_critical_damage_multiplier (11 Nov 2026).
 
   return m;
 }

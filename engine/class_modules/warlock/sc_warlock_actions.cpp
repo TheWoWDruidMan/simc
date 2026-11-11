@@ -847,6 +847,21 @@ using namespace helpers;
 
       p()->buffs.soulburn->expire();
     }
+
+    // BracketSim legacy (11 Nov 2026): Inevitable Demise - the stacks Agony banks were never spent. "Increases the damage
+    // of your next Drain Life": each tick gets the stacks' value and the channel's end clears them, as Battle for Azeroth
+    // SimulationCraft did (drain_life_t::bonus_ta / last_tick).
+    double bonus_ta( const action_state_t* s ) const override
+    {
+      return warlock_spell_t::bonus_ta( s ) + p()->buffs.inevitable_demise->check_stack_value();
+    }
+
+    void last_tick( dot_t* d ) override
+    {
+      warlock_spell_t::last_tick( d );
+
+      p()->buffs.inevitable_demise->expire();
+    }
   };
 
   // BracketSim legacy compatibility: Shadowlands covenant abilities ========

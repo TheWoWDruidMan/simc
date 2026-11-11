@@ -11245,6 +11245,11 @@ std::unique_ptr<expr_t> rogue_t::create_expression( util::string_view name_str )
 {
   auto split = util::string_split<util::string_view>( name_str, "." );
 
+  // BracketSim legacy (11 Nov 2026): legacy_conduit.<id> as mage_t's - 1 when that Shadowlands conduit is socketed, so a
+  // rotation line changes only for a character wearing it (Well-Placed Steel, 238).
+  if ( split.size() == 2 && util::str_compare_ci( split[ 0 ], "legacy_conduit" ) )
+    return expr_t::create_constant( name_str, legacy_conduits.has( util::to_unsigned( split[ 1 ] ) ) ? 1.0 : 0.0 );
+
   if ( split[ 0 ] == "combo_points" )
   {
     if ( split.size() == 1 )
