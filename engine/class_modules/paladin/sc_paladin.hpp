@@ -328,6 +328,8 @@ public:
     buff_t* legacy_blessing_of_dawn;
     buff_t* legacy_relentless_inquisitor_rf;
     buff_t* legacy_vanguards_momentum;
+    // BracketSim legacy (12 Nov 2026): standing in Ashen Hallow (330382) - Hammer of Wrath usable, +100% damage.
+    buff_t* legacy_ashen_hallow = nullptr;
   } buffs;
 
   // Gains

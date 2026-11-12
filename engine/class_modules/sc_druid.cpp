@@ -700,7 +700,13 @@ struct druid_t final : public parse_player_effects_t
     action_t* legacy_lycaras_moonkin = nullptr;
     // BracketSim legacy compatibility (12 Nov 2026): Frenzyband's bleed (Frenzied Assault 340056).
     action_t* legacy_frenzied_assault = nullptr;
+    // BracketSim legacy compatibility (12 Nov 2026): Kindred Empowerment's Arcane damage (338411).
+    action_t* legacy_kindred_empowerment_damage = nullptr;
   } active;
+
+  // BracketSim legacy compatibility (12 Nov 2026): the two Kindred Empowerment pools of the virtual partner
+  // (0 = what the partner gives you, 1 = what you give the partner). Shadowlands' sim minimum of 1.
+  double legacy_ke_pool[ 2 ] = { 1.0, 1.0 };
 
   // Pets
   struct pets_t
@@ -892,6 +898,7 @@ struct druid_t final : public parse_player_effects_t
     buff_t* legacy_ravenous_frenzy;
     // BracketSim legacy compatibility: the ten second Kindred Spirits window.
     buff_t* legacy_kindred_empowerment;
+    buff_t* legacy_kindred_empowerment_pool[ 2 ] = { nullptr, nullptr };
     buff_t* legacy_kindred_affinity;
     // BracketSim legacy compatibility: Sinful Hysteria's lingering echo.
     buff_t* legacy_sinful_hysteria;
@@ -12401,6 +12408,13 @@ void druid_t::create_buffs()
           ->set_duration( 10_s )
           ->set_default_value( 0.0 )
           ->set_chance( legacy_covenant.kindred_spirits->ok() ? 1.0 : 0.0 );
+  // The pools' spending windows (Kindred Empowerment 327022, 10 s, refreshed by every addition as 9.2.7).
+  buff.legacy_kindred_empowerment_pool[ 0 ] = make_buff( this, "kindred_empowerment_received", find_spell( 327022 ) )
+                                                  ->set_refresh_behavior( buff_refresh_behavior::DURATION )
+                                                  ->set_cooldown( 0_ms );
+  buff.legacy_kindred_empowerment_pool[ 1 ] = make_buff( this, "kindred_empowerment_partner", find_spell( 327022 ) )
+                                                  ->set_refresh_behavior( buff_refresh_behavior::DURATION )
+                                                  ->set_cooldown( 0_ms );
 
   // BracketSim legacy compatibility: Sinful Hysteria. When the frenzy ends the
   // stacks live on for the 3s in spell 355315, and every stack gained while it
@@ -13420,6 +13434,54 @@ void druid_t::create_actions()
       ss->base_dd_max *= 0.6667;
     }
     active.legacy_streaking_stars = ss;
+  }
+
+  // BracketSim legacy compatibility (12 Nov 2026, the author "do all 7"): Kindred Spirits' bonded partner, as Shadowlands
+  // 9.2.7 simulated it with no partner named - a partner with the SAME damage as you. While Kindred Empowerment's
+  // energize (327139, 10 s) is up, 20% of each hit goes into the partner's pool and the partner's identical 20% into
+  // yours; both shrink by the 9.2.7 defaults (pool multiplier 0.85 for Balance/Feral, 1.2 for Guardian/Restoration
+  // whose partner is a damage dealer; 15% absorbed). Each later hit spends 15% of itself (327022 effect 2) from a pool
+  // as Arcane damage (338411) until the pool is empty. Guardian/Restoration give no pool to the partner (9.2.7).
+  // The spent amount is already final damage, so the Arcane hit takes no further multipliers.
+  if ( legacy_covenant.kindred_spirits->ok() )
+  {
+    auto ke = new druid_spell_t( "kindred_empowerment", this, find_spell( 338411 ) );
+    ke->background = ke->dual = true;
+    ke->may_miss = ke->may_crit = ke->callbacks = false;
+    ke->snapshot_flags = ke->update_flags = 0;
+    active.legacy_kindred_empowerment_damage = ke;
+
+    const bool dps    = specialization() == DRUID_BALANCE || specialization() == DRUID_FERAL;
+    const double add  = find_spell( 327139 )->effectN( 1 ).percent() * ( dps ? 0.85 : 1.2 ) * ( 1.0 - 0.15 );
+    const double use  = find_spell( 327022 )->effectN( 2 ).percent();
+    assessor_out_damage.add( assessor::TARGET_DAMAGE + 1, [ this, dps, add, use ]( result_amount_type, action_state_t* s ) {
+      if ( !s->action->harmful || ( s->action->type != ACTION_SPELL && s->action->type != ACTION_ATTACK ) ||
+           s->result_amount <= 0 || s->action == active.legacy_kindred_empowerment_damage )
+        return assessor::CONTINUE;
+      // 9.2.7 order: your hit fills the partner's pool and spends yours, then the partner's identical hit fills
+      // yours and spends the partner's.
+      for ( int i : { 1, 0 } )
+      {
+        buff_t* b = buff.legacy_kindred_empowerment_pool[ i ];
+        if ( ( i == 0 || dps ) && buff.legacy_kindred_empowerment->check() )
+        {
+          if ( !b->check() )
+            legacy_ke_pool[ i ] = 1.0;
+          b->trigger();
+          legacy_ke_pool[ i ] += s->result_amount * add;
+        }
+        buff_t* u = buff.legacy_kindred_empowerment_pool[ 1 - i ];
+        double& up = legacy_ke_pool[ 1 - i ];
+        if ( ( 1 - i == 1 && !dps ) || !u->check() || up <= 1.0 )
+          continue;
+        double amount = std::min( s->result_amount * use, up - 1.0 );
+        if ( amount <= 0 )
+          continue;
+        up -= amount;
+        active.legacy_kindred_empowerment_damage->execute_on_target( s->target, amount );
+      }
+      return assessor::CONTINUE;
+    } );
   }
 
   if ( shadowlands_legacy.frenzyband )

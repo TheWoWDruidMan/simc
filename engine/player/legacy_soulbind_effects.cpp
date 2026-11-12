@@ -56,6 +56,75 @@ const class_values_t CLASS_VALUES[] = {
 // enemy capped at CD/3.
 }  // namespace
 
+/*
+ * KEVIN'S OOZELING FOR EVERY CLASS (12 Nov 2026, the author "do all 7"). Shadowlands' sim gave every class the same pet
+ * (soulbinds.cpp kevins_oozeling): summoned by the Necrolord class ability for the trait's class duration, extended by
+ * the next cast while it lives, casting Kevin's Wrath at its owner's target; each hit makes the target take more damage
+ * from the owner. Here the priest module keeps its own pet; every other class gets this one, with the priest's
+ * numbers - measured from a live log because the spells (352520, 352528) are gone from current data: 0.1196 x power
+ * per hit, one cast every 1.62 s, +6% for 8 s refreshed per hit. "Power" is spell power for an Intellect class and
+ * attack power for a Strength/Agility one (Shadowlands gave the pet both: sp_from_sp, ap_from_ap) - an inference, not
+ * a measurement: no non-priest log exists.
+ */
+struct legacy_kevins_oozeling_pet_t final : public pet_t
+{
+  struct kevins_wrath_t final : public spell_t
+  {
+    kevins_wrath_t( pet_t* p, util::string_view options ) : spell_t( "kevins_wrath", p, spell_data_t::nil() )
+    {
+      parse_options( options );
+      may_crit               = true;
+      school                 = SCHOOL_NATURE;
+      spell_power_mod.direct = 0.1196;
+      base_execute_time      = 1.62_s;
+      cooldown->duration     = timespan_t::zero();
+    }
+
+    // The measured cadence is already hasted.
+    timespan_t execute_time() const override { return base_execute_time; }
+
+    void impact( action_state_t* s ) override
+    {
+      spell_t::impact( s );
+      auto o = debug_cast<pet_t*>( player )->owner;
+      if ( o->legacy_soulbinds.kevins_wrath )
+      {
+        o->legacy_soulbinds.kevins_wrath_target = s->target;
+        o->legacy_soulbinds.kevins_wrath->trigger();
+      }
+    }
+  };
+
+  legacy_kevins_oozeling_pet_t( player_t* owner ) : pet_t( owner->sim, owner, "kevins_oozeling", true, false )
+  {
+    npc_id = 178601;
+    if ( owner->convert_hybrid_stat( STAT_STR_AGI_INT ) == STAT_INTELLECT )
+      owner_coeff.sp_from_sp = 1.0;
+    else
+      owner_coeff.sp_from_ap = 1.0;
+  }
+
+  void init_action_list() override
+  {
+    action_list_str = "kevins_wrath";
+    pet_t::init_action_list();
+  }
+
+  action_t* create_action( util::string_view name, util::string_view options ) override
+  {
+    if ( name == "kevins_wrath" )
+      return new kevins_wrath_t( this, options );
+    return pet_t::create_action( name, options );
+  }
+
+  void demise() override
+  {
+    pet_t::demise();
+    if ( owner->legacy_soulbinds.kevins_wrath )
+      owner->legacy_soulbinds.kevins_wrath->expire();
+  }
+};
+
 const class_values_t& class_values( const player_t* p )
 {
   switch ( p ? p->type : PLAYER_NONE )
@@ -358,6 +427,7 @@ stat_pct_buff_type primary_pct_buff_type( const player_t* p )
 
 void effects_t::create_buffs( player_t* p )
 {
+
   /*
    * NEWFOUND RESOLVE (7 Oct 2026, a player): "your Doubt will manifest ... Directly facing your Doubt will overcome it,
    * granting 10% Intellect and Stamina for 15 sec" - 10% of the PRIMARY stat (352917: Modify Total Stat% 10, $pri). Built
@@ -372,6 +442,13 @@ void effects_t::create_buffs( player_t* p )
   enabled = !chosen.empty();
   if ( !enabled )
     return;
+
+  if ( has( KEVINS_OOZELING ) && p && p->type != PRIEST && !p->is_pet() && !p->is_enemy() )
+  {
+    kevins_wrath = make_buff( p, "kevins_wrath" )->set_duration( 8_s )->set_default_value( 0.06 );
+    if ( !p->find_pet( "kevins_oozeling" ) )
+      kevins_oozeling = new legacy_kevins_oozeling_pet_t( p );
+  }
 
   if ( has( NEWFOUND_RESOLVE ) )
     newfound_doubt = p->get_shuffled_rng( "newfound_resolve", 1, 30 );
@@ -830,6 +907,15 @@ void effects_t::covenant_ability_cast( player_t* p, covenant_e cov, cooldown_t* 
     case COVENANT_NECROLORD:
       if ( has( LEAD_BY_EXAMPLE ) )
         lead_by_example->trigger();
+      // Kevin's Oozeling: summoned for the class duration, or extended by it while out (Shadowlands covenant_cb_pet_t).
+      if ( kevins_oozeling )
+      {
+        timespan_t d = timespan_t::from_seconds( class_values( p ).kevins_oozeling );
+        if ( kevins_oozeling->is_sleeping() )
+          kevins_oozeling->summon( d );
+        else
+          kevins_oozeling->adjust_duration( d );
+      }
       break;
 
     case COVENANT_NIGHT_FAE:
@@ -1043,6 +1129,9 @@ double effects_t::target_multiplier( const player_t* p, const player_t* t ) cons
   // from and the repeat cannot itself repeat.
   if ( has( MNEMONIC_EQUIPMENT ) && t->health_percentage() < 35.0 )
     m *= 1.03;
+
+  if ( kevins_wrath && kevins_wrath->check() && t == kevins_wrath_target )
+    m *= 1.0 + kevins_wrath->check_value();
 
   return m;
 }

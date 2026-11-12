@@ -1004,6 +1004,7 @@ public:
   // BracketSim legacy compatibility: Vision of Perfection.
   void vision_of_perfection_proc() override;
   action_t* legacy_vop_bladestorm = nullptr;  // BracketSim legacy: Vision of Perfection's Bladestorm (Arms)
+  action_t* legacy_signet_storm = nullptr;    // BracketSim legacy: Signet of Tormented Kings' short Bladestorm/Ravager
   void init_spells() override;
   void init_items() override;
   void init_base_stats() override;
@@ -3622,6 +3623,10 @@ struct bladestorm_t : public warrior_attack_t
     warrior_attack_t::execute();
 
     p()->buff.bladestorm->trigger();
+
+    // BracketSim legacy compatibility: Signet of Tormented Kings - casting Bladestorm rolls Avatar or Recklessness.
+    if ( !background )
+      p()->trigger_legacy_signet( warrior_t::signet_ability::AVATAR, warrior_t::signet_ability::RECKLESSNESS );
   }
 
   timespan_t composite_dot_duration( const action_state_t* s ) const override
@@ -6761,6 +6766,7 @@ struct ravager_t : public warrior_attack_t
   timespan_t duration;
   int num_ticks;
   action_t* legacy_unhinged_ms = nullptr;
+  bool legacy_signet_roll = false;  // only the Ravager the player casts rolls Signet (not Whirling Blade's or Signet's own)
   ravager_t( warrior_t* p, util::string_view options_str )
     : warrior_attack_t( "ravager", p, p->talents.shared.ravager ),
       ravager( new ravager_tick_t( p, "ravager_tick", p->spell.ravager->duration() ) ),
@@ -6768,6 +6774,7 @@ struct ravager_t : public warrior_attack_t
       num_ticks( 0 )
   {
     parse_options( options_str );
+    legacy_signet_roll = true;
     // BracketSim legacy (11 Nov 2026): Unhinged (335282) - "While Ravager is active, you automatically cast a total of
     // 1 Mortal Strike". Only the Bladestorm half was ported; Level 60 Arms takes Ravager.
     if ( p->shadowlands_legacy.unhinged && p->specialization() == WARRIOR_ARMS )
@@ -6849,6 +6856,10 @@ struct ravager_t : public warrior_attack_t
   void execute() override
   {
     warrior_attack_t::execute();
+
+    // BracketSim legacy compatibility: Signet of Tormented Kings - casting Ravager rolls Avatar or Recklessness.
+    if ( legacy_signet_roll && !background )
+      p()->trigger_legacy_signet( warrior_t::signet_ability::AVATAR, warrior_t::signet_ability::RECKLESSNESS );
 
     if ( sim->dbc->wowv() < wowv_t( 12, 1, 0 ) )
     {
@@ -10609,8 +10620,33 @@ void warrior_t::create_actions()
   }
 
   // BracketSim legacy compatibility: Signet of Tormented Kings.
+  // 12 Nov 2026 (the author: "fix the Signet of Tormented Kings"): the Bladestorm half is the genuine short one, as 9.2.7 -
+  // a background copy lasting 335266 effect 3 (4 sec), or Ravager for 335266 effect 4 (4 sec) when Ravager is taken
+  // ($?s152277). It used to reset the actor's own Bladestorm cooldown, a free full 6 sec one.
   if ( shadowlands_legacy.signet_of_tormented_kings )
-    cooldown.legacy_signet_of_tormented_kings->duration = find_spell( 335266 )->internal_cooldown();
+  {
+    const spell_data_t* signet = find_spell( 335266 );
+    cooldown.legacy_signet_of_tormented_kings->duration = signet->internal_cooldown();
+    if ( talents.shared.ravager.ok() )
+    {
+      auto rv = new ravager_t( "ravager_torment", this );
+      rv->background = true;
+      rv->cooldown   = get_cooldown( "ravager_torment" );
+      rv->cooldown->duration = 0_ms;
+      rv->duration = signet->effectN( 4 ).time_value();
+      rv->ravager->ravaged_debuff_duration = signet->effectN( 4 ).time_value();
+      legacy_signet_storm = rv;
+    }
+    else
+    {
+      auto bs = new bladestorm_t( this, "", "bladestorm_torment", find_spell( 227847 ) );
+      bs->background = true;
+      bs->cooldown   = get_cooldown( "bladestorm_torment" );
+      bs->cooldown->duration = 0_ms;
+      bs->dot_duration = signet->effectN( 3 ).time_value();
+      legacy_signet_storm = bs;
+    }
+  }
 
   parse_player_effects_t::create_actions();
 }
@@ -10908,8 +10944,12 @@ void warrior_t::trigger_legacy_signet( signet_ability first, signet_ability seco
       buff.recklessness->extend_duration_or_trigger( signet->effectN( 1 ).time_value() );
       break;
     case signet_ability::BLADESTORM:
-      if ( action_t* storm = find_action( "bladestorm" ) )
-        storm->cooldown->reset( false );
+      // A Bladestorm already spinning is not stacked on (same rule as Vision of Perfection's copy).
+      if ( legacy_signet_storm && ( talents.shared.ravager.ok() || !buff.bladestorm->check() ) )
+      {
+        legacy_signet_storm->set_target( target );
+        legacy_signet_storm->execute();
+      }
       break;
   }
 }

@@ -395,6 +395,8 @@ public:
     buff_t* paradise_lost;
     buff_t* perforate;
     buff_t* legacy_scent_of_blood;
+    // BracketSim legacy (12 Nov 2026): Sepsis's free use of a stealth ability (347037, 5 s).
+    buff_t* legacy_sepsis_stealth = nullptr;
     buff_t* snake_eyes;
     buff_t* legacy_the_first_dance;
     buff_t* legacy_double_dose;
@@ -2432,6 +2434,12 @@ public:
     if ( affected_by.blindside && p()->buffs.blindside->check() )
       return false;
 
+    // BracketSim legacy (12 Nov 2026): Sepsis's buff (347037 effect 1, Modify Stance Mask) lets Ambush, Shadowstrike
+    // and Cheap Shot be used out of stealth - as Shadowlands' requires_stealth(). It is NOT stealth for anything else.
+    if ( _requires_stealth && p()->buffs.legacy_sepsis_stealth && p()->buffs.legacy_sepsis_stealth->check() &&
+         ab::data().affected_by( p()->buffs.legacy_sepsis_stealth->data().effectN( 1 ) ) )
+      return false;
+
     return _requires_stealth;
   }
 
@@ -2973,6 +2981,12 @@ public:
 
   void execute() override
   {
+    // BracketSim legacy (12 Nov 2026): a use spends Sepsis's buff unless real stealth already allowed it (9.2.7).
+    if ( _requires_stealth && p()->buffs.legacy_sepsis_stealth && p()->buffs.legacy_sepsis_stealth->check() &&
+         ab::data().affected_by( p()->buffs.legacy_sepsis_stealth->data().effectN( 1 ) ) &&
+         !p()->stealthed( STEALTH_STANCE ) )
+      p()->buffs.legacy_sepsis_stealth->decrement();
+
     ab::execute();
 
     if ( ab::hit_any_target )
@@ -7510,8 +7524,9 @@ struct legacy_sepsis_t : public rogue_attack_t
   void last_tick( dot_t* d ) override
   {
     rogue_attack_t::last_tick( d );
-    // The free stealth ability the dot's expiry granted is not modelled.
     burst->execute_on_target( d->target );
+    // BracketSim legacy (12 Nov 2026, the author "do all 7"): the dot ran its full duration - one free stealth ability.
+    p()->buffs.legacy_sepsis_stealth->trigger();
 
     // BracketSim legacy compatibility: Toxic Onslaught (7478), the other two specs' cooldowns for 10 sec.
     if ( p()->legendary.toxic_onslaught )
@@ -12733,6 +12748,10 @@ void rogue_t::create_buffs()
   buffs.perforate                = make_buff( this, "perforate", find_spell( 277720 ) )
     ->set_trigger_spell( azerite.perforate.spell_ref().effectN( 1 ).trigger() )
     ->set_default_value( azerite.perforate.value() );
+  // "you gain $s6 use of any Stealth ability for $347037d" (328305 effect 6 = 1).
+  buffs.legacy_sepsis_stealth = make_buff( this, "sepsis_buff", find_spell( 347037 ) )
+                                    ->set_cooldown( 0_ms )
+                                    ->set_initial_stack( std::max( 1, as<int>( find_spell( 328305 )->effectN( 6 ).base_value() ) ) );
   buffs.legacy_scent_of_blood    = make_buff<stat_buff_t>( this, "legacy_scent_of_blood", find_spell( 277731 ) )
     ->add_stat( STAT_AGILITY, azerite.scent_of_blood.value() )
     ->set_duration( timespan_t::zero() ); // Infinite aura

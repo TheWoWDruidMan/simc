@@ -573,9 +573,14 @@ struct light_of_dawn_t : public holy_power_consumer_t<paladin_heal_t>
 struct avenging_crusader_t : public paladin_spell_t
 {
   avenging_crusader_t( paladin_t* p, util::string_view options_str )
-    : paladin_spell_t( "avenging_crusader", p, p->talents.avenging_crusader )
+    // BracketSim (12 Nov 2026): the talent (394088) is a hidden passive with no duration or cooldown, so the
+    // action re-cast every 0 s and the sim reported "Simulation stuck". The castable spell is 216331
+    // (15 s, 60 s cooldown); the talent still gates it.
+    : paladin_spell_t( "avenging_crusader", p,
+                       p->talents.avenging_crusader->ok() ? p->find_spell( 216331 ) : spell_data_t::not_found() )
   {
     parse_options( options_str );
+    harmful = false;
   }
 
   void execute() override
@@ -583,6 +588,9 @@ struct avenging_crusader_t : public paladin_spell_t
     paladin_spell_t::execute();
 
     p()->buffs.avenging_crusader->trigger();
+    // 216331 effect 7 (Ignore Aura State) lets Hammer of Wrath be cast during Avenging Crusader.
+    if ( p()->talents.hammer_of_wrath->ok() )
+      p()->buffs.hammer_of_wrath->trigger();
   }
 };
 
@@ -635,7 +643,14 @@ void paladin_t::create_buffs_holy()
                                 ->set_cooldown( 0_ms );  // Handled by the action
   buffs.infusion_of_light = make_buff( this, "infusion_of_light", find_spell( 54149 ) );
   buffs.avenging_crusader =
-      make_buff( this, "avenging_crusader", talents.avenging_crusader )->set_default_value_from_effect( 1 );
+      make_buff( this, "avenging_crusader", talents.avenging_crusader->ok() ? find_spell( 216331 ) : talents.avenging_crusader )
+          ->set_default_value_from_effect( 1 )
+          ->set_cooldown( 0_ms )  // the action owns the cooldown
+          ->set_expire_callback( [ this ]( buff_t*, double, timespan_t ) {
+            if ( !buffs.avenging_wrath->check() &&
+                 !( buffs.legacy_ashen_hallow && buffs.legacy_ashen_hallow->check() ) )
+              buffs.hammer_of_wrath->expire();
+          } );
 }
 
 void paladin_t::init_spells_holy()

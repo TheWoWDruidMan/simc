@@ -6838,8 +6838,8 @@ struct raptor_strike_base_t : public melee_focus_spender_t
     // hung this off Raptor Strike and Mongoose Bite's impact; Midnight folded
     // Mongoose Bite into Raptor Strike, which is where mongoose_fury is
     // triggered from too.
-    if ( p()->legacy_conduits.has( 252 ) )
-      p()->buffs.legacy_flame_infusion->trigger();
+    // 12 Nov 2026 (the author "do all 7", genuine spells only): Flame Infusion is charged by Carve and Butchery, neither of
+    // which Midnight Survival can learn - the Raptor Strike stand-in is gone, so it does nothing in Midnight.
 
     // Legacy Azerite: Primeval Intuition, also a Mongoose Bite effect in Battle
     // for Azeroth.
@@ -10166,9 +10166,11 @@ void hunter_t::init_finished()
   if ( shadowlands_legacy.call_of_the_wild )
   {
     double pct = find_spell( 336742 )->effectN( 1 ).percent();
-    for ( auto cd : { cooldowns.trueshot, cooldowns.bestial_wrath } )
-      if ( cd )
-        cd->duration *= 1.0 + pct;
+    // 12 Nov 2026 (the author "do all 7", genuine spells only): the tooltip names the Aspects, Trueshot (MM) and
+    // Coordinated Assault (SV) - Bestial Wrath was a stand-in for Beast Mastery's removed Aspect of the Wild and is
+    // gone. Beast Mastery's remaining Aspects (Cheetah, Turtle) deal no damage, so on Beast Mastery it does nothing.
+    if ( cooldowns.trueshot )
+      cooldowns.trueshot->duration *= 1.0 + pct;
     // Survival's Coordinated Assault, named in the same tooltip (23 Oct 2026: it was left out).
     if ( auto ca = find_action( "coordinated_assault" ) )
       ca->cooldown->duration *= 1.0 + pct;

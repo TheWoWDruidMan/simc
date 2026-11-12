@@ -1835,7 +1835,9 @@ hammer_of_wrath_t::hammer_of_wrath_t( paladin_t* p, util::string_view name, util
     echo->triggers_divine_resonance = false;
     echo->base_multiplier *= p->talents.herald_of_the_sun.second_sunrise->effectN( 2 ).percent();
   }
-  if ( p->specialization() == PALADIN_PROTECTION )
+  // BracketSim (12 Nov 2026): Holy's Hammer of Wrath (1241413) sits on the same
+  // charge category as Holy's Judgment (275773, category 1663), like Prot's.
+  if ( p->specialization() == PALADIN_PROTECTION || p->specialization() == PALADIN_HOLY )
   {
     if ( p->cooldowns.judgment == nullptr )
       p->cooldowns.judgment = cooldown;
@@ -1864,6 +1866,9 @@ void hammer_of_wrath_t::execute()
     timespan_t ext = timespan_t::from_seconds( p()->find_spell( 337594 )->effectN( 1 ).base_value() );
     if ( p()->buffs.avenging_wrath->check() )
       p()->buffs.avenging_wrath->extend_duration( ext );
+    // Tooltip: "extends the duration of ...[Avenging Crusader]..." when 216331 is known (Holy).
+    if ( p()->buffs.avenging_crusader && p()->buffs.avenging_crusader->check() )
+      p()->buffs.avenging_crusader->extend_duration( ext );
   }
 
   p()->buffs.legacy_vanguards_momentum->trigger();
@@ -1930,6 +1935,9 @@ double hammer_of_wrath_t::composite_target_multiplier( player_t* target ) const
   double min = 20.0;
   ctm *= 1.0 + p()->talents.vengeful_wrath->effectN( 1 ).percent() *
                    ( 1.0 - ( std::max( target->health_percentage() - min, 0.0 ) / ( 100.0 - min ) ) );
+  // BracketSim legacy (12 Nov 2026): Ashen Hallow 330382 effect 2, +100% Hammer of Wrath damage inside the hallow.
+  if ( p()->buffs.legacy_ashen_hallow && p()->buffs.legacy_ashen_hallow->check() )
+    ctm *= 1.0 + p()->buffs.legacy_ashen_hallow->data().effectN( 2 ).percent();
   return ctm;
 }
 
@@ -2046,8 +2054,14 @@ struct legacy_ashen_hallow_t : public paladin_spell_t
     if ( p()->shadowlands_legacy.radiant_embers )
       duration *= 1.0 + p()->find_spell( 355447 )->effectN( 1 ).percent();
 
-    // The healing half of the hallow, and the Hammer of Wrath it enabled inside
-    // its radius, are not modelled.
+    // BracketSim legacy (12 Nov 2026, the author "do all 7"): standing in the hallow (330382, still in current data):
+    // Hammer of Wrath may be cast (effect 1, Ignore Aura State) and deals 100% more (effect 2) for the whole
+    // hallow - Radiant Embers' longer one included. A Patchwerk fight stands in it throughout, as 9.2.7's
+    // standing_in_hallow(). The healing half is still not modelled.
+    p()->buffs.legacy_ashen_hallow->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, duration );
+    if ( p()->talents.hammer_of_wrath->ok() )
+      p()->buffs.hammer_of_wrath->trigger();
+
     make_event<ground_aoe_event_t>(
         *sim, p(),
         ground_aoe_params_t()
@@ -3872,6 +3886,12 @@ action_t* paladin_t::create_action( util::string_view name, util::string_view op
       return new hammer_of_wrath_t( this, "hammer_of_wrath", options_str, find_spell( 1241413 ) );
     else if ( specialization() == PALADIN_RETRIBUTION )
       return new hammer_of_wrath_t( this, "hammer_of_wrath", options_str, find_spell( 24275 ) );
+    // BracketSim (12 Nov 2026): Holy learns the class talent Hammer of Wrath too; it uses Prot's version
+    // (1241413, Judgment's charge category, which the Holy Paladin aura 137029 modifies). Without this a
+    // Holy hammer_of_wrath line made no action at all. Built without the talent too (it is then never ready: the
+    // override buff only comes with the talent), so a damage list carrying the line never fails to start.
+    else if ( specialization() == PALADIN_HOLY )
+      return new hammer_of_wrath_t( this, "hammer_of_wrath", options_str, find_spell( 1241413 ) );
   }
   if ( name == "judgment" )
   {
@@ -4164,10 +4184,25 @@ void paladin_t::create_buffs()
                              ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
                              ->add_invalidate( CACHE_CRIT_CHANCE )
                              ->add_invalidate( CACHE_MASTERY )
+                             // BracketSim (12 Nov 2026): the action owns the cooldown. The buff copied the
+                             // spell's 60 s, so anything that shortens the button's cooldown (Blessing of
+                             // Autumn: cast at 58.6 s) cast Avenging Wrath and the buff refused to apply.
+                             ->set_cooldown( 0_ms )
                              ->set_expire_callback( [ this ]( buff_t*, double, timespan_t ) {
-                               buffs.hammer_of_wrath->expire();
+                               // Hammer of Wrath stays castable while Ashen Hallow or Avenging Crusader lasts.
+                               if ( !( buffs.legacy_ashen_hallow && buffs.legacy_ashen_hallow->check() ) &&
+                                    !( buffs.avenging_crusader && buffs.avenging_crusader->check() ) )
+                                 buffs.hammer_of_wrath->expire();
                                buffs.herald_of_the_sun.born_in_sunlight->expire();
                              } );
+
+  buffs.legacy_ashen_hallow = make_buff( this, "ashen_hallow_hammer", find_spell( 330382 ) )
+                                  ->set_cooldown( 0_ms )
+                                  ->set_chance( legacy_covenant.ashen_hallow->ok() ? 1.0 : 0.0 )
+                                  ->set_expire_callback( [ this ]( buff_t*, double, timespan_t ) {
+                                    if ( !wings_up() && !( buffs.avenging_crusader && buffs.avenging_crusader->check() ) )
+                                      buffs.hammer_of_wrath->expire();
+                                  } );
 
   if ( talents.crusade->ok() )
   {

@@ -38,6 +38,7 @@
 
 struct player_t;
 struct buff_t;
+struct pet_t;
 struct cooldown_t;
 struct action_t;
 struct shuffled_rng_t;
@@ -263,6 +264,10 @@ struct effects_t
 
   // Volatile Solvent's Humanoid benefit, triggered by casting Fleshcraft.
   buff_t* volatile_solvent_humanoid = nullptr;
+  // Kevin's Oozeling for every class but priest (the priest module has its own pet), 12 Nov 2026.
+  pet_t* kevins_oozeling          = nullptr;
+  buff_t* kevins_wrath            = nullptr;   // "+6% damage taken from you" on Kevin's target
+  const player_t* kevins_wrath_target = nullptr;
   buff_t* newfound_resolve      = nullptr;
   action_t* spiked_burrs        = nullptr;
   shuffled_rng_t* newfound_doubt = nullptr;   // built at init, as class modules do (a mid-fight build crashed)
