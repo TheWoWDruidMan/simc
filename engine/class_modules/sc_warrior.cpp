@@ -246,6 +246,8 @@ public:
     buff_t* legacy_ashen_juggernaut;
     // BracketSim legacy compatibility: Will of the Berserker.
     buff_t* legacy_will_of_the_berserker;
+    // BracketSim legacy compatibility (12 Nov 2026): Elysian Might (7730), +25% critical damage (311193).
+    buff_t* legacy_elysian_might = nullptr;
     buff_t* battle_stance;
     buff_t* battle_shout_highlight;
     buff_t* battlelord;
@@ -1038,6 +1040,7 @@ public:
   };
   void trigger_legacy_signet( signet_ability first, signet_ability second );
   double composite_melee_crit_chance() const override;
+  double composite_player_critical_damage_multiplier( const action_state_t*, school_e ) const override;
   double composite_leech() const override;
   block_result_e target_block_resolution( const action_state_t* ) const override;
   double resource_gain( resource_e, double, gain_t* = nullptr, action_t* = nullptr ) override;
@@ -1213,6 +1216,9 @@ public:
       parse_effects( p()->buff.martial_prowess );
       parse_effects( p()->buff.master_of_warfare );
       parse_effects( p()->buff.battlelord );
+      // BracketSim legacy (12 Nov 2026): the Battlelord legendary's "reduce the Rage cost of your next Mortal Strike by
+      // 15" (346369 effect 1) - the buff was triggered and never read.
+      parse_effects( p()->buff.legacy_battlelord, CONSUME_BUFF );
 
       if ( p()->sets->has_set_bonus( WARRIOR_ARMS, MID2, B4 ) )
         parse_effects( p()->buff.winding_up );
@@ -5315,6 +5321,9 @@ struct legacy_spear_of_bastion_t : public warrior_attack_t
   void execute() override
   {
     warrior_attack_t::execute();
+
+    if ( p()->buff.legacy_elysian_might )
+      p()->buff.legacy_elysian_might->trigger();
 
     // BracketSim legacy compatibility: the soulbind traits that ride this
     // covenant ability. The shared player_t layer owns them because they are
@@ -9757,6 +9766,12 @@ void warrior_t::create_buffs()
   // than from the conduit spell - that spell is not in this build's data - so
   // the duration is taken from the banner itself, which is where Shadowlands
   // took it from too rather than from the conduit.
+  // BracketSim legacy compatibility (12 Nov 2026): Elysian Might's crit buff, up for 311193's 8 s from the spear's
+  // cast - the spear lasts 4 + 4 s with the legendary, and a Patchwerk fight stands in it throughout.
+  if ( shadowlands_legacy.elysian_might && legacy_covenant.spear_of_bastion->ok() )
+    buff.legacy_elysian_might = make_buff( this, "elysian_might", find_spell( 311193 ) )
+                                    ->set_default_value( find_spell( 311193 )->effectN( 1 ).percent() );
+
   buff.legacy_veterans_repute =
       make_buff( this, "legacy_veterans_repute" )
           ->set_default_value( legacy_conduits.percent( 158 ) )
@@ -10942,6 +10957,20 @@ double warrior_t::composite_melee_crit_chance() const
   c += buff.legacy_will_of_the_berserker->check_value();
 
   return c;
+}
+
+// warrior_t::composite_player_critical_damage_multiplier ===================
+
+double warrior_t::composite_player_critical_damage_multiplier( const action_state_t* s, school_e school ) const
+{
+  double m = parse_player_effects_t::composite_player_critical_damage_multiplier( s, school );
+
+  // BracketSim legacy compatibility (12 Nov 2026): Elysian Might - "While you remain within Spear of Bastion's area
+  // your critical strike damage is increased by 25%" (311193 effect 1). Shadowlands 9.2.7 did the same here.
+  if ( buff.legacy_elysian_might )
+    m *= 1.0 + buff.legacy_elysian_might->check_value();
+
+  return m;
 }
 
 // warrior_t::composite_leech ==============================================

@@ -4042,6 +4042,19 @@ struct disrupt_t : public demon_hunter_spell_t
   }
 };
 
+// BracketSim legacy compatibility: Agony Gaze (runeforge 7681 / Unity), its second half. Shadowlands 9.2.7
+// (sc_demon_hunter.cpp trigger_agony_gaze): every hit of Eye Beam (Havoc) or Fel Devastation / Collective Anguish
+// (Vengeance) lengthens a ticking Sinful Brand on that target by effect 2 of 355886 (750 ms). The port had only
+// effect 1 (+10% Sinful Brand damage).
+static void legacy_agony_gaze_extend( demon_hunter_t* p, action_state_t* s )
+{
+  if ( !p->shadowlands_legacy.agony_gaze || !s->action->result_is_hit( s->result ) )
+    return;
+  dot_t* d = s->target->find_dot( "sinful_brand", p );
+  if ( d && d->is_ticking() )
+    d->adjust_duration( timespan_t::from_millis( p->find_spell( 355886 )->effectN( 2 ).base_value() ) );
+}
+
 // Eye Beam =================================================================
 
 struct eye_beam_base_t : public student_of_suffering_trigger_t<final_breath_trigger_t<demon_hunter_spell_t>>
@@ -4090,6 +4103,12 @@ struct eye_beam_base_t : public student_of_suffering_trigger_t<final_breath_trig
       b += dh()->azerite.eyes_of_rage.value( 2 );
 
       return b;
+    }
+
+    void impact( action_state_t* s ) override
+    {
+      demon_hunter_spell_t::impact( s );
+      legacy_agony_gaze_extend( dh(), s );
     }
 
     timespan_t execute_time() const override
@@ -4283,6 +4302,12 @@ struct fel_devastation_t : public final_breath_trigger_t<demon_hunter_spell_t>
     {
       background = dual = true;
       aoe               = -1;
+    }
+
+    void impact( action_state_t* s ) override
+    {
+      demon_hunter_spell_t::impact( s );
+      legacy_agony_gaze_extend( dh(), s );
     }
 
     double composite_da_multiplier( const action_state_t* s ) const override
@@ -4737,6 +4762,12 @@ struct collective_anguish_t : public demon_hunter_spell_t
       dual = true;
       aoe  = -1;
     }
+
+    void impact( action_state_t* s ) override
+    {
+      demon_hunter_spell_t::impact( s );
+      legacy_agony_gaze_extend( dh(), s );
+    }
   };
 
   collective_anguish_t( util::string_view name, demon_hunter_t* p )
@@ -4771,6 +4802,12 @@ struct legacy_collective_anguish_vengeance_t : public demon_hunter_spell_t
     {
       dual = true;
       aoe  = -1;
+    }
+
+    void impact( action_state_t* s ) override
+    {
+      demon_hunter_spell_t::impact( s );
+      legacy_agony_gaze_extend( dh(), s );
     }
 
     double composite_crit_chance() const override

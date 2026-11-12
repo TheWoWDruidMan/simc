@@ -651,6 +651,11 @@ public:
     buff_t *legacy_invokers_delight;
     // BracketSim legacy compatibility: Shadowlands covenant abilities.
     buff_t *legacy_weapons_of_order;
+    // BracketSim legacy compatibility (12 Nov 2026): Bone Marrow Hops' cooldown cuts left for this Bonedust Brew
+    // (Shadowlands bonedust_brew_hidden: 5 per cast or Bountiful Brew proc, 10 s, reverse).
+    buff_t *legacy_bone_marrow_hops = nullptr;
+    // BracketSim legacy compatibility (12 Nov 2026): Xuen's Battlegear's Pressure Point (337482).
+    buff_t *legacy_xuens_pressure_point = nullptr;
   } buff;
 
   // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. Named

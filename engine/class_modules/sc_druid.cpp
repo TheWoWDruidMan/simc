@@ -698,6 +698,8 @@ struct druid_t final : public parse_player_effects_t
     // BracketSim legacy compatibility: Lycara's Fleeting Glimpse (7110).
     action_t* legacy_lycaras_cat = nullptr;
     action_t* legacy_lycaras_moonkin = nullptr;
+    // BracketSim legacy compatibility (12 Nov 2026): Frenzyband's bleed (Frenzied Assault 340056).
+    action_t* legacy_frenzied_assault = nullptr;
   } active;
 
   // Pets
@@ -4153,6 +4155,18 @@ public:
       trigger_unseen_attack( as<int>( p()->resources.max[ RESOURCE_COMBO_POINT ] ), 1.0 );
   }
 
+  // BracketSim legacy compatibility (12 Nov 2026): Frenzyband's second half - during Berserk / Incarnation each combo
+  // point builder also bleeds the target for 150% of its damage over 8 s, added to any bleed already rolling
+  // (340053 effect 2; tooltip on Wowhead).
+  void impact( action_state_t* s ) override
+  {
+    base_t::impact( s );
+
+    if ( p()->active.legacy_frenzied_assault && !proc && s->result_amount > 0 && p()->buff.b_inc_cat->check() )
+      residual_action::trigger( p()->active.legacy_frenzied_assault, s->target,
+                                s->result_amount * dbc::find_spell( p(), 340053U )->effectN( 2 ).percent() );
+  }
+
   double gain_energize_resource( resource_e rt, double a, gain_t* g ) override
   {
     auto ret = base_t::gain_energize_resource( rt, a, g );
@@ -4663,7 +4677,8 @@ struct ferocious_bite_base_t : public cp_spender_t
   {
     add_option( opt_bool( "max_energy", max_energy ) );
 
-    if ( p->talent.apex_predators_craving.ok() )
+    // BracketSim legacy (12 Nov 2026): the Apex Predator's Craving legendary (7091) uses the talent's free bite.
+    if ( p->talent.apex_predators_craving.ok() || p->shadowlands_legacy.apex_predators_craving )
     {
       auto apex_name = name_str + "_apex";
 
@@ -5240,7 +5255,7 @@ struct rip_t final : public trigger_thriving_growth_t<use_dot_list_t<cp_spender_
     if ( p()->shadowlands_legacy.apex_predators_craving &&
          rng().roll( p()->find_spell( 339139 )->effectN( 1 ).percent() ) )
     {
-      p()->buff.legacy_apex_predators_craving->trigger();
+      p()->buff.apex_predators_craving->trigger();
     }
 
     // BracketSim legacy compatibility: the conduit Incessant Hunter (266).
@@ -7563,18 +7578,26 @@ public:
 
     p()->buff.legacy_timeworn_dreambinder->trigger();
 
-    // BracketSim legacy compatibility: Oneth's Clear Vision. Each Astral Power
-    // spender has a chance to make the other one free.
+    druid_spell_t::execute();
+
+    // BracketSim legacy compatibility: Oneth's Clear Vision - "Starsurge has a 20% chance to make Starfall free.
+    // Starfall has a 40% chance to make Starsurge free." 12 Nov 2026: rolled AFTER this cast paid (it rolled before, so
+    // the proc made its own cast free) and only for the other spell, as Shadowlands 9.2.7. A spell the Clear Vision
+    // buff (339797) makes free is Starsurge; one Perception (339800) makes free is Starfall.
     if ( p()->shadowlands_legacy.oneths_clear_vision && pays )
     {
       const spell_data_t* oneth = p()->find_spell( 338661 );
-      if ( rng().roll( oneth->effectN( 1 ).percent() ) )
-        p()->buff.legacy_oneths_perception->trigger();
-      if ( rng().roll( oneth->effectN( 2 ).percent() ) )
-        p()->buff.legacy_oneths_clear_vision->trigger();
+      if ( data().affected_by( p()->buff.legacy_oneths_clear_vision->data().effectN( 1 ) ) )
+      {
+        if ( rng().roll( oneth->effectN( 1 ).percent() ) )
+          p()->buff.legacy_oneths_perception->trigger();
+      }
+      else if ( data().affected_by( p()->buff.legacy_oneths_perception->data().effectN( 1 ) ) )
+      {
+        if ( rng().roll( oneth->effectN( 2 ).percent() ) )
+          p()->buff.legacy_oneths_clear_vision->trigger();
+      }
     }
-
-    druid_spell_t::execute();
 
     p()->buff.starlord->trigger( this );
 
@@ -12508,8 +12531,14 @@ void druid_t::create_buffs()
       ->set_default_value( 0 );  // value used to indicate if the proc happened during eclipse (1) or not (0)
 
   // Feral buffs
-  buff.apex_predators_craving = make_fallback( talent.apex_predators_craving.ok(),
-    this, "apex_predators_craving", find_trigger( talent.apex_predators_craving ).trigger() );
+  // BracketSim legacy (12 Nov 2026): the Apex Predator's Craving legendary (7091) shares the talent's buff - 339140 and
+  // 391882 carry the same effects (cost -100%, max cost -4: a free bite at full Combo Points and full Energy bonus, as
+  // the tooltip says). Before this the legendary had its own buff that Ferocious Bite spent without making it free or
+  // maximum damage, and the list never pressed Ferocious Bite for it.
+  buff.apex_predators_craving = make_fallback(
+      talent.apex_predators_craving.ok() || shadowlands_legacy.apex_predators_craving, this, "apex_predators_craving",
+      talent.apex_predators_craving.ok() ? find_trigger( talent.apex_predators_craving ).trigger()
+                                         : find_spell( 391882 ) );
 
   // BracketSim legacy (12 Nov 2026): Vision of Perfection procs Berserk (106951) even without the talent (GAME-RULES:
   // a proc still procs an ability the player does not have).
@@ -13391,6 +13420,14 @@ void druid_t::create_actions()
       ss->base_dd_max *= 0.6667;
     }
     active.legacy_streaking_stars = ss;
+  }
+
+  if ( shadowlands_legacy.frenzyband )
+  {
+    using frenzied_assault_t = residual_action::residual_periodic_action_t<cat_attack_t>;
+    auto fa = get_secondary_action<frenzied_assault_t>( "frenzied_assault", this, dbc::find_spell( this, 340056U ) );
+    fa->proc = true;
+    active.legacy_frenzied_assault = fa;
   }
 
   if ( legacy_azerite.lunar_shrapnel.ok() )
@@ -15793,6 +15830,11 @@ void druid_t::parse_action_effects( action_t* action )
   _a->parse_effects( buff.apex_predators_craving );
   _a->parse_effects( buff.berserk_cat );
   _a->parse_effects( buff.coiled_to_spring, CONSUME_BUFF );
+  // BracketSim legacy (12 Nov 2026): Oneth's Clear Vision (7087) - "Starsurge has a 20% chance to make Starfall free.
+  // Starfall has a 40% chance to make Starsurge free." The buffs were rolled and never read; their cost -100% (339797,
+  // 339800 effect 1) now applies to the spell they name and is spent by it.
+  _a->parse_effects( buff.legacy_oneths_perception, CONSUME_BUFF );
+  _a->parse_effects( buff.legacy_oneths_clear_vision, CONSUME_BUFF );
   _a->parse_effects( buff.halazzis_fury );
   _a->parse_effects( buff.hunger_for_battle );
   _a->parse_effects( buff.incarnation_cat );

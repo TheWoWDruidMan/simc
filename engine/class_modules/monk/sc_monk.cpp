@@ -183,6 +183,10 @@ void monk_action_t<Base>::apply_buff_effects()
 
   // Shado-Pan
 
+  // BracketSim legacy compatibility: Xuen's Battlegear's Pressure Point (Rising Sun Kick crit chance).
+  if ( p()->buff.legacy_xuens_pressure_point )
+    parse_effects( p()->buff.legacy_xuens_pressure_point );
+
   // Midnight S1 Set
   // Midnight S2 Set
   // Midnight S3 Set
@@ -490,13 +494,15 @@ void monk_action_t<Base>::impact( action_state_t *state )
     }
   }
 
-  // BracketSim legacy compatibility: Bonedust Brew. Effect 2 is the chance for
-  // a struck target to be hit a second time, effect 1 the share of the damage
-  // that second hit is worth.
+  // BracketSim legacy compatibility: Bonedust Brew. The tooltip's $h% (the
+  // spell's proc chance, 50%) is the chance for a struck target to be hit a
+  // second time, effect 1 the share of the damage that second hit is worth.
+  // 12 Nov 2026: was effect 2 (35%), which is not the tooltip's chance -
+  // Shadowlands 9.2.7 rolled covenant.necrolord->proc_chance() too.
   if ( p()->legacy_covenant.bonedust_brew->ok() && p()->action.legacy_bonedust_brew_damage &&
        state->action != p()->action.legacy_bonedust_brew_damage && state->result_amount > 0 &&
        get_td( state->target )->debuff.legacy_bonedust_brew->up() &&
-       Base::rng().roll( p()->legacy_covenant.bonedust_brew->effectN( 2 ).percent() ) )
+       Base::rng().roll( p()->legacy_covenant.bonedust_brew->proc_chance() ) )
   {
     auto bdb = p()->action.legacy_bonedust_brew_damage;
     // BracketSim legacy compatibility: Bone Marrow Hops (conduit 60) raises the
@@ -505,6 +511,17 @@ void monk_action_t<Base>::impact( action_state_t *state )
         state->result_amount * p()->legacy_covenant.bonedust_brew->effectN( 1 ).percent() *
         ( 1.0 + p()->legacy_conduits.percent( 60 ) );
     bdb->execute_on_target( state->target );
+
+    // BracketSim legacy compatibility (12 Nov 2026): Bone Marrow Hops' second
+    // half - each bonus hit takes 0.5 s off Bonedust Brew's cooldown, up to 5
+    // per cast or Bountiful Brew proc. 337295 effect 2 is -500 ms in 9.2.7 data
+    // (the spell is not in Midnight data). Shadowlands: bonedust_brew_damage_t.
+    if ( p()->legacy_conduits.has( 60 ) && p()->buff.legacy_bone_marrow_hops &&
+         p()->buff.legacy_bone_marrow_hops->up() )
+    {
+      p()->get_cooldown( "bonedust_brew" )->adjust( timespan_t::from_millis( -500 ), true );
+      p()->buff.legacy_bone_marrow_hops->decrement();
+    }
   }
 
   // BracketSim legacy compatibility: Bountiful Brew. A free Bonedust Brew on
@@ -515,6 +532,8 @@ void monk_action_t<Base>::impact( action_state_t *state )
        p()->legacy_covenant.bonedust_brew->ok() && p()->legacy_bountiful_brew_rppm &&
        p()->legacy_bountiful_brew_rppm->trigger() )
   {
+    if ( p()->buff.legacy_bone_marrow_hops )
+      p()->buff.legacy_bone_marrow_hops->trigger();
     get_td( state->target )
         ->debuff.legacy_bonedust_brew->extend_duration_or_trigger(
             p()->find_spell( 356592 )->effectN( 1 ).time_value() );
@@ -2168,6 +2187,9 @@ struct fists_of_fury_t : monk_melee_attack_t
 
     if ( jadefire_stomp )
       jadefire_stomp->execute();
+
+    if ( p()->buff.legacy_xuens_pressure_point )
+      p()->buff.legacy_xuens_pressure_point->trigger();
 
     // TODO: is there a better way to do this?
     // Delay the expiration of the buffs until after the tick action happens.
@@ -5658,7 +5680,10 @@ monk_td_t::monk_td_t( player_t *target, monk_t *player )
                           player->legacy_covenant.weapons_of_order_debuff );
   debuff.legacy_bonedust_brew =
       make_buff_fallback( player->legacy_covenant.bonedust_brew->ok(), *this, "bonedust_brew",
-                          player->legacy_covenant.bonedust_brew );
+                          player->legacy_covenant.bonedust_brew )
+          // BracketSim 12 Nov 2026: 325216's 50% proc chance is the bonus-hit roll, not the debuff's own chance.
+          // Without this half of all casts (and Bountiful Brew procs) left no debuff. Shadowlands: set_chance( 1 ).
+          ->set_chance( 1.0 );
 
   // Windwalker
   debuff.empowered_tiger_lightning = make_buff_fallback<buffs::empowered_tiger_lightning_t>(
@@ -5881,6 +5906,8 @@ struct legacy_bonedust_brew_t : public monk_spell_t
 
   void execute() override
   {
+    if ( p()->buff.legacy_bone_marrow_hops )
+      p()->buff.legacy_bone_marrow_hops->trigger();
     monk_spell_t::execute();
 
     // BracketSim legacy compatibility: the soulbind traits that ride this
@@ -7177,6 +7204,17 @@ void monk_t::create_buffs()
           ->set_duration( legacy_covenant.weapons_of_order->duration() + ( legacy_conduits.has( 59 ) ? 5_s : 0_s ) )
           ->set_pct_buff_type( STAT_PCT_BUFF_MASTERY )
           ->set_chance( legacy_covenant.weapons_of_order->ok() ? 1.0 : 0.0 );
+  // BracketSim legacy compatibility (12 Nov 2026): Xuen's Battlegear's second half - when Fists of Fury ends, Rising
+  // Sun Kick's critical strike chance is raised for 5 s (Pressure Point 337482, 40% - the tooltip's value).
+  if ( shadowlands_legacy.xuens_battlegear )
+    buff.legacy_xuens_pressure_point = make_buff( this, "pressure_point", dbc::find_spell( this, 337482U ) )
+                                           ->set_refresh_behavior( buff_refresh_behavior::DURATION );
+  if ( legacy_covenant.bonedust_brew->ok() && legacy_conduits.has( 60 ) )
+    buff.legacy_bone_marrow_hops = make_buff( this, "bone_marrow_hops_hidden" )
+                                       ->set_quiet( true )
+                                       ->set_duration( 10_s )
+                                       ->set_max_stack( 5 )
+                                       ->set_reverse( true );
 
   // BracketSim legacy compatibility: Invoker's Delight (7082) was detected but
   // never had a buff to grant. Its haste comes straight from spell 338321.

@@ -7596,9 +7596,24 @@ struct storms_eye_t : public shaman_spell_t
 
 struct lava_burst_state_t : public shaman_action_state_t
 {
+  // BracketSim legacy compatibility: Windspeaker's Lava Resurgence was up when this Lava Burst was cast.
+  bool legacy_wlr = false;
+
   lava_burst_state_t( action_t* action_, player_t* target_ ) :
     shaman_action_state_t( action_, target_ )
   { }
+
+  void initialize() override
+  {
+    shaman_action_state_t::initialize();
+    legacy_wlr = false;
+  }
+
+  void copy_state( const action_state_t* s ) override
+  {
+    shaman_action_state_t::copy_state( s );
+    legacy_wlr = debug_cast<const lava_burst_state_t*>( s )->legacy_wlr;
+  }
 };
 
 // As of 8.1 Lava Burst checks its state on impact. Lava Burst -> Flame Shock now forces the critical strike
@@ -7631,6 +7646,21 @@ struct lava_burst_overload_t : public elemental_overload_spell_t
   static const lava_burst_state_t* cast_state( const action_state_t* s )
   { return debug_cast<const lava_burst_state_t*>( s ); }
 
+  // BracketSim legacy compatibility: Windspeaker's Lava Resurgence (6992), as Shadowlands: snapshot at cast, +20%
+  // (336065 effect 1) on this Lava Burst's damage at impact.
+  void snapshot_state( action_state_t* s, result_amount_type rt ) override
+  {
+    elemental_overload_spell_t::snapshot_state( s, rt );
+    cast_state( s )->legacy_wlr = p()->buff.legacy_windspeakers_lava_resurgence->check() > 0;
+  }
+
+  double composite_da_multiplier( const action_state_t* s ) const override
+  {
+    double m = elemental_overload_spell_t::composite_da_multiplier( s );
+    if ( cast_state( s )->legacy_wlr )
+      m *= 1.0 + p()->buff.legacy_windspeakers_lava_resurgence->default_value;
+    return m;
+  }
   action_state_t* new_state() override
   { return new lava_burst_state_t( this, target ); }
 
@@ -7984,6 +8014,21 @@ struct lava_burst_t : public shaman_spell_t
   static const lava_burst_state_t* cast_state( const action_state_t* s )
   { return debug_cast<const lava_burst_state_t*>( s ); }
 
+  // BracketSim legacy compatibility: Windspeaker's Lava Resurgence (6992), as Shadowlands: snapshot at cast, +20%
+  // (336065 effect 1) on this Lava Burst's damage at impact.
+  void snapshot_state( action_state_t* s, result_amount_type rt ) override
+  {
+    shaman_spell_t::snapshot_state( s, rt );
+    cast_state( s )->legacy_wlr = p()->buff.legacy_windspeakers_lava_resurgence->check() > 0;
+  }
+
+  double composite_da_multiplier( const action_state_t* s ) const override
+  {
+    double m = shaman_spell_t::composite_da_multiplier( s );
+    if ( cast_state( s )->legacy_wlr )
+      m *= 1.0 + p()->buff.legacy_windspeakers_lava_resurgence->default_value;
+    return m;
+  }
   action_state_t* new_state() override
   { return new lava_burst_state_t( this, target ); }
 
@@ -8028,6 +8073,10 @@ struct lava_burst_t : public shaman_spell_t
     s->result_amount = shaman_spell_t::calculate_direct_amount( s );
 
     shaman_spell_t::impact( s );
+
+    // BracketSim legacy compatibility: the Lava Burst spends Windspeaker's Lava Resurgence (Shadowlands: on hit).
+    if ( cast_state( s )->legacy_wlr && is_variant( spell_variant::NORMAL ) )
+      p()->buff.legacy_windspeakers_lava_resurgence->expire();
   }
 
   double action_multiplier() const override

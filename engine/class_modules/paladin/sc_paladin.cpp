@@ -4222,10 +4222,10 @@ void paladin_t::create_buffs()
                           ( 1.0 + legacy_conduits.percent( 210 ) ) )
           ->set_chance( legacy_covenant.blessing_of_summer->ok() ? 1.0 : 0.0 );
 
-  buffs.legacy_blessing_of_autumn =
-      make_buff( this, "blessing_of_autumn", legacy_covenant.blessing_of_autumn )
-          ->set_cooldown( 0_ms ) // BracketSim 11 Nov 2026: the cooldown is the ability's, not the buff's
-          ->set_default_value_from_effect( 1, 0.01 )
+  // BracketSim legacy (12 Nov 2026): Blessing of Autumn - "causing their cooldowns to recover 30% faster" (328622
+  // effect 1, label 16). The plain buff was triggered and nothing read it; Shadowlands' own blessing_of_autumn_t (kept
+  // above) speeds every action carrying that label while it is up. Self-cast on a Patchwerk.
+  buffs.legacy_blessing_of_autumn = ( new buffs::blessing_of_autumn_t( this ) )
           ->set_chance( legacy_covenant.blessing_of_autumn->ok() ? 1.0 : 0.0 );
 
   buffs.legacy_equinox =

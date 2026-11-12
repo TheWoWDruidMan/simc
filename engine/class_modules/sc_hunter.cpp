@@ -1843,6 +1843,19 @@ public:
     }
     return ab::target;
   }
+
+  // BracketSim legacy (12 Nov 2026): Eagletalon's True Focus (7011) - "Trueshot ... reduces the Focus cost of all of
+  // your abilities by 25%" (336851 effect 1). The buff ran for the whole Trueshot and nothing read it.
+  double cost_pct_multiplier() const override
+  {
+    double c = ab::cost_pct_multiplier();
+
+    if ( ab::current_resource() == RESOURCE_FOCUS && p()->buffs.legacy_eagletalons_true_focus &&
+         p()->buffs.legacy_eagletalons_true_focus->check() )
+      c *= 1.0 + p()->buffs.legacy_eagletalons_true_focus->data().effectN( 1 ).percent();
+
+    return c;
+  }
 };
 
 struct hunter_spell_t : public hunter_action_t<spell_t>
@@ -2411,7 +2424,21 @@ struct hunter_main_pet_base_t : public stable_pet_t
 
     if ( buffs.bestial_wrath -> has_common_school( school ) )
       m *= 1 + buffs.bestial_wrath -> check_value();
-    
+
+    return m;
+  }
+
+  // BracketSim legacy compatibility (12 Nov 2026): Rylakstalker's Piercing Fangs (7010, 336845 effect 1: Modify Crit
+  // Damage Done%). "While Bestial Wrath is active, your pet's critical damage dealt is increased by 35%" - the whole
+  // critical hit, as Shadowlands 9.2.7 did (hunter_main_pet_base_t::composite_player_critical_damage_multiplier, keyed
+  // to the pet's own Bestial Wrath). It used to multiply only the crit BONUS on pet actions, about half the effect.
+  double composite_player_critical_damage_multiplier( const action_state_t* s, school_e school ) const override
+  {
+    double m = stable_pet_t::composite_player_critical_damage_multiplier( s, school );
+
+    if ( o()->shadowlands_legacy.rylakstalkers_piercing_fangs && buffs.bestial_wrath->check() )
+      m *= 1 + o()->find_spell( 336845 )->effectN( 1 ).percent();
+
     return m;
   }
 
@@ -2878,11 +2905,9 @@ public:
     // from the bonus id on 7010 and nothing anywhere asked for it, so the
     // legendary equipped, showed its tooltip, and did nothing. Same shape as
     // the trinket effect-worth table that sat unread for a day.
-    if ( o()->shadowlands_legacy.rylakstalkers_piercing_fangs &&
-         o()->buffs.bestial_wrath->check() )
-    {
-      cm *= 1 + o()->find_spell( 336845 )->effectN( 1 ).percent();
-    }
+    //
+    // 12 Nov 2026: moved to hunter_main_pet_base_t::composite_player_critical_damage_multiplier - here it scaled only
+    // the crit bonus (2.35x crits instead of 2.7x).
 
     return cm;
   }
@@ -6038,6 +6063,8 @@ struct aimed_shot_t : public aimed_shot_base_t
     const bool casting = p() -> executing && p() -> executing == this;
     if ( casting ? lock_and_loaded : p() -> buffs.lock_and_load -> check() )
       return 0;
+    if ( casting ? legacy_vigil : p()->buffs.legacy_secrets_of_the_unblinking_vigil->check() )
+      return 0;
 
     return aimed_shot_base_t::cost();
   }
@@ -6068,15 +6095,23 @@ struct aimed_shot_t : public aimed_shot_base_t
   void schedule_execute( action_state_t* s ) override
   {
     lock_and_loaded = p() -> buffs.lock_and_load -> up();
+    legacy_vigil = p()->buffs.legacy_secrets_of_the_unblinking_vigil->up();
 
     aimed_shot_base_t::schedule_execute( s );
   }
+
+  // BracketSim legacy (12 Nov 2026): Secrets of the Unblinking Vigil (7014) - "...and cause your next Aimed Shot to not
+  // consume any Focus" (336892 effect 1). Only the charge refund was read before.
+  bool legacy_vigil = false;
 
   void execute() override
   {
     hydra_target = p()->get_hydra_target( target );
 
     aimed_shot_base_t::execute();
+
+    if ( legacy_vigil && !lock_and_loaded )
+      p()->buffs.legacy_secrets_of_the_unblinking_vigil->expire();
 
     // BracketSim legacy compatibility: Serpentstalker's Trickery (7013).
     if ( p()->actions.legacy_serpent_sting )
