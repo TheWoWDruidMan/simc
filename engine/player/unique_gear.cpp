@@ -891,6 +891,14 @@ void enchants::executioner( special_effect_t& effect )
 // executioner does.
 void enchants::crusader( special_effect_t& effect )
 {
+  // 12 Nov 2026, the author (in game): "It just doesn't proc above 49". The tooltip reads "Has a reduced effect for players
+  // above level 49"; in game a character above 49 gets no Holy Strength at all, so the enchant does nothing there.
+  if ( effect.item->player->true_level > 49 )
+  {
+    effect.type = SPECIAL_EFFECT_NONE;
+    return;
+  }
+
   const spell_data_t* spell = effect.item->player->find_spell( effect.spell_id );
   // One Holy Strength per hand (9 Oct 2026): in game a Crusader on each weapon gives two separate buffs, both up at once
   // (a Fury warrior's log: a second applybuff 8.6 s after the first, no removal between). One shared buff only refreshed.

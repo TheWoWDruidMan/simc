@@ -8122,6 +8122,19 @@ struct death_knight_disease_t : public death_knight_spell_t
     }
   }
 
+  // Legacy Shadowlands: Soulwarped Seal of Menethil (367951). Its Remnant's Despair debuff (368690) adds its value to every
+  // tick of the Death Knight's diseases, as 9.2.7 did (sc_death_knight.cpp death_knight_disease_t::bonus_ta, "Currently
+  // Remnants Despair affects all diseases"). 12 Nov 2026: the ring rolled and the debuff landed, but nothing read it, so the
+  // ring added no damage (a player: "it doesn't proc on my 60 DK sim").
+  double bonus_ta( const action_state_t* s ) const override
+  {
+    double ta = death_knight_spell_t::bonus_ta( s );
+    if ( const actor_target_data_t* td = get_td( s->target ) )
+      if ( td->debuff.remnants_despair )
+        ta += td->debuff.remnants_despair->value();
+    return ta;
+  }
+
   double composite_ta_multiplier( const action_state_t* s ) const override
   {
     double mult = death_knight_spell_t::composite_ta_multiplier( s );
