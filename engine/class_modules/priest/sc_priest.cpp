@@ -4841,30 +4841,27 @@ void priest_t::vision_of_perfection_proc()
   double mult = essence.spell( 1u )->effectN( 1 ).percent() +
                 essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
 
-  buff_t* window = nullptr;
-  switch ( specialization() )
-  {
-    case PRIEST_SHADOW:
-      window = buffs.voidform;
-      break;
-    case PRIEST_DISCIPLINE:
-      window = buffs.power_infusion;
-      break;
-    case PRIEST_HOLY:
-      window = buffs.apotheosis;
-      break;
-    default:
-      break;
-  }
-
-  if ( !window || mult <= 0 )
+  // BracketSim legacy (12 Nov 2026, the author: "it should use what it genuinely says"): Shadowfiend, or Mindbender when
+  // talented, as the tooltip (297739) - summoned for the essence's share of its duration, or the one out extended.
+  if ( mult <= 0 || ( specialization() != PRIEST_SHADOW && specialization() != PRIEST_DISCIPLINE ) )
     return;
 
-  timespan_t dur = window->buff_duration() * mult;
-  if ( window->check() )
-    window->extend_duration( dur );
+  bool bender     = talents.shared.mindbender.enabled();
+  auto& spawner   = bender ? pets.mindbender : pets.shadowfiend;
+  // Shadowfiend (34433) is a passive in Midnight; the fiend it summons today is 1280172 (5 sec) - the current spell as
+  // is (the author's version rule). APPROXIMATION until a Shadow log shows what the game does.
+  timespan_t base = bender ? talents.shared.mindbender->duration() : find_spell( 1280172 )->duration();
+  timespan_t dur  = base * mult;
+  if ( dur <= 0_ms )
+    return;
+
+  if ( spawner.n_active_pets() > 0 )
+  {
+    for ( auto a_pet : spawner.active_pets() )
+      a_pet->adjust_duration( dur );
+  }
   else
-    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+    spawner.spawn( dur );
 }
 
 void priest_t::reset()

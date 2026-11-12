@@ -4710,8 +4710,14 @@ void player_t::create_actions()
     // 48 DPS and cost 5 Bloodthirsts (-158 DPS) on the level 50 Fury list. A player would not press it, so the
     // list does not either; the essence's minor and passive parts still apply. A user's own action list may still
     // press it by name.
-    static constexpr unsigned net_loss_majors[] = { 5, 6, 7, 12, 15, 27, 35 };
+    static constexpr unsigned net_loss_majors[] = { 5, 6, 7, 12, 15, 35 };
     if ( range::find( net_loss_majors, azerite_essence->major_essence_id() ) != std::end( net_loss_majors ) )
+      name = {};
+    // Memory of Lucid Dreams (27) works since 12 Nov 2026 (doubled resource generation, not Heart-scaled damage):
+    // pressing it gains at 300 s for every spec but Retribution (-2.25%) and Enhancement (-0.16%; no resource left
+    // to double), measured 12 Nov, 300 iterations, Patchwerk, 1 target.
+    if ( azerite_essence->major_essence_id() == 27 &&
+         ( specialization() == PALADIN_RETRIBUTION || specialization() == SHAMAN_ENHANCEMENT ) )
       name = {};
     if ( !name.empty() && range::find( legacy_apl_actions, name ) == legacy_apl_actions.end() )
     {
@@ -5493,6 +5499,73 @@ void player_t::init_finished()
       register_precombat_begin( [ this, custom_buff, dur = c.start ]( player_t* ) {
         make_event( *sim, dur, [ custom_buff ]() { custom_buff->execute(); } );
       } );
+    }
+  }
+
+  // BracketSim legacy (12 Nov 2026): Strive for Perfection (Vision of Perfection minor, also part of the major):
+  // "Reduces the cooldown of <297736-297739> by X%". Nothing applied it. The cooldowns the tooltip names, by the
+  // names this engine gives them; a cooldown the spec does not have is simply not found.
+  if ( is_player() )
+  {
+    auto vop = find_azerite_essence( "Vision of Perfection" );
+    double cdr = azerite::vision_of_perfection_cdr( vop );
+    if ( vop.enabled() && cdr < 0 )
+    {
+      std::vector<const char*> names;
+      switch ( specialization() )
+      {
+        case SHAMAN_ENHANCEMENT:     names = { "feral_spirit" }; break;
+        case SHAMAN_ELEMENTAL:       names = { "fire_elemental", "storm_elemental" }; break;
+        case HUNTER_SURVIVAL:        names = { "coordinated_assault" }; break;
+        case HUNTER_MARKSMANSHIP:    names = { "trueshot" }; break;
+        case HUNTER_BEAST_MASTERY:   names = { "aspect_of_the_wild" }; break;
+        case WARRIOR_FURY:           names = { "recklessness" }; break;
+        case WARRIOR_ARMS:           names = { "ravager", "bladestorm" }; break;
+        case WARRIOR_PROTECTION:     names = { "avatar" }; break;
+        case DEATH_KNIGHT_BLOOD:     names = { "vampiric_blood" }; break;
+        case DEATH_KNIGHT_UNHOLY:    names = { "apocalypse" }; break;
+        case DEATH_KNIGHT_FROST:     names = { "empower_rune_weapon" }; break;
+        case PALADIN_HOLY:
+        case PALADIN_PROTECTION:
+        case PALADIN_RETRIBUTION:    names = { "avenging_wrath", "crusade", "avenging_crusader" }; break;
+        case DRUID_BALANCE:          names = { "celestial_alignment", "incarnation_chosen_of_elune", "ca_inc" }; break;
+        case DRUID_FERAL:            names = { "berserk", "berserk_cat", "incarnation_avatar_of_ashamane",
+                                               "incarnation_king_of_the_jungle", "b_inc_cat" }; break;
+        case DRUID_GUARDIAN:         names = { "survival_instincts" }; break;
+        case MONK_WINDWALKER:        names = { "storm_earth_and_fire", "serenity" }; break;
+        case MONK_BREWMASTER:        names = { "fortifying_brew" }; break;
+        case ROGUE_ASSASSINATION:    names = { "vendetta" }; break;
+        case ROGUE_OUTLAW:           names = { "adrenaline_rush" }; break;
+        case ROGUE_SUBTLETY:         names = { "shadow_blades" }; break;
+        case DEMON_HUNTER_HAVOC:
+        case DEMON_HUNTER_VENGEANCE: names = { "metamorphosis" }; break;
+        case PRIEST_SHADOW:
+        case PRIEST_DISCIPLINE:      names = { "shadowfiend", "mindbender" }; break;
+        case WARLOCK_DESTRUCTION:    names = { "summon_infernal" }; break;
+        case WARLOCK_DEMONOLOGY:     names = { "summon_demonic_tyrant" }; break;
+        case WARLOCK_AFFLICTION:     names = { "summon_darkglare" }; break;
+        case MAGE_ARCANE:            names = { "arcane_power" }; break;
+        case MAGE_FIRE:              names = { "combustion" }; break;
+        case MAGE_FROST:             names = { "icy_veins" }; break;
+        default: break;
+      }
+      std::vector<cooldown_t*> done;
+      for ( auto n : names )
+      {
+        auto cd = find_cooldown( n );
+        if ( !cd || range::find( done, cd ) != done.end() || cd->duration <= 0_ms )
+          continue;
+        done.push_back( cd );
+        cd->duration *= 1.0 + cdr;
+        sim->print_debug( "{} Strive for Perfection: {} cooldown {:.1f}% to {}", *this, n, cdr * 100, cd->duration );
+        // A buff of the same name with its own cooldown (Avenging Wrath: 60 s) would refuse the earlier cast - the
+        // 12 Nov regress caught Retribution losing every second Avenging Wrath. It follows the ability.
+        if ( auto b = buff_t::find( this, n ); b && b->cooldown && b->cooldown->duration > cd->duration )
+        {
+          b->cooldown->duration = cd->duration;
+          sim->print_debug( "{} Strive for Perfection: buff {} cooldown to {}", *this, n, cd->duration );
+        }
+      }
     }
   }
 }
@@ -7739,6 +7812,8 @@ void player_t::reset()
 {
   sim->print_debug( "Resetting {}.", *this );
 
+  legacy_lucid_dreams.partial = 0.0;
+
   last_cast = timespan_t::zero();
   bracketsim.trinket_fallback_on[ 0 ] = bracketsim.trinket_fallback_on[ 1 ] = false;
   gcd_ready = timespan_t::zero();
@@ -8668,6 +8743,15 @@ double player_t::resource_gain( resource_e resource_type, double amount, gain_t*
 {
   if ( current.sleeping || amount == 0.0 )
     return 0.0;
+
+  // BracketSim legacy (12 Nov 2026): Memory of Lucid Dreams major - "increasing your <resource> generation rate by
+  // 100%" (298357: Modify Resource Generation% for Rage, Focus, Energy, Astral Power, Holy Power, Maelstrom,
+  // Insanity, Fury, Soul Shards; mana regeneration). Warrior does not double its own Lucid Dreams refund (BfA).
+  if ( amount > 0 && buffs.memory_of_lucid_dreams && buffs.memory_of_lucid_dreams->check() &&
+       ( legacy_lucid_dreams_resource( resource_type, true ) ||
+         ( resource_type == RESOURCE_MANA && source && source == gains.resource_regen[ RESOURCE_MANA ] ) ) &&
+       !( type == WARRIOR && source && source == legacy_lucid_dreams.gain ) )
+    amount *= 1.0 + buffs.memory_of_lucid_dreams->data().effectN( 1 ).percent();
 
   double actual_amount = std::min( amount, resources.max[ resource_type ] - resources.current[ resource_type ] );
   double previous_amount;
@@ -12726,6 +12810,70 @@ azerite_essence_t player_t::find_azerite_essence( util::string_view name, bool t
 void player_t::vision_of_perfection_proc()
 {
   return;
+}
+
+/**
+ * BracketSim legacy (12 Nov 2026): the resource Memory of Lucid Dreams works on, per class, as Battle for Azeroth
+ * had it (Lucid Dreams 298268 "refund 50% of the <298373> spent", Memory of Lucid Dreams 298357 generation +100%).
+ */
+bool player_t::legacy_lucid_dreams_resource( resource_e r, bool major ) const
+{
+  switch ( type )
+  {
+    case WARRIOR:      return r == RESOURCE_RAGE;
+    case PALADIN:      return r == RESOURCE_HOLY_POWER;
+    case HUNTER:       return r == RESOURCE_FOCUS;
+    case ROGUE:        return r == RESOURCE_ENERGY;
+    case DEMON_HUNTER: return r == RESOURCE_FURY;
+    case SHAMAN:       return r == RESOURCE_MAELSTROM ||
+                              ( !major && r == RESOURCE_MANA &&
+                                ( specialization() == SHAMAN_RESTORATION || specialization() == SHAMAN_ENHANCEMENT ) );
+    case WARLOCK:      return r == RESOURCE_SOUL_SHARD;
+    case DRUID:        return r == RESOURCE_ASTRAL_POWER || r == RESOURCE_ENERGY || r == RESOURCE_RAGE ||
+                              ( !major && r == RESOURCE_MANA && specialization() == DRUID_RESTORATION );
+    case MONK:         return r == RESOURCE_ENERGY || ( !major && r == RESOURCE_MANA );
+    // Shadow: Voidform no longer drains, so the minor refunds the Insanity spent (the game refunds what was spent -
+    // the author's Fire log); the major doubles Insanity.
+    case PRIEST:       return major ? r == RESOURCE_INSANITY
+                                    : ( specialization() == PRIEST_SHADOW ? r == RESOURCE_INSANITY : r == RESOURCE_MANA );
+    // Runes: refunded here, regeneration doubled in the class module.
+    case DEATH_KNIGHT: return !major && r == RESOURCE_RUNE;
+    // Arcane mana here; Fire (Fire Blast) and Frost (Icicles) in the class module.
+    case MAGE:         return !major && r == RESOURCE_MANA;
+    default:           return false;
+  }
+}
+
+void player_t::legacy_lucid_dreams_gain( resource_e r, double amount )
+{
+  resource_gain( r, amount, legacy_lucid_dreams.gain );
+}
+
+void player_t::legacy_lucid_dreams_refund( action_t*, resource_e r, double spent )
+{
+  if ( legacy_lucid_dreams.refund <= 0 || spent <= 0 || !legacy_lucid_dreams_resource( r, false ) )
+    return;
+  if ( !rng().roll( legacy_lucid_dreams.chance ) )
+    return;
+
+  double amount = spent * legacy_lucid_dreams.refund;
+  if ( r == RESOURCE_HOLY_POWER || r == RESOURCE_SOUL_SHARD || r == RESOURCE_RUNE )
+  {
+    // Whole units: the fraction carries to the next proc (BfA). A proc on a 1 Holy Power spender always gives 1.
+    double total = legacy_lucid_dreams.partial + amount;
+    if ( r == RESOURCE_HOLY_POWER && spent == 1 && total < 1 )
+      total = 1;
+    amount = std::floor( total );
+    legacy_lucid_dreams.partial = total - amount;
+  }
+  else if ( r != RESOURCE_MANA && r != RESOURCE_ASTRAL_POWER )
+    amount = std::ceil( amount );  // "Gains are rounded up to the nearest whole value" (BfA)
+
+  if ( amount > 0 )
+    legacy_lucid_dreams_gain( r, amount );
+
+  if ( legacy_lucid_dreams.rank3 && buffs.lucid_dreams )
+    buffs.lucid_dreams->trigger();
 }
 
 /**

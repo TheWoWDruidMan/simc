@@ -265,8 +265,10 @@ namespace warlock
     talents.practiced_pestilence = find_talent_spell( talent_tree::SPECIALIZATION, "Practiced Pestilence" ); // Should be ID 1259811
 
     talents.summon_darkglare = find_talent_spell( talent_tree::SPECIALIZATION, "Summon Darkglare" ); // Should be ID 205180
-    talents.eye_beam = conditional_spell_lookup( talents.summon_darkglare.ok(), 205231 );
-    talents.darkglare_presence_buff = conditional_spell_lookup( talents.summon_darkglare.ok(), 1280663 );
+    // BracketSim legacy (12 Nov 2026): Vision of Perfection can summon a Darkglare without the talent.
+    const bool legacy_vop_darkglare = find_azerite_essence( "Vision of Perfection" ).is_major();
+    talents.eye_beam = conditional_spell_lookup( talents.summon_darkglare.ok() || legacy_vop_darkglare, 205231 );
+    talents.darkglare_presence_buff = conditional_spell_lookup( talents.summon_darkglare.ok() || legacy_vop_darkglare, 1280663 );
 
     talents.cull_the_weak = find_talent_spell( talent_tree::SPECIALIZATION, "Cull the Weak" ); // Should be ID 1259886
 
@@ -2014,24 +2016,43 @@ void warlock_t::vision_of_perfection_proc()
   double mult = essence.spell( 1u )->effectN( 1 ).percent() +
                 essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
 
-  buff_t* window = nullptr;
+  // BracketSim legacy (12 Nov 2026, the author: "it should use what it genuinely says"; today's spells): Summon Infernal /
+  // Summon Darkglare / Summon Demonic Tyrant (297739), the demon itself for the essence's share of its duration.
+  // The tooltip's "only extends your DoTs / other demons by" lines describe Battle for Azeroth's extensions; today's
+  // Darkglare extends nothing and today's Tyrant extends Dreadstalkers only with Reign of Tyranny, so by that much.
+  if ( mult <= 0 )
+    return;
+
   switch ( specialization() )
   {
-    case WARLOCK_DEMONOLOGY:
-      window = buffs.tyrant;
+    case WARLOCK_DESTRUCTION:
+      warlock_pet_list.infernals.spawn( find_spell( 111685 )->duration() * mult );
+      // Legacy Azerite: Crashing Chaos also comes with a Vision of Perfection Infernal (BfA).
+      if ( legacy_azerite.crashing_chaos.ok() )
+        buffs.legacy_crashing_chaos->trigger( buffs.legacy_crashing_chaos->max_stack() );
       break;
+    case WARLOCK_AFFLICTION:
+      warlock_pet_list.darkglares.spawn( find_spell( 205180 )->duration() * mult );
+      break;
+    case WARLOCK_DEMONOLOGY:
+    {
+      timespan_t dur = find_spell( 265187 )->duration() * mult;
+      warlock_pet_list.demonic_tyrants.spawn( dur );
+      buffs.tyrant->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+      if ( talents.reign_of_tyranny.ok() )
+      {
+        timespan_t ext = timespan_t::from_millis( essence.spell( 1u )->effectN( 2 ).base_value() );
+        for ( auto dreadstalker : warlock_pet_list.dreadstalkers )
+          if ( !dreadstalker->is_sleeping() && dreadstalker->expiration )
+            dreadstalker->expiration->reschedule( dreadstalker->expiration->remains() + ext );
+        if ( buffs.dreadstalkers->check() )
+          buffs.dreadstalkers->extend_duration( ext );
+      }
+      break;
+    }
     default:
       break;
   }
-
-  if ( !window || mult <= 0 )
-    return;
-
-  timespan_t dur = window->buff_duration() * mult;
-  if ( window->check() )
-    window->extend_duration( dur );
-  else
-    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
 }
 
   void warlock_t::reset()

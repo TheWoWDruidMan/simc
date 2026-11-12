@@ -4097,6 +4097,10 @@ struct memory_of_lucid_dreams_t : public azerite_essence_major_t
       buff->set_cooldown( 0_ms )->set_duration(
           essence.spell_ref( 1U ).duration() +
           essence.spell_ref( 2U, essence_spell::UPGRADE ).effectN( 1 ).time_value() );
+      // BracketSim legacy (12 Nov 2026): the major doubles resource generation (player_t::resource_gain); regen is
+      // settled at the moment it starts/ends, and the class hears of it (rune regen, Fire Blast recharge).
+      buff->set_affects_regen( true );
+      buff->set_stack_change_callback( [ p ]( buff_t*, int, int ) { p->legacy_lucid_dreams_major_changed(); } );
 
       player->buffs.memory_of_lucid_dreams = buff;
     }
@@ -4885,7 +4889,9 @@ void lucid_dreams( special_effect_t& effect )
   if ( !ess.enabled() )
     return;
 
-  if ( p->buffs.lucid_dreams )
+  // BracketSim legacy (12 Nov 2026): this read `if ( p->buffs.lucid_dreams )`, so the buff was never made, and nothing
+  // refunded anything. The refund itself is player_t::legacy_lucid_dreams_refund (from action_t::execute).
+  if ( !p->buffs.lucid_dreams )
   {
     p->buffs.lucid_dreams =
         make_buff<stat_buff_t>( p, "lucid_dreams", p->find_spell( 298343 ) )
@@ -4893,6 +4899,20 @@ void lucid_dreams( special_effect_t& effect )
                 STAT_VERSATILITY_RATING,
                 ess.spell_ref( 3U, essence_spell::UPGRADE, essence_type::MINOR ).effectN( 1 ).average( ess.item() ) )
             ->set_quiet( ess.rank() < 3 );
+  }
+
+  p->legacy_lucid_dreams.refund = ess.spell_ref( 1U, essence_type::MINOR ).effectN( 1 ).percent();
+  p->legacy_lucid_dreams.rank3  = ess.rank() >= 3;
+  p->legacy_lucid_dreams.gain   = p->get_gain( "lucid_dreams" );
+  // Battle for Azeroth proc chances: 15%, except Arcane 7.5%, Fire 10%, Frost 7.5%, Holy/Discipline Priest 8%.
+  switch ( p->specialization() )
+  {
+    case MAGE_ARCANE:       p->legacy_lucid_dreams.chance = 0.075; break;
+    case MAGE_FIRE:         p->legacy_lucid_dreams.chance = 0.10; break;
+    case MAGE_FROST:        p->legacy_lucid_dreams.chance = 0.075; break;
+    case PRIEST_HOLY:
+    case PRIEST_DISCIPLINE: p->legacy_lucid_dreams.chance = 0.08; break;
+    default:                p->legacy_lucid_dreams.chance = 0.15; break;
   }
 }
 
@@ -5036,8 +5056,10 @@ void vision_of_perfection( special_effect_t& effect )
     vision_of_perfection_callback_t( player_t* p, special_effect_t& e ) : dbc_proc_callback_t( p, e )
     {}
 
-    void execute( const spell_data_t*, player_t*, action_state_t* ) override
+    void execute( const spell_data_t* s, player_t* t, action_state_t* st ) override
     {
+      // BracketSim legacy (12 Nov 2026): the base call triggers the rank 3 Haste buff (303344); it was skipped.
+      dbc_proc_callback_t::execute( s, t, st );
       make_event( *listener->sim, [this] { listener->vision_of_perfection_proc(); } );
     }
   };

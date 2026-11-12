@@ -7381,8 +7381,12 @@ void monk_t::create_buffs()
   buff.fuel_on_the_fire = make_buff_fallback( talent.brewmaster.fuel_on_the_fire->ok(), this, "fuel_on_the_fire",
                                               talent.brewmaster.fuel_on_the_fire_buff );
 
-  buff.invoke_niuzao = make_buff_fallback( talent.brewmaster.invoke_niuzao_the_black_ox->ok(), this,
-                                           "invoke_niuzao_the_black_ox", talent.brewmaster.invoke_niuzao_the_black_ox )
+  // BracketSim legacy (12 Nov 2026): Vision of Perfection invokes Niuzao (132578) even without the talent.
+  const bool vop_niuzao = specialization() == MONK_BREWMASTER && !talent.brewmaster.invoke_niuzao_the_black_ox->ok() &&
+                          find_azerite_essence( "Vision of Perfection" ).is_major();
+  buff.invoke_niuzao = make_buff_fallback( talent.brewmaster.invoke_niuzao_the_black_ox->ok() || vop_niuzao, this,
+                                           "invoke_niuzao_the_black_ox",
+                                           vop_niuzao ? find_spell( 132578 ) : talent.brewmaster.invoke_niuzao_the_black_ox )
                            ->set_default_value_from_effect( 2 )
                            ->set_cooldown( timespan_t::zero() )
                            ->add_invalidate( CACHE_MASTERY );
@@ -7485,6 +7489,14 @@ void monk_t::create_buffs()
   buff.whirling_dragon_punch = make_buff_fallback<buffs::whirling_dragon_punch_buff_t>(
       talent.windwalker.whirling_dragon_punch->ok(), this, "whirling_dragon_punch" );
 
+  // BracketSim legacy (12 Nov 2026): Storm, Earth, and Fire, last version The War Within 11.2.7 (15 s, three spirits
+  // at 40% each = 120%), only reachable through Vision of Perfection here.
+  buff.legacy_storm_earth_and_fire = make_buff( this, "storm_earth_and_fire", spell_data_t::nil() )
+                                         ->set_duration( 15_s )
+                                         ->set_default_value( 3 * 0.40 - 1.0 )
+                                         ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
+                                         ->set_chance( specialization() == MONK_WINDWALKER &&
+                                                       find_azerite_essence( "Vision of Perfection" ).is_major() );
   buff.zenith = make_buff_fallback<buffs::zenith_t>( talent.windwalker.zenith->ok(), this, "zenith" )
                     ->set_expire_callback( [ & ]( buff_t *, int, timespan_t ) { buff.zenith_stomp->expire(); } );
 
@@ -8060,6 +8072,15 @@ void monk_t::init_finished()
 // BracketSim legacy compatibility: Vision of Perfection (Heart of Azeroth major
 // essence). The engine procs it and calls this; each spec fires its signature
 // cooldown early, at the fraction of its duration the essence grants.
+// BracketSim legacy: Storm, Earth, and Fire's three spirits (see buff.legacy_storm_earth_and_fire).
+double monk_t::composite_player_multiplier( school_e school ) const
+{
+  double m = stagger_t<parse_player_effects_t, monk_t>::composite_player_multiplier( school );
+  if ( buff.legacy_storm_earth_and_fire )
+    m *= 1.0 + buff.legacy_storm_earth_and_fire->check_value();
+  return m;
+}
+
 void monk_t::vision_of_perfection_proc()
 {
   auto essence = find_azerite_essence( "Vision of Perfection" );
@@ -8069,11 +8090,12 @@ void monk_t::vision_of_perfection_proc()
   double mult = essence.spell( 1u )->effectN( 1 ).percent() +
                 essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
 
+  // BracketSim legacy (12 Nov 2026, the author: "it should use what it genuinely says"): Storm, Earth, and Fire (297738).
   buff_t* window = nullptr;
   switch ( specialization() )
   {
     case MONK_WINDWALKER:
-      window = buff.zenith;
+      window = buff.legacy_storm_earth_and_fire;
       break;
     case MONK_BREWMASTER:
       window = buff.invoke_niuzao;
@@ -8086,6 +8108,15 @@ void monk_t::vision_of_perfection_proc()
     return;
 
   timespan_t dur = window->buff_duration() * mult;
+  // Brewmaster: Niuzao himself comes too (summoned for the share, or the one out stays longer).
+  if ( window == buff.invoke_niuzao && dur > 0_ms )
+  {
+    if ( pets.niuzao.n_active_pets() > 0 )
+      for ( auto a_pet : pets.niuzao.active_pets() )
+        a_pet->adjust_duration( dur );
+    else
+      pets.niuzao.spawn( dur, 1 );
+  }
   if ( window->check() )
     window->extend_duration( dur );
   else

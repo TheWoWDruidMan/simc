@@ -542,6 +542,7 @@ public:
     buff_t* haze_of_rage;
     buff_t* in_the_rhythm;
     buff_t* legacy_aspect_of_the_wild;
+    buff_t* legacy_coordinated_assault;  // BracketSim legacy: Coordinated Assault (360952), for Vision of Perfection
     // BracketSim legacy compatibility: Brutal Projectiles. Auto Shot arms the
     // first; Rapid Fire spends it and stacks the second, which multiplies every
     // tick of the channel.
@@ -2624,6 +2625,10 @@ struct hunter_main_pet_t final : public hunter_main_pet_base_t
 
     if ( o()->talents.solitary_companion.ok() && buffs.solitary_companion->up() )
       m *= 1 + buffs.solitary_companion->check_value();
+
+    // BracketSim legacy: Coordinated Assault (360952) - the pet's damage +20% too.
+    if ( o()->buffs.legacy_coordinated_assault && o()->buffs.legacy_coordinated_assault->check() )
+      m *= 1 + o()->find_spell( 360952 )->effectN( 4 ).percent();
     
     return m;
   }
@@ -9420,6 +9425,18 @@ void hunter_t::create_buffs()
         if ( auto pet = pets.main )
           pet->resource_gain( RESOURCE_FOCUS, 5.0, gains.legacy_aspect_of_the_wild );
       } );
+  // BracketSim legacy (12 Nov 2026): Coordinated Assault (360952) - "You and your pet attack as one, increasing all
+  // damage you both deal by 20%" - is not a Survival ability here (Takedown replaced it); Vision of Perfection procs it.
+  buffs.legacy_coordinated_assault =
+    make_buff( this, "coordinated_assault", find_spell( 360952 ) )
+      ->set_default_value( find_spell( 360952 )->effectN( 2 ).percent() )
+      ->set_cooldown( 0_ms )
+      ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
+      ->set_stack_change_callback( [ this ]( buff_t*, int, int ) {
+        for ( auto pet : pet_list )
+          pet->invalidate_cache( CACHE_PLAYER_DAMAGE_MULTIPLIER );
+      } )
+      ->set_chance( specialization() == HUNTER_SURVIVAL && find_azerite_essence( "Vision of Perfection" ).is_major() );
   buffs.primal_instincts = make_buff<stat_buff_t>( this, "primal_instincts", find_spell( 279810 ) )
     ->add_stat( STAT_MASTERY_RATING, legacy_azerite.primal_instincts.value( 1 ) )
     ->set_trigger_spell( legacy_azerite.primal_instincts );
@@ -10184,7 +10201,8 @@ void hunter_t::vision_of_perfection_proc()
       window = buffs.trueshot;
       break;
     case HUNTER_SURVIVAL:
-      window = buffs.aspect_of_the_eagle;
+      // BracketSim legacy (12 Nov 2026, the author: "it should use what it genuinely says"): Coordinated Assault (297736).
+      window = buffs.legacy_coordinated_assault;
       break;
     default:
       break;
@@ -10332,6 +10350,10 @@ double hunter_t::composite_player_multiplier( school_e school ) const
   // BracketSim legacy compatibility: Strength of the Pack (conduit 224).
   if ( buffs.legacy_strength_of_the_pack )
     m *= 1.0 + buffs.legacy_strength_of_the_pack->check_value();
+
+  // BracketSim legacy: Coordinated Assault (360952), +20% damage.
+  if ( buffs.legacy_coordinated_assault )
+    m *= 1.0 + buffs.legacy_coordinated_assault->check_value();
 
   return m;
 }

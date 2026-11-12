@@ -1938,7 +1938,17 @@ void action_t::execute()
 
   update_ready();  // Based on testing with warrior mechanics, Blizz updates cooldowns before consuming resources.
                    // This is very rarely relevant.
+  // BracketSim legacy (12 Nov 2026): Lucid Dreams refunds part of what this cast actually spent (measured, so a
+  // class's own consume_resource and free casts are both right).
+  resource_e legacy_lucid_r = player->legacy_lucid_dreams.refund > 0 ? current_resource() : RESOURCE_NONE;
+  double legacy_lucid_before = legacy_lucid_r != RESOURCE_NONE ? player->iteration_resource_lost[ legacy_lucid_r ] : 0.0;
   consume_resource();
+  if ( legacy_lucid_r != RESOURCE_NONE )
+  {
+    double spent = player->iteration_resource_lost[ legacy_lucid_r ] - legacy_lucid_before;
+    if ( spent > 0 )
+      player->legacy_lucid_dreams_refund( this, legacy_lucid_r, spent );
+  }
 
   if ( !dual && ( !player->first_cast || !harmful ) )
     stats->add_execute( time_to_execute, target );

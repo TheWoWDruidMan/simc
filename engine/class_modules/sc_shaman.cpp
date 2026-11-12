@@ -1461,6 +1461,7 @@ public:
 
     buff_t* molten_weapon;
     buff_t* crackling_surge;
+    buff_t* legacy_earthen_weapon;  // BracketSim legacy: Feral Spirit (51533) wolves' buff, for Vision of Perfection
     buff_t* converging_storms;
     buff_t* static_accumulation;
     buff_t* doom_winds;
@@ -14334,6 +14335,12 @@ void shaman_t::create_buffs()
     ->set_trigger_spell( talent.feral_spirit );
   buff.crackling_surge  = make_buff( this, "crackling_surge", find_spell( 224127 ) )
     ->set_stack_behavior( buff_stack_behavior::ASYNCHRONOUS );
+  // BracketSim legacy (12 Nov 2026): Earthen Weapon (392375), one per Spirit Wolf of Feral Spirit (51533) - only
+  // reachable through Vision of Perfection here.
+  buff.legacy_earthen_weapon = make_buff( this, "earthen_weapon", find_spell( 392375 ) )
+    ->set_stack_behavior( buff_stack_behavior::ASYNCHRONOUS )
+    ->set_max_stack( 2 )
+    ->set_chance( specialization() == SHAMAN_ENHANCEMENT && find_azerite_essence( "Vision of Perfection" ).is_major() );
   buff.converging_storms = make_buff( this, "converging_storms", find_spell( 198300 ) )
       ->set_default_value_from_effect( 1 );
   // Buffs stormstrike and lava lash after using crash lightning
@@ -14844,6 +14851,7 @@ void shaman_t::apply_action_effects( parse_effects_t* a )
 
   eff::source_eff_builder_t( buff.amplification_core ).build( a );
   eff::source_eff_builder_t( buff.crackling_surge ).build( a );
+  eff::source_eff_builder_t( buff.legacy_earthen_weapon ).build( a );
   eff::source_eff_builder_t( buff.molten_weapon ).build( a );
   eff::source_eff_builder_t( buff.doom_winds ).build( a );
   eff::source_eff_builder_t( buff.converging_storms ).build( a );
@@ -15525,27 +15533,25 @@ void shaman_t::vision_of_perfection_proc()
   double mult = essence.spell( 1u )->effectN( 1 ).percent() +
                 essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
 
-  buff_t* window = nullptr;
-  switch ( specialization() )
-  {
-    case SHAMAN_ELEMENTAL:
-      window = buff.ascendance;
-      break;
-    case SHAMAN_ENHANCEMENT:
-      window = buff.ascendance;
-      break;
-    default:
-      break;
-  }
-
-  if ( !window || mult <= 0 )
+  // BracketSim legacy (12 Nov 2026, the author: "it should use what it genuinely says"; current spell where it still
+  // exists): Feral Spirit / Fire Elemental (297736) for the essence's share of their duration, not Ascendance.
+  if ( mult <= 0 )
     return;
 
-  timespan_t dur = window->buff_duration() * mult;
-  if ( window->check() )
-    window->extend_duration( dur );
-  else
-    window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+  if ( specialization() == SHAMAN_ELEMENTAL )
+  {
+    summon_elemental( talent.primal_elementalist.ok() ? elemental::PRIMAL_FIRE : elemental::GREATER_FIRE,
+                      buff.fire_elemental->buff_duration() * mult );
+  }
+  else if ( specialization() == SHAMAN_ENHANCEMENT )
+  {
+    // 51533: "Summons two Spirit Wolves ... for $228562d", each granting Earthen Weapon.
+    timespan_t base = find_spell( 228562 )->duration() > 0_ms ? find_spell( 228562 )->duration() : 15_s;
+    timespan_t dur  = base * mult;
+    pet.legacy_spirit_wolves.spawn( dur, 2 );
+    for ( int i = 0; i < 2; i++ )
+      buff.legacy_earthen_weapon->trigger( dur );
+  }
 }
 
 void shaman_t::reset()

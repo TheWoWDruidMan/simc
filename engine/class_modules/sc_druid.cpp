@@ -6508,6 +6508,29 @@ struct raze_t final : public maul_ravage_base_t<raze_base_t>
       add_child( repeat_action );
     }
   }
+
+  // Legacy Azerite: Guardian's Wrath - Raze replaces Maul, so it carries Maul's trait (the author 12 Nov 2026): the flat
+  // damage on each hit, and one stack toward the cheaper Ironfur per cast (from the main target).
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double da = base_t::bonus_da( s );
+
+    if ( p()->legacy_azerite.guardians_wrath.ok() )
+      da += p()->legacy_azerite.guardians_wrath.value( 2 );
+
+    return da;
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    base_t::impact( s );
+
+    if ( s->chain_target == 0 && result_is_hit( s->result ) && p()->legacy_azerite.guardians_wrath.ok() )
+    {
+      p()->buff.legacy_guardians_wrath->up();  // benefit tracking
+      p()->buff.legacy_guardians_wrath->trigger();
+    }
+  }
 };
 
 // Sundering Roar ===========================================================
@@ -12488,7 +12511,12 @@ void druid_t::create_buffs()
   buff.apex_predators_craving = make_fallback( talent.apex_predators_craving.ok(),
     this, "apex_predators_craving", find_trigger( talent.apex_predators_craving ).trigger() );
 
-  buff.berserk_cat = make_fallback( talent.berserk_cat.ok(), this, "berserk_cat", spec.berserk_cat )
+  // BracketSim legacy (12 Nov 2026): Vision of Perfection procs Berserk (106951) even without the talent (GAME-RULES:
+  // a proc still procs an ability the player does not have).
+  const bool vop_berserk = specialization() == DRUID_FERAL && !talent.berserk_cat.ok() &&
+                           find_azerite_essence( "Vision of Perfection" ).is_major();
+  buff.berserk_cat = make_fallback( talent.berserk_cat.ok() || vop_berserk, this, "berserk_cat",
+                                    vop_berserk ? find_spell( 106951 ) : spec.berserk_cat )
     ->set_name_reporting( "berserk" )
     ->set_stack_change_callback( [ this ]( buff_t*, int, int new_ ) {
       if ( !new_ )
@@ -13821,7 +13849,8 @@ void druid_t::init_gains()
 {
   player_t::init_gains();
 
-  if ( talent.berserk_cat.ok() )
+  if ( talent.berserk_cat.ok() || ( specialization() == DRUID_FERAL &&
+                                     find_azerite_essence( "Vision of Perfection" ).is_major() ) )
     gain.overflowing_power = get_gain( "Overflowing Power" );
 }
 

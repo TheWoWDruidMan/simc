@@ -344,6 +344,7 @@ public:
     buff_t* hand_of_frost;
     buff_t* icicles;
     buff_t* icy_veins;
+    buff_t* legacy_arcane_power;  // BracketSim legacy: Arcane Power (12042), procced by Vision of Perfection
     buff_t* permafrost_lances;
     buff_t* rapid_refreezing;
     buff_t* slick_ice;
@@ -981,6 +982,8 @@ public:
   // Character Definition
   // BracketSim legacy compatibility: Vision of Perfection.
   void vision_of_perfection_proc() override;
+  void legacy_lucid_dreams_refund( action_t*, resource_e, double ) override;
+  void legacy_lucid_dreams_major_changed() override;
   void init_spells() override;
   void init_base_stats() override;
   void create_buffs() override;
@@ -1902,6 +1905,9 @@ public:
     if ( affected_by.arcane_surge )
       m *= 1.0 + p()->buffs.arcane_surge->check_value();
 
+    // BracketSim legacy: Arcane Power (12042) "you deal 30% more spell damage" (direct and periodic).
+    m *= 1.0 + p()->buffs.legacy_arcane_power->check_value();
+
     if ( affected_by.combustion )
       m *= 1.0 + p()->buffs.combustion->check_value();
 
@@ -2054,6 +2060,10 @@ public:
     double c = spell_t::cost_pct_multiplier();
 
     c *= 1.0 + p()->talents.mana_confluence->effectN( 1 ).percent();
+
+    // BracketSim legacy: Arcane Power (12042) "your spells cost 30% less mana".
+    if ( p()->buffs.legacy_arcane_power->check() )
+      c *= 1.0 - 0.30;
 
     return c;
   }
@@ -4874,6 +4884,10 @@ struct flurry_t final : public custom_state_spell_t<frost_mage_spell_t, flurry_d
   {
     custom_state_spell_t::execute();
 
+    // BracketSim legacy: Memory of Lucid Dreams major - "causing Frostbolt and Flurry to generate an additional Icicle".
+    if ( p()->player_t::buffs.memory_of_lucid_dreams && p()->player_t::buffs.memory_of_lucid_dreams->check() )
+      p()->trigger_icicle();
+
     if ( p()->buffs.brain_freeze->up() )
     {
       p()->buffs.brain_freeze->decrement();
@@ -5012,6 +5026,10 @@ struct frostbolt_t final : public filler_spell_t<frost_mage_spell_t>
   void execute() override
   {
     filler_spell_t::execute();
+
+    // BracketSim legacy: Memory of Lucid Dreams major - "causing Frostbolt and Flurry to generate an additional Icicle".
+    if ( p()->player_t::buffs.memory_of_lucid_dreams && p()->player_t::buffs.memory_of_lucid_dreams->check() )
+      p()->trigger_icicle();
 
     p()->trigger_fof( fof_chance, proc_fof );
     p()->trigger_brain_freeze( bf_chance, proc_brain_freeze, 150_ms );
@@ -5701,6 +5719,10 @@ struct fire_blast_t final : public fire_mage_spell_t
 
     if ( &cd == cooldown )
       m /= 1.0 + p()->buffs.fiery_rush->check_value();
+
+    // BracketSim legacy: Memory of Lucid Dreams major - Fire Blast recharges 100% faster (303399: recharge time -50%).
+    if ( &cd == cooldown && p()->player_t::buffs.memory_of_lucid_dreams && p()->player_t::buffs.memory_of_lucid_dreams->check() )
+      m *= 1.0 + p()->find_spell( 303399 )->effectN( 1 ).percent();
 
     return m;
   }
@@ -7787,6 +7809,13 @@ void mage_t::create_buffs()
                                      ->add_stat( STAT_INTELLECT, azerite.brain_storm.value() )
                                      ->set_chance( azerite.brain_storm.enabled() );
   proc_t* proc_fof_frigid_grasp = get_proc( "Fingers of Frost from Frigid Grasp" );
+  // BracketSim legacy: Arcane Power (12042) is gone from the client; its last version (Shadowlands 9.2.7, rank 2 at
+  // level 41): 10 s, +30% spell damage, -30% mana cost.
+  buffs.legacy_arcane_power      = make_buff( this, "arcane_power", spell_data_t::nil() )
+                                     ->set_default_value( 0.30 )
+                                     ->set_duration( 10_s )
+                                     ->set_chance( specialization() == MAGE_ARCANE &&
+                                                   find_azerite_essence( "Vision of Perfection" ).is_major() );
   buffs.frigid_grasp             = make_buff<stat_buff_t>( this, "frigid_grasp", find_spell( 279684 ) )
                                      ->add_stat( STAT_INTELLECT, azerite.frigid_grasp.value() )
                                      ->set_stack_change_callback( [ this, proc_fof_frigid_grasp ]( buff_t*, int old, int )
@@ -7847,11 +7876,15 @@ void mage_t::create_buffs()
                                ->set_chance( talents.hand_of_frost_2.ok() );
   buffs.icicles            = make_buff( this, "icicles", find_spell( 205473 ) )
                                ->set_chance( talents.icicles.ok() );
+  // BracketSim legacy (12 Nov 2026): Icy Veins (12472, not in Midnight data) for Slick Ice and Vision of Perfection.
+  // the author's in-game log (12 Nov, Frost, VoP rank 3) shows each proc lasting 7.0 s = 20 s x 35%, so the game's copy is
+  // 20 s (not The War Within's 25 s); Haste 30% to match (the log cannot show the Haste amount).
+  const bool vop_icy_veins = specialization() == MAGE_FROST && find_azerite_essence( "Vision of Perfection" ).is_major();
   buffs.icy_veins          = make_buff( this, "icy_veins", spell_data_t::nil() )
                                ->set_default_value( 0.30 )
                                ->set_duration( 20_s )
                                ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
-                               ->set_chance( shadowlands_legacy.slick_ice )
+                               ->set_chance( shadowlands_legacy.slick_ice || vop_icy_veins )
                                ->set_stack_change_callback( [ this ] ( buff_t*, int, int current )
                                  { if ( current == 0 ) buffs.slick_ice->expire(); } );
   buffs.permafrost_lances  = make_buff( this, "permafrost_lances", find_spell( 455122 ) )
@@ -8389,14 +8422,20 @@ void mage_t::vision_of_perfection_proc()
   double mult = essence.spell( 1u )->effectN( 1 ).percent() +
                 essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
 
+  // BracketSim legacy (12 Nov 2026, the author: "it should use what it genuinely says even if that class doesnt have it
+  // anymore"): the tooltip's Arcane Power / Combustion / Icy Veins (297739), not a modern stand-in. Frost also gets
+  // Frigid Grasp when the proc starts Icy Veins (Battle for Azeroth).
   buff_t* window = nullptr;
   switch ( specialization() )
   {
     case MAGE_ARCANE:
-      window = buffs.arcane_surge;
+      window = buffs.legacy_arcane_power;
       break;
     case MAGE_FIRE:
       window = buffs.combustion;
+      break;
+    case MAGE_FROST:
+      window = buffs.icy_veins;
       break;
     default:
       break;
@@ -8409,7 +8448,45 @@ void mage_t::vision_of_perfection_proc()
   if ( window->check() )
     window->extend_duration( dur );
   else
+  {
     window->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+    // the author's log: Frigid Grasp (with its Fingers of Frost) starts with the proc's Icy Veins and ends with it.
+    if ( window == buffs.icy_veins && azerite.frigid_grasp.enabled() )
+    {
+      buffs.frigid_grasp->expire();
+      buffs.frigid_grasp->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, dur );
+    }
+  }
+}
+
+// BracketSim legacy (12 Nov 2026): Lucid Dreams for Fire ("refund 50% of a charge of Fire Blast") and Frost ("a
+// chance to generate an Icicle"), on a mana spend, as Battle for Azeroth (mage_t::trigger_lucid_dreams). Arcane: mana.
+void mage_t::legacy_lucid_dreams_refund( action_t* a, resource_e r, double spent )
+{
+  if ( specialization() == MAGE_ARCANE )
+    return player_t::legacy_lucid_dreams_refund( a, r, spent );
+
+  if ( legacy_lucid_dreams.refund <= 0 || spent <= 0 || r != RESOURCE_MANA || !rng().roll( legacy_lucid_dreams.chance ) )
+    return;
+
+  if ( specialization() == MAGE_FIRE )
+  {
+    cooldowns.fire_blast->adjust( -legacy_lucid_dreams.refund * cooldown_t::cooldown_duration( cooldowns.fire_blast ) );
+    // the author's in-game log (12 Nov): a Fire proc also refunds about half the mana spent (Scorch 150 -> 80, Pyroblast
+    // 225 -> 120, Shimmer 300 -> 150). The Fire Blast part cannot show in a log (cooldowns are not logged).
+    player_t::legacy_lucid_dreams_gain( RESOURCE_MANA, spent * legacy_lucid_dreams.refund );
+  }
+  else if ( specialization() == MAGE_FROST )
+    trigger_icicle();
+
+  if ( legacy_lucid_dreams.rank3 && player_t::buffs.lucid_dreams )
+    player_t::buffs.lucid_dreams->trigger();
+}
+
+void mage_t::legacy_lucid_dreams_major_changed()
+{
+  if ( specialization() == MAGE_FIRE )
+    cooldowns.fire_blast->adjust_recharge_multiplier();
 }
 
 void mage_t::reset()

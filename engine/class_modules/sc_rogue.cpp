@@ -177,6 +177,7 @@ public:
     buff_t* wound_poison;
     buff_t* banshees_blight; // BracketSim legacy: Edge of Night
     buff_t* legacy_well_placed_steel; // BracketSim legacy: conduit 238
+    buff_t* legacy_vendetta;          // BracketSim legacy: Vendetta (79140, 9.2.7), for Vision of Perfection
   } debuffs;
 
   rogue_td_t( player_t* target, rogue_t* source );
@@ -10674,6 +10675,11 @@ rogue_td_t::rogue_td_t( player_t* target, rogue_t* source ) :
   debuffs.numbing_poison        = new buffs::numbing_poison_t( *this );
 
   debuffs.amplifying_poison = make_buff( *this, "amplifying_poison", source->spec.amplifying_poison_debuff );
+  debuffs.legacy_vendetta = make_buff( *this, "vendetta" )
+                                ->set_duration( 20_s )
+                                ->set_default_value( 0.30 )
+                                ->set_chance( source->specialization() == ROGUE_ASSASSINATION &&
+                                              source->find_azerite_essence( "Vision of Perfection" ).is_major() );
   debuffs.legacy_well_placed_steel = make_buff( *this, "legacy_well_placed_steel" )
                                          ->set_duration( 8_s )
                                          ->set_default_value( source->legacy_conduits.percent( 238 ) )
@@ -10915,6 +10921,11 @@ double rogue_t::composite_player_pet_damage_multiplier( const action_state_t* s,
 double rogue_t::composite_player_target_multiplier( player_t* target, school_e school ) const
 {
   double m = player_t::composite_player_target_multiplier( target, school );
+
+  // BracketSim legacy: Vendetta (79140, 9.2.7) - "increasing the damage your abilities and auto attacks deal to the
+  // target by 30%".
+  if ( auto tdata = find_target_data( target ); tdata && tdata->debuffs.legacy_vendetta->check() )
+    m *= 1.0 + tdata->debuffs.legacy_vendetta->check_value();
 
   // BracketSim legacy compatibility: Well-Placed Steel (conduit 238) - Nature damage against Shiv's target.
   if ( legacy_conduits.has( 238 ) && dbc::is_school( school, SCHOOL_NATURE ) )
@@ -13758,9 +13769,14 @@ void rogue_t::vision_of_perfection_proc()
   double mult = essence.spell( 1u )->effectN( 1 ).percent() +
                 essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
 
+  // BracketSim legacy (12 Nov 2026, the author: "it should use what it genuinely says"): Assassination marks the target
+  // with Vendetta (297738) for the essence's share of its 20 sec.
   buff_t* window = nullptr;
   switch ( specialization() )
   {
+    case ROGUE_ASSASSINATION:
+      window = get_target_data( target )->debuffs.legacy_vendetta;
+      break;
     case ROGUE_OUTLAW:
       window = buffs.adrenaline_rush;
       break;

@@ -1001,6 +1001,7 @@ public:
   // Character Definition
   // BracketSim legacy compatibility: Vision of Perfection.
   void vision_of_perfection_proc() override;
+  action_t* legacy_vop_bladestorm = nullptr;  // BracketSim legacy: Vision of Perfection's Bladestorm (Arms)
   void init_spells() override;
   void init_items() override;
   void init_base_stats() override;
@@ -10528,6 +10529,23 @@ struct into_the_fray_callback_t
 
 void warrior_t::create_actions()
 {
+  // BracketSim legacy (12 Nov 2026): Vision of Perfection's Bladestorm for Arms without Ravager - a background copy of
+  // today's Bladestorm (227847) lasting the essence's share of its 6 sec.
+  if ( specialization() == WARRIOR_ARMS && !talents.shared.ravager.ok() )
+  {
+    auto vop = find_azerite_essence( "Vision of Perfection" );
+    if ( vop.is_major() )
+    {
+      double mult = vop.spell( 1u )->effectN( 1 ).percent() + vop.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
+      auto bs = new bladestorm_t( this, "", "bladestorm_vop", find_spell( 227847 ) );
+      bs->background = true;
+      bs->cooldown   = get_cooldown( "bladestorm_vop" );
+      bs->cooldown->duration = 0_ms;
+      bs->dot_duration = bs->dot_duration * mult;
+      legacy_vop_bladestorm = bs;
+    }
+  }
+
   if ( talents.shared.deep_wounds->ok() || talents.arms.mortal_wounds->ok() || talents.colossus.decimator->ok() )
     active.deep_wounds = new deep_wounds_t( this );
   if ( talents.arms.fatality->ok() )
@@ -10608,12 +10626,27 @@ void warrior_t::vision_of_perfection_proc()
   double mult = essence.spell( 1u )->effectN( 1 ).percent() +
                 essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
 
+  // BracketSim legacy (12 Nov 2026, the author: "it should use what it genuinely says"): Arms spins Bladestorm, not Avatar.
+  if ( specialization() == WARRIOR_ARMS )
+  {
+    if ( legacy_vop_bladestorm && !buff.bladestorm->check() )
+    {
+      legacy_vop_bladestorm->set_target( target );
+      legacy_vop_bladestorm->execute();
+      // The Bladestorm buff (abilities wait while spinning) lasts as long as this short spin.
+      if ( auto d = legacy_vop_bladestorm->find_dot( target ); d && d->is_ticking() )
+      {
+        buff.bladestorm->expire();
+        buff.bladestorm->trigger( d->remains() );
+      }
+    }
+    // With Ravager talented the tooltip names Ravager; no level 50 Arms list takes it (not ported).
+    return;
+  }
+
   buff_t* window = nullptr;
   switch ( specialization() )
   {
-    case WARRIOR_ARMS:
-      window = buff.avatar;
-      break;
     case WARRIOR_FURY:
       window = buff.recklessness;
       break;

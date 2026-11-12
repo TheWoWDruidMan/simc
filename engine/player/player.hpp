@@ -1621,6 +1621,25 @@ public:
   // 8.2 Vision of Perfection essence
   virtual void vision_of_perfection_proc();
 
+  // BracketSim legacy (12 Nov 2026): Memory of Lucid Dreams, ported from Battle for Azeroth for every class.
+  // Minor (Lucid Dreams 298268): a spend of the class resource has a chance to refund part of it. Major (298357):
+  // that resource is generated 100% faster. Both did nothing before (the minor's Versatility buff was never even made).
+  struct legacy_lucid_dreams_t
+  {
+    double refund  = 0.0;  // minor worn: share of the spend refunded (0 = not worn)
+    double chance  = 0.0;  // minor: chance per spend (Battle for Azeroth per spec)
+    double partial = 0.0;  // minor: carried fraction for whole-unit resources (runes, Holy Power, Soul Shards)
+    bool rank3     = false;
+    gain_t* gain   = nullptr;
+  } legacy_lucid_dreams;
+  // Is this resource the one Lucid Dreams works on? (major = the 100% generation part)
+  virtual bool legacy_lucid_dreams_resource( resource_e r, bool major ) const;
+  // A cast spent `spent` of resource r: roll the minor and refund.
+  virtual void legacy_lucid_dreams_refund( action_t* a, resource_e r, double spent );
+  virtual void legacy_lucid_dreams_gain( resource_e r, double amount );
+  // The major's buff went up or down (rune regeneration, Fire Blast recharge).
+  virtual void legacy_lucid_dreams_major_changed() {}
+
 private:
   void do_update_movement( double yards );
   void check_resource_callback_deactivation();

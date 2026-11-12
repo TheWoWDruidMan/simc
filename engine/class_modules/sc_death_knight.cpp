@@ -2146,6 +2146,11 @@ public:
   // Character Definition overrides
   // BracketSim legacy compatibility: Vision of Perfection.
   void vision_of_perfection_proc() override;
+  action_t* legacy_vop_erw = nullptr;  // BracketSim legacy: Vision of Perfection's Empower Rune Weapon (Frost)
+  void legacy_lucid_dreams_gain( resource_e, double ) override;
+  void legacy_lucid_dreams_major_changed() override;
+  bool legacy_vop_army() const
+  { return specialization() == DEATH_KNIGHT_UNHOLY && find_azerite_essence( "Vision of Perfection" ).is_major(); }
   void init_spells() override;
   void init_action_list() override;
   void init_blizzard_action_list() override;
@@ -10770,6 +10775,31 @@ struct empower_rune_weapon_projectile_t final : public death_knight_spell_t
   }
 };
 
+// BracketSim legacy (12 Nov 2026, the author: "for DK id use the current empower rune weapon as is in midnight as that is
+// what will proc"): Vision of Perfection's Empower Rune Weapon for Frost is today's spell - Shadowfrost damage (reduced
+// on nearby enemies), 40 Runic Power (1230959) and Killing Machine. It has no duration to stretch.
+struct legacy_vop_empower_rune_weapon_t final : public death_knight_spell_t
+{
+  legacy_vop_empower_rune_weapon_t( death_knight_t* p )
+    : death_knight_spell_t( "empower_rune_weapon_vop", p, p->find_spell( 47568 ) )
+  {
+    background          = true;
+    aoe                 = -1;
+    reduced_aoe_targets = 1.0;
+    full_amount_targets = 1;
+    cooldown->duration  = 0_ms;
+  }
+
+  void execute() override
+  {
+    death_knight_spell_t::execute();
+    p()->resource_gain( RESOURCE_RUNIC_POWER,
+                        p()->find_spell( 1230959 )->effectN( 1 ).resource( RESOURCE_RUNIC_POWER ),
+                        p()->gains.empower_rune_weapon, this );
+    p()->trigger_killing_machine( true, p()->procs.km_from_erw, p()->procs.km_from_erw_wasted );
+  }
+};
+
 struct empower_rune_weapon_t final : public death_knight_spell_t
 {
   empower_rune_weapon_t( death_knight_t* p, std::string_view options_str )
@@ -14641,6 +14671,20 @@ bool death_knight_t::in_death_and_decay() const
   return get_ground_aoe_distance( *active_dnds.front()->pulse_state) <= active_dnds.front()->pulse_state->action->radius;
 }
 
+// BracketSim legacy (12 Nov 2026): Lucid Dreams refunds Runes through the rune system.
+void death_knight_t::legacy_lucid_dreams_gain( resource_e r, double amount )
+{
+  if ( r == RESOURCE_RUNE )
+    replenish_rune( as<unsigned>( amount ), legacy_lucid_dreams.gain );
+  else
+    player_t::legacy_lucid_dreams_gain( r, amount );
+}
+
+void death_knight_t::legacy_lucid_dreams_major_changed()
+{
+  _runes.update_coefficient();
+}
+
 unsigned death_knight_t::replenish_rune( unsigned n, gain_t* gain )
 {
   unsigned replenished = 0;
@@ -15607,7 +15651,7 @@ void death_knight_t::create_actions()
                                                                       lesser_ghoul_e::LESSER_PUTREFY );
     }
 
-    if ( talent.unholy.army_of_the_dead.ok() )
+    if ( talent.unholy.army_of_the_dead.ok() || legacy_vop_army() )
     {
       pet_summon.army_ghoul = get_action<summon_lesser_ghoul_t>( "army_ghoul", this, spell.summon_army_ghoul,
                                                                  lesser_ghoul_e::LESSER_ARMY_OF_THE_DEAD );
@@ -15715,6 +15759,9 @@ void death_knight_t::create_actions()
         background_actions.legacy_echoing_howl = get_action<legacy_echoing_howl_t>( "legacy_echoing_howl", this );
       }
     }
+
+    if ( specialization() == DEATH_KNIGHT_FROST && find_azerite_essence( "Vision of Perfection" ).is_major() )
+      legacy_vop_erw = new legacy_vop_empower_rune_weapon_t( this );
 
     if ( talent.frost.empower_rune_weapon.ok() )
     {
@@ -16094,7 +16141,7 @@ void death_knight_t::create_pets()
       pets.risen_skulker.set_replacement_strategy( spawner::pet_replacement_strategy::NO_REPLACE );
     }
 
-    if ( talent.unholy.army_of_the_dead.ok() )
+    if ( talent.unholy.army_of_the_dead.ok() || legacy_vop_army() )
     {
       pets.lesser_ghoul_army.set_creation_callback(
           []( death_knight_t* p ) { return new pets::lesser_ghoul_pet_t( p, "army_ghoul", PET_ARMY_GHOUL ); } );
@@ -16915,7 +16962,7 @@ void death_knight_t::spell_lookups()
   // Unholy Summon Spells
   spell.summon_gargoyle      = conditional_spell_lookup( talent.unholy.summon_gargoyle.ok(), 49206 );
   spell.summon_abomination   = conditional_spell_lookup( talent.unholy.raise_abomination.ok(), 288853 );
-  spell.summon_army_ghoul    = conditional_spell_lookup( talent.unholy.army_of_the_dead.ok(), 1294026 );
+  spell.summon_army_ghoul    = conditional_spell_lookup( talent.unholy.army_of_the_dead.ok() || legacy_vop_army(), 1294026 );
   spell.summon_lesser_ghoul  = conditional_spell_lookup( talent.unholy.scourge_strike.ok(), 275430 );
   spell.summon_putrefy_ghoul = conditional_spell_lookup( talent.unholy.putrefy.ok(), 1277098 );
   spell.summon_magus         = conditional_spell_lookup( talent.unholy.magus_of_the_dead.ok(), 317776 );
@@ -18346,17 +18393,39 @@ void death_knight_t::vision_of_perfection_proc()
   double mult = essence.spell( 1u )->effectN( 1 ).percent() +
                 essence.spell( 2u, essence_spell::UPGRADE )->effectN( 1 ).percent();
 
+  // BracketSim legacy (12 Nov 2026, the author: "it should use what it genuinely says"): the tooltip's Vampiric Blood /
+  // Empower Rune Weapon (297737) and, for Unholy, "summon 2 Army of the Dead ghouls for 15 sec" (296325) - not the
+  // Dancing Rune Weapon / Pillar of Frost / Dark Transformation stand-ins.
+  if ( specialization() == DEATH_KNIGHT_UNHOLY )
+  {
+    auto vop = essence.spell( 1u, essence_type::MAJOR );
+    if ( pet_summon.army_ghoul )
+    {
+      auto summon = debug_cast<summon_lesser_ghoul_t*>( pet_summon.army_ghoul.get() );
+      for ( int i = 0; i < as<int>( vop->effectN( 5 ).base_value() ); i++ )
+      {
+        summon->set_duration( timespan_t::from_millis( vop->effectN( 4 ).base_value() ) );
+        summon->execute();
+      }
+    }
+    return;
+  }
+
+  if ( specialization() == DEATH_KNIGHT_FROST )
+  {
+    if ( legacy_vop_erw )
+    {
+      legacy_vop_erw->set_target( target );
+      legacy_vop_erw->execute();
+    }
+    return;
+  }
+
   buff_t* window = nullptr;
   switch ( specialization() )
   {
     case DEATH_KNIGHT_BLOOD:
-      window = buffs.dancing_rune_weapon;
-      break;
-    case DEATH_KNIGHT_FROST:
-      window = buffs.pillar_of_frost;
-      break;
-    case DEATH_KNIGHT_UNHOLY:
-      window = buffs.dark_transformation;
+      window = buffs.vampiric_blood;
       break;
     default:
       break;
@@ -18637,6 +18706,10 @@ inline double death_knight_t::runes_per_second() const
   if ( talent.frost.runic_command->ok() )
     rps *= 1.0 + talent.frost.runic_command->effectN( 2 ).percent();
 
+  // BracketSim legacy: Memory of Lucid Dreams major - Runes regenerate 100% faster (298357 effect 8).
+  if ( player_t::buffs.memory_of_lucid_dreams && player_t::buffs.memory_of_lucid_dreams->check() )
+    rps *= 1.0 + player_t::buffs.memory_of_lucid_dreams->data().effectN( 8 ).percent();
+
   return rps;
 }
 
@@ -18650,6 +18723,10 @@ inline double death_knight_t::rune_regen_coefficient() const
 
   if ( talent.frost.runic_command->ok() )
     coeff /= 1.0 + talent.frost.runic_command->effectN( 2 ).percent();
+
+  // BracketSim legacy: Memory of Lucid Dreams major - Runes regenerate 100% faster (298357 effect 8).
+  if ( player_t::buffs.memory_of_lucid_dreams && player_t::buffs.memory_of_lucid_dreams->check() )
+    coeff /= 1.0 + player_t::buffs.memory_of_lucid_dreams->data().effectN( 8 ).percent();
 
   return coeff;
 }

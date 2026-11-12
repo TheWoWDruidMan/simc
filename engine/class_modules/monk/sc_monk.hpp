@@ -598,6 +598,7 @@ public:
     propagate_const<buff_t *> whirling_dragon_punch;
     propagate_const<buff_t *> zenith;
     propagate_const<buff_t *> zenith_stomp;
+    buff_t *legacy_storm_earth_and_fire = nullptr;  // BracketSim legacy: SEF (137639, 11.2.7), Vision of Perfection
     propagate_const<buff_t *> rushing_wind_kick;
     propagate_const<buff_t *> tigereye_brew_1;
     propagate_const<buff_t *> tigereye_brew_1_accumulator;
@@ -1318,6 +1319,7 @@ public:
   // Init / Reset
   // BracketSim legacy compatibility: Vision of Perfection.
   void vision_of_perfection_proc() override;
+  double composite_player_multiplier( school_e school ) const override;
   void init_spells() override;
   void init_background_actions() override;
   void init_base_stats() override;
