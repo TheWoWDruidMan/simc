@@ -5898,9 +5898,18 @@ struct ironfur_t final : public rage_spender_t<druid_spell_t>
     harmful = may_miss = may_dodge = may_parry = may_block = false;
   }
 
+  // Legacy Azerite: Guardian's Wrath - "Maul reduces the cost of your next Ironfur"
+  // (279541 effect 1). 12 Nov 2026: the stacks were built but never spent.
+  double cost() const override
+  {
+    return std::max( 0.0, base_t::cost() + p()->buff.legacy_guardians_wrath->check_stack_value() );
+  }
+
   void execute() override
   {
     base_t::execute();
+
+    p()->buff.legacy_guardians_wrath->expire();
 
     p()->buff.gory_fur_maul->trigger( this );
 
@@ -12116,7 +12125,8 @@ void druid_t::create_buffs()
     ->set_chance( legacy_azerite.twisted_claws.ok() ? find_spell( 275908 )->proc_chance() : 0.0 );
   buff.legacy_burst_of_savagery = make_buff<stat_buff_t>( this, "legacy_burst_of_savagery", find_spell( 289315 ) )
     ->add_stat( STAT_MASTERY_RATING, legacy_azerite.burst_of_savagery.value( 1 ) );
-  buff.legacy_guardians_wrath = make_buff( this, "legacy_guardians_wrath", find_spell( 279541 ) );
+  buff.legacy_guardians_wrath = make_buff( this, "legacy_guardians_wrath", find_spell( 279541 ) )
+    ->set_default_value( find_spell( 279541 )->effectN( 1 ).resource( RESOURCE_RAGE ) );
   buff.legacy_masterful_instincts =
       make_buff<stat_buff_t>( this, "legacy_masterful_instincts", find_spell( 273349 ) )
           ->add_stat( STAT_MASTERY_RATING, legacy_azerite.masterful_instincts.value( 1 ) )

@@ -2999,9 +2999,6 @@ struct kill_command_bm_t: public hunter_pet_attack_t<hunter_main_pet_base_t>
   {
     background = dual = proc = true;
 
-    // Legacy Azerite: Dire Consequences
-    base_dd_adder += o()->legacy_azerite.dire_consequences.value( 1 );
-
     if ( o()->legacy_azerite.serrated_jaws.ok() )
     {
       legacy_serrated_jaws.chance = o()->legacy_azerite.serrated_jaws.spell()->effectN( 3 ).percent();
@@ -3018,6 +3015,9 @@ struct kill_command_bm_t: public hunter_pet_attack_t<hunter_main_pet_base_t>
 
     if ( legacy_serrated_jaws.procced )
       b += legacy_serrated_jaws.bonus_da;
+
+    // Legacy Azerite: Dire Consequences (effect 1, Beast Mastery), read at hit time.
+    b += o()->legacy_azerite.dire_consequences.value( 1 );
 
     return b;
   }
@@ -3090,8 +3090,12 @@ struct kill_command_sv_t : public hunter_pet_attack_t<hunter_main_pet_t>
 {
   kill_command_sv_t( hunter_main_pet_t* p ) : hunter_pet_attack_t( "kill_command", p, p->o()->talents.kill_command_sv_pet )
   {
-    // Legacy Azerite: Dire Consequences
-    base_dd_adder += o()->legacy_azerite.dire_consequences.value( 2 );
+  }
+
+  // Legacy Azerite: Dire Consequences (effect 2, Survival). Read at hit time, as for Beast Mastery.
+  double bonus_da( const action_state_t* s ) const override
+  {
+    return hunter_pet_attack_t::bonus_da( s ) + o()->legacy_azerite.dire_consequences.value( 2 );
   }
 
   double composite_da_multiplier( const action_state_t* s ) const override
@@ -7300,9 +7304,20 @@ struct kill_command_t: public hunter_spell_t
     timespan_t cap = 0_s;
   } fury_of_the_wyvern;
 
+  // Legacy Azerite: Dire Consequences - "and has a chance to summon a Dire Beast"
+  // (Battle for Azeroth: 1 RPPM, attack-speed scaled, x0.65 for Beast Mastery).
+  real_ppm_t* legacy_dire_consequences = nullptr;
+
   kill_command_t( hunter_t* p, util::string_view options_str, const spell_data_t* s ) : hunter_spell_t( "kill_command", p, s )
   {
     parse_options( options_str );
+
+    if ( p->legacy_azerite.dire_consequences.ok() )
+    {
+      legacy_dire_consequences = p->get_rppm( "dire_consequences", 1.0, 1.0, RPPM_AUTO_ATTACK_SPEED );
+      if ( p->specialization() == HUNTER_BEAST_MASTERY )
+        legacy_dire_consequences->set_modifier( 0.65 );
+    }
 
     if ( p->specialization() == HUNTER_BEAST_MASTERY )
     {
@@ -7332,6 +7347,9 @@ struct kill_command_t: public hunter_spell_t
     hunter_spell_t::execute();
 
     p()->buffs.legacy_flamewakers_cobra_sting->decrement();
+
+    if ( legacy_dire_consequences && legacy_dire_consequences->trigger() )
+      p()->pets.dire_beast.spawn( pets::dire_beast_duration( p(), p()->talents.dire_beast_summon->duration() ).first );
 
     for ( auto pet : pets::active<pets::hunter_main_pet_base_t>( p()->pets.main, p()->pets.animal_companion, p()->pets.natures_ally_pet.active_pet() ) )
       pet -> actions.kill_command -> execute_on_target( target );

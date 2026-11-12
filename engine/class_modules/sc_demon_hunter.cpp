@@ -7512,6 +7512,13 @@ struct blade_dance_base_t
         target_filter_callback = secondary_targets_only();
     }
 
+    // Legacy Azerite: Revolving Blades - "Blade Dance deals ${$s2*4} additional
+    // damage": effect 2 on each of the four slashes, as in Battle for Azeroth.
+    double bonus_da( const action_state_t* s ) const override
+    {
+      return demon_hunter_attack_t::bonus_da( s ) + dh()->azerite.revolving_blades.value( 2 );
+    }
+
     // BracketSim legacy compatibility: the conduit Dancing with Fate (151),
     // the non-First-Blood half of Blade Dance. Same gate: the final slash only.
     double composite_da_multiplier( const action_state_t* s ) const override
@@ -7632,7 +7639,8 @@ struct blade_dance_base_t
   double cost() const override
   {
     // TWW1 4pc % cost reduction results in a fractional fury cost, but testing shows rounding up
-    return ceil( base_t::cost() );
+    // Legacy Azerite: Revolving Blades stacks are negative Fury (279584 effect 1).
+    return ceil( std::max( 0.0, base_t::cost() + dh()->buff.revolving_blades->check_stack_value() ) );
   }
 
   void execute() override
@@ -7645,8 +7653,13 @@ struct blade_dance_base_t
     // Legacy Azerite: Revolving Blades cheapens the next Blade Dance, one stack
     // per enemy struck by the final slash. Hooked on the parent cast rather than
     // on a damage child: which child actually swings depends on First Blood.
+    // The stacks were spent on this cast's cost (12 Nov 2026: they were never spent
+    // or read before, so the trait did nothing).
     if ( dh()->azerite.revolving_blades.ok() )
+    {
+      dh()->buff.revolving_blades->expire();
       dh()->buff.revolving_blades->trigger( std::max( 1, as<int>( dh()->sim->target_non_sleeping_list.size() ) ) );
+    }
 
     dh()->buff.chaos_theory->trigger();
     // BracketSim legacy compatibility: the Chaos Theory legendary shares its
@@ -7875,6 +7888,13 @@ struct chaos_strike_base_t
     chaos_strike_base_t* parent;
     bool may_refund;
     double refund_proc_chance;
+    // Legacy Azerite: Thirsting Blades, snapshot by the parent cast (as in Battle for Azeroth).
+    double legacy_thirsting_blades_da = 0.0;
+
+    double bonus_da( const action_state_t* s ) const override
+    {
+      return base_t::bonus_da( s ) + legacy_thirsting_blades_da;
+    }
 
     chaos_strike_damage_t( util::string_view name, demon_hunter_t* p, const spelleffect_data_t& eff,
                            chaos_strike_base_t* a )
@@ -7994,7 +8014,8 @@ struct chaos_strike_base_t
     if ( from_onslaught )
       return 0.0;
 
-    return base_t::cost();
+    // Legacy Azerite: Thirsting Blades - each stack is 1 Fury off (278736 effect 2).
+    return std::max( 0.0, base_t::cost() - dh()->buff.thirsting_blades->check() );
   }
 
   void init_finished() override
@@ -8012,9 +8033,16 @@ struct chaos_strike_base_t
   {
     base_t::execute();
 
+    // Legacy Azerite: Thirsting Blades - the stacks are spent by this cast
+    // (12 Nov 2026: they were built but never read, so the trait did nothing).
+    const double thirsting_blades_da = dh()->buff.thirsting_blades->stack_value();
+    if ( thirsting_blades_da > 0 )
+      dh()->buff.thirsting_blades->expire();
+
     // Create Strike Events
     for ( auto& attack : attacks )
     {
+      attack->legacy_thirsting_blades_da = thirsting_blades_da;
       make_event<delayed_execute_event_t>( *sim, dh(), attack, target, attack->delay );
     }
 

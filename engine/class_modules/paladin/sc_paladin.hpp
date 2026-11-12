@@ -1659,7 +1659,8 @@ public:
       return 0.0;
     }
 
-    if ( ( is_divine_storm && ( ab::p()->buffs.empyrean_power->check() ) ) ||
+    // Legacy Azerite: Empyrean Power - "make your next Divine Storm free" (286393 effect 3).
+    if ( ( is_divine_storm && ( ab::p()->buffs.empyrean_power->check() || ab::p()->buffs.legacy_empyrean_power->check() ) ) ||
          ( ab::affected_by.divine_purpose_cost && ab::p()->buffs.divine_purpose->check() ) )
     {
       return 0.0;

@@ -671,6 +671,10 @@ struct divine_storm_t: public holy_power_consumer_t<paladin_melee_attack_t>
   {
     holy_power_consumer_t::execute();
 
+    // Legacy Azerite: Empyrean Power is spent by this Divine Storm (12 Nov 2026: it was
+    // never spent, so it neither made the storm free nor ran out).
+    p()->buffs.legacy_empyrean_power->expire();
+
     if ( p()->talents.tempest_of_the_lightbringer->ok() )
       tempest->schedule_execute();
 

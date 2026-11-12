@@ -4381,17 +4381,6 @@ struct blade_flurry_attack_t : public rogue_attack_t
     snapshot_flags |= STATE_TGT_MUL_DA;
   }
 
-  // BracketSim legacy compatibility: Keep Your Wits About You adds flat damage
-  // to each Blade Flurry cleave hit.
-  double bonus_da( const action_state_t* s ) const override
-  {
-    double b = rogue_attack_t::bonus_da( s );
-
-    b += p()->azerite.keep_your_wits_about_you.value( 2 );
-
-    return b;
-  }
-
   bool procs_poison() const override
   { return true; }
 };
@@ -4960,9 +4949,19 @@ struct eviscerate_t : public rogue_attack_t
     }
   }
 
+  // Legacy Azerite: Night's Vengeance - "Rupture increases the damage of your next
+  // Eviscerate by $s1 per combo point" (the combo point multiplier applies to it).
+  double bonus_da( const action_state_t* s ) const override
+  {
+    return rogue_attack_t::bonus_da( s ) + p()->buffs.nights_vengeance->stack_value();
+  }
+
   void execute() override
   {
     rogue_attack_t::execute();
+
+    // 12 Nov 2026: the buff was built but never read, so the trait did nothing.
+    p()->buffs.nights_vengeance->expire();
 
     trigger_cut_to_the_chase( execute_state );
 
@@ -6886,9 +6885,12 @@ struct sinister_strike_t : public rogue_attack_t
     }
 
     // Legacy Azerite: Snake Eyes - the extra Sinister Strike gets the bonus and uses a charge, as in Battle for Azeroth.
+    // Keep Your Wits About You - "Additional strikes of Sinister Strike deal $s2 more damage" (12 Nov 2026: this sat
+    // on the Blade Flurry cleave instead, which never happens against one target).
     double bonus_da( const action_state_t* s ) const override
     {
-      return rogue_attack_t::bonus_da( s ) + p()->buffs.snake_eyes->check_value();
+      return rogue_attack_t::bonus_da( s ) + p()->buffs.snake_eyes->check_value() +
+             p()->azerite.keep_your_wits_about_you.value( 2 );
     }
 
     double composite_energize_amount( const action_state_t* ) const override
@@ -8643,6 +8645,13 @@ struct blade_flurry_t : public rogue_buff_t
     set_default_value_from_effect( 2 );
     set_refresh_behavior( buff_refresh_behavior::DURATION );
   }
+
+  // Legacy Azerite: Keep Your Wits About You lasts while Blade Flurry does (as in Battle for Azeroth).
+  void expire_override( int expiration_stacks, timespan_t remaining_duration ) override
+  {
+    rogue_buff_t::expire_override( expiration_stacks, remaining_duration );
+    p->buffs.keep_your_wits_about_you->expire();
+  }
 };
 
 struct subterfuge_t : public buff_t
@@ -9558,6 +9567,11 @@ void actions::rogue_action_t<Base>::trigger_blade_flurry( const action_state_t* 
   }
 
   p()->active.blade_flurry->trigger_residual_action( state, multiplier );
+
+  // Legacy Azerite: Keep Your Wits About You - "When an attack Blade Flurries, increase the chance for
+  // Sinister Strike to strike again" (12 Nov 2026: the buff was never triggered).
+  if ( p()->azerite.keep_your_wits_about_you.ok() )
+    p()->buffs.keep_your_wits_about_you->trigger();
 }
 
 template <typename Base>
@@ -9762,7 +9776,11 @@ void actions::rogue_action_t<Base>::trigger_opportunity( const action_state_t* s
     return;
 
   const int stacks = 1 + as<int>( p()->talent.outlaw.fan_the_hammer->effectN( 1 ).base_value() );
-  if ( p()->buffs.opportunity->trigger( stacks, buff_t::DEFAULT_VALUE(), p()->extra_attack_proc_chance() * modifier ) )
+  double chance = p()->extra_attack_proc_chance() * modifier;
+  // Legacy Azerite: Keep Your Wits About You raises the chance for Sinister Strike only.
+  if ( ab::data().id() == p()->spec.sinister_strike->id() )
+    chance += p()->buffs.keep_your_wits_about_you->stack_value();
+  if ( p()->buffs.opportunity->trigger( stacks, buff_t::DEFAULT_VALUE(), chance ) )
   {
     if ( p()->talent.fatebound.deal_fate->ok() )
     {

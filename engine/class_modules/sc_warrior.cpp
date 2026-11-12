@@ -210,6 +210,7 @@ public:
   int into_the_fray_friends;
   int never_surrender_percentage;
   bool first_rampage_attack_missed;
+  double legacy_pulverizing_blows_da = 0.0;  // Legacy Azerite: snapshot for the Rampage in flight
   int slayers_strike_attempts_since_last_proc;
   int master_of_warfare_attempts_since_last_proc;
   int fury_mid2_2pc_extensions;
@@ -1821,6 +1822,7 @@ struct warrior_attack_t : public warrior_action_t<melee_attack_t>
   double master_of_warfare_proc_chance;
   bool proc_slayers_strike;
   bool proc_slayers_strike_per_target;
+  bool legacy_spends_crushing_assault = false;  // Slam: spends the buff and rolls it itself
   warrior_attack_t( util::string_view n, warrior_t* p, const spell_data_t* s = spell_data_t::nil() )
     : base_t( n, p, s ),
     slayers_strike_proc_chance( 0 ),
@@ -1896,6 +1898,12 @@ struct warrior_attack_t : public warrior_action_t<melee_attack_t>
       p()->cooldown.sudden_death_icd->start();
       p()->cooldown.execute->reset( true );
     }
+
+    // Legacy Azerite: Crushing Assault - "Your melee abilities have a chance to increase
+    // the damage of your next Slam" (Battle for Azeroth rolled it on every special attack;
+    // 12 Nov 2026: it only rolled on Slam itself, and nothing read it).
+    if ( p()->azerite.crushing_assault.ok() && !legacy_spends_crushing_assault )
+      p()->buff.crushing_assault->trigger();
   }
 
   double composite_target_multiplier( player_t* target ) const override
@@ -3815,6 +3823,7 @@ struct slam_base_t : public warrior_attack_t
     weapon                       = &( p->main_hand_weapon );
     radius = 5;
     proc_slayers_strike = true;
+    legacy_spends_crushing_assault = true;
     if ( player->specialization() == WARRIOR_FURY )
     {
       base_aoe_multiplier = p->spell.whirlwind_buff->effectN( 2 ).percent();
@@ -3854,7 +3863,20 @@ struct slam_base_t : public warrior_attack_t
     if ( from_fervor )
       return 0;
 
+    // Legacy Azerite: Crushing Assault - "...and reduce its Rage cost by ${$s2/10}".
+    if ( p()->buff.crushing_assault->check() )
+      return std::max( 0.0, warrior_attack_t::cost() - p()->azerite.crushing_assault.spell()->effectN( 2 ).base_value() / 10.0 );
+
     return warrior_attack_t::cost();
+  }
+
+  // Legacy Azerite: Crushing Assault - "increase the damage of your next Slam by $s1".
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = warrior_attack_t::bonus_da( s );
+    if ( p()->buff.crushing_assault->check() )
+      b += p()->buff.crushing_assault->value();
+    return b;
   }
 
   void impact( action_state_t* state ) override
@@ -6268,6 +6290,16 @@ struct overpower_t : public warrior_attack_t
     }
   }
 
+  // Legacy Azerite: Striking the Anvil - "your next Overpower ... deal $s1 additional damage"
+  // (12 Nov 2026: only the Mortal Strike cooldown half was ported).
+  double bonus_da( const action_state_t* s ) const override
+  {
+    double b = warrior_attack_t::bonus_da( s );
+    if ( p()->buff.legacy_striking_the_anvil->check() )
+      b += p()->azerite.striking_the_anvil.value( 1 );
+    return b;
+  }
+
   void execute() override
   {
     warrior_attack_t::execute();
@@ -6380,6 +6412,8 @@ struct rampage_attack_t : public rampage_attack_base_t
     double b = rampage_attack_base_t::bonus_da( s );
     b += p()->azerite.legacy_simmering_rage.value( 2 );
     b += p()->azerite.unbridled_ferocity.value( 2 );
+    // Legacy Azerite: Pulverizing Blows - "every strike of your next Rampage".
+    b += p()->legacy_pulverizing_blows_da;
     return b;
   }
 
@@ -6600,6 +6634,11 @@ struct rampage_parent_t : public warrior_attack_t
       p()->resource_gain(RESOURCE_RAGE, last_resource_cost * rage_from_frothing_berserker, p()->gain.frothing_berserker);
     }
 
+
+    // Legacy Azerite: Pulverizing Blows - this Rampage takes the stacks Raging Blow
+    // built (12 Nov 2026: they were built but never read, so the trait did nothing).
+    p()->legacy_pulverizing_blows_da = p()->buff.pulverizing_blows->stack_value();
+    p()->buff.pulverizing_blows->expire();
 
     // BracketSim legacy compatibility: Deathmaker (6964), 30% per Rampage (effect 1: 6000 ms).
     if ( p()->shadowlands_legacy.deathmaker && result_is_hit( execute_state->result ) &&
