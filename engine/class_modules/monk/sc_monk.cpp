@@ -7169,6 +7169,7 @@ void monk_t::create_buffs()
   // rank value to its Mastery (upstream shadowlands: monk_t::composite_mastery, + conduit value while it is up).
   buff.legacy_weapons_of_order =
       make_buff( this, "weapons_of_order", legacy_covenant.weapons_of_order )
+          ->set_cooldown( 0_ms ) // BracketSim 11 Nov 2026: the cooldown is the ability's, not the buff's
           // Mastery POINTS, as upstream shadowlands added them (player_t::composite_mastery adds the value as points;
           // the old * 0.01 made it 0.1 points, about nothing).
           ->set_default_value( legacy_covenant.weapons_of_order->effectN( 1 ).base_value()

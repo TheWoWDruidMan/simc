@@ -3322,6 +3322,21 @@ struct rogue_poison_t : public rogue_attack_t
       if ( td( state->target )->dots.kingsbane->is_ticking() )
         p()->buffs.kingsbane->trigger();
     }
+
+    // BracketSim legacy (11 Nov 2026): Dashing Scoundrel - "...and their critical strikes generate 1 Energy" (340426).
+    if ( p()->legendary.dashing_scoundrel && state->result == RESULT_CRIT && p()->buffs.envenom->check() )
+      p()->resource_gain( RESOURCE_ENERGY, p()->find_spell( 340426 )->effectN( 1 ).resource( RESOURCE_ENERGY ),
+                          p()->gains.dashing_scoundrel, this );
+  }
+
+  // BracketSim legacy (11 Nov 2026): Dashing Scoundrel - "Envenom also increases the critical strike chance of your
+  // poisons by 15%" (340081 effect 1). The buff it triggered was never read, so the legendary did nothing.
+  double composite_crit_chance() const override
+  {
+    double c = rogue_attack_t::composite_crit_chance();
+    if ( p()->legendary.dashing_scoundrel && p()->buffs.envenom->check() )
+      c += p()->find_spell( 340081 )->effectN( 1 ).percent();
+    return c;
   }
 };
 
@@ -11673,7 +11688,8 @@ void rogue_t::init_spells()
   };
 
   legendary.obedience        = legacy_unity( 7572, "venthyr" );
-  legendary.toxic_onslaught  = options.legacy_shadowlands_enabled && has_bonus_id( 7478 );
+  // 11 Nov 2026: Toxic Onslaught is the Night Fae covenant legendary, so Unity opens it too (it read only its own id).
+  legendary.toxic_onslaught  = legacy_unity( 7478, "night_fae" );
   legendary.deathspike       = legacy_unity( 7573, "necrolord" );
   legendary.duskwalkers_patch = options.legacy_shadowlands_enabled && has_bonus_id( 7118 );
   legendary.greenskins_wickers = options.legacy_shadowlands_enabled && has_bonus_id( 7119 );
@@ -11687,6 +11703,13 @@ void rogue_t::init_spells()
   legendary.doomblade             = options.legacy_shadowlands_enabled && has_bonus_id( 7116 );
   legendary.finality              = options.legacy_shadowlands_enabled && has_bonus_id( 7123 );
   legendary.resounding_clarity    = legacy_unity( 7577, "kyrian" );
+  // BracketSim legacy (11 Nov 2026): Deathly Shadows and Invigorating Shadowdust ride Vanish, which Outlaw only presses
+  // with Hidden Opportunity (not reachable at 60), so both gave 0. Their wearers press it, as Shadowlands' Outlaw list
+  // did: Deathly Shadows for Combo Points when the buff is down, Shadowdust on cooldown.
+  if ( specialization() == ROGUE_OUTLAW && legendary.deathly_shadows )
+    legacy_apl_actions.emplace_back( "vanish,if=!stealthed.all&buff.legacy_deathly_shadows.down&combo_points<=2" );
+  else if ( specialization() == ROGUE_OUTLAW && legendary.invigorating_shadowdust )
+    legacy_apl_actions.emplace_back( "vanish,if=!stealthed.all" );
 
   // Core Class Spells
   spell.ambush = find_class_spell( "Ambush" );

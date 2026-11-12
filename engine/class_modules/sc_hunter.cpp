@@ -5345,7 +5345,11 @@ struct cobra_shot_base_t: public hunter_ranged_attack_t
     hunter_ranged_attack_t::execute();
 
     if ( p() -> talents.killer_cobra.ok() && p() -> buffs.bestial_wrath -> check() )
+    {
       p() -> cooldowns.kill_command -> reset( true );
+      // BracketSim legacy (11 Nov 2026): Strength of the Pack (conduit 224) - "When Kill Command's cooldown is reset".
+      p() -> buffs.legacy_strength_of_the_pack -> trigger();
+    }
     
     if ( p()->talents.barbed_scales.ok() )
       p()->cooldowns.barbed_shot->adjust( -p()->talents.barbed_scales->effectN( 1 ).time_value() );
@@ -7313,9 +7317,21 @@ struct kill_command_t: public hunter_spell_t
     }
   }
 
+  // BracketSim legacy (11 Nov 2026): Flamewaker's Cobra Sting - "Cobra Shot has a 25% chance to make your next Kill
+  // Command consume no Focus" (336826 effect 1, -100% cost). The buff was triggered but never made anything free.
+  double cost() const override
+  {
+    double c = hunter_spell_t::cost();
+    if ( p()->buffs.legacy_flamewakers_cobra_sting->check() )
+      c *= 1.0 + p()->buffs.legacy_flamewakers_cobra_sting->data().effectN( 1 ).percent();
+    return c;
+  }
+
   void execute() override
   {
     hunter_spell_t::execute();
+
+    p()->buffs.legacy_flamewakers_cobra_sting->decrement();
 
     for ( auto pet : pets::active<pets::hunter_main_pet_base_t>( p()->pets.main, p()->pets.animal_companion, p()->pets.natures_ally_pet.active_pet() ) )
       pet -> actions.kill_command -> execute_on_target( target );

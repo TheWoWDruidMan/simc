@@ -928,6 +928,7 @@ public:
     buff_t* legacy_death_turf;
     buff_t* legacy_deaths_due_strength = nullptr;  // 324165, 30 Sep 2026
     buff_t* legacy_frenzied_monstrosity;
+    buff_t* legacy_final_sentence = nullptr;  // 353823, 11 Nov 2026
   } buffs;
 
   // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. These
@@ -2165,6 +2166,10 @@ public:
   bool validate_actor() override;
   double composite_attribute( attribute_e ) const override;
   double composite_bonus_armor() const override;
+  // BracketSim legacy (11 Nov 2026): Abomination's Frenzy's debuff 353546 is aura 270/381/380 (damage taken from the
+  // caster / its pets / its guardians), which parse_target_effects does not read, so it is applied here.
+  double composite_player_target_multiplier( player_t*, school_e ) const override;
+  double composite_player_target_pet_damage_multiplier( player_t*, bool ) const override;
   void combat_begin() override;
   void activate() override;
   void moving() override;
@@ -3560,6 +3565,10 @@ struct ghoul_pet_t final : public base_ghoul_pet_t
 
       if ( ghoulish_frenzy->check() )
         m *= 1.0 + ghoulish_frenzy->data().effectN( 2 ).percent();
+
+      // BracketSim legacy (11 Nov 2026): Frenzied Monstrosity, the ghoul's half (334895 effect 1).
+      if ( dk()->shadowlands_legacy.frenzied_monstrosity && dark_transformation->check() )
+        m *= 1.0 + dk()->find_spell( 334895 )->effectN( 1 ).percent();
     }
 
     return m;
@@ -3568,6 +3577,10 @@ struct ghoul_pet_t final : public base_ghoul_pet_t
   double composite_melee_auto_attack_speed() const override
   {
     double haste = base_ghoul_pet_t::composite_melee_auto_attack_speed();
+
+    // BracketSim legacy (11 Nov 2026): Frenzied Monstrosity, the ghoul's half (334895 effect 2).
+    if ( dk()->shadowlands_legacy.frenzied_monstrosity && dark_transformation->check() )
+      haste /= 1.0 + dk()->find_spell( 334895 )->effectN( 2 ).percent();
 
     if ( ghoulish_frenzy->check() )
       haste /= 1.0 + ghoulish_frenzy->data().effectN( 1 ).percent();
@@ -3643,6 +3656,11 @@ struct ghoul_pet_t final : public base_ghoul_pet_t
                               ->set_duration( 0_ms )  // Handled by the player buff
                               ->set_cooldown( 0_ms )  // Handled by the action
                               ->set_default_value_from_effect_type( A_MOD_DAMAGE_PERCENT_DONE );
+    // BracketSim legacy (12 Nov 2026): Frenzied Monstrosity's ghoul half reads Dark Transformation in the cached damage
+    // and attack speed, so they must be refreshed when it starts and ends - for its wearers only (on every Unholy it
+    // moved the whole list's numbers, 30-80, by -0.6 to +0.2%).
+    if ( dk()->shadowlands_legacy.frenzied_monstrosity )
+      dark_transformation->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )->add_invalidate( CACHE_AUTO_ATTACK_SPEED );
 
     ghoulish_frenzy = make_buff( this, "ghoulish_frenzy", dk()->pet_spell.ghoulish_frenzy )
                           ->set_default_value( dk()->pet_spell.ghoulish_frenzy->effectN( 1 ).percent() )
@@ -13669,6 +13687,7 @@ struct legacy_shackle_the_unworthy_t final : public death_knight_spell_t
     // Legacy Shadowlands: Final Sentence rides this cast.
     if ( p()->shadowlands_legacy.final_sentence )
     {
+      p()->buffs.legacy_final_sentence->trigger();
       p()->replenish_rune(
           as<unsigned int>( p()->find_spell( 353823 )->effectN( 1 ).resource( RESOURCE_RUNE ) ),
           p()->gains.legacy_final_sentence );
@@ -13787,6 +13806,24 @@ struct legacy_abomination_limb_damage_t final : public death_knight_spell_t
     base_multiplier *= 1.0 + p->legacy_conduits.percent( 127 );
   }
 
+  // BracketSim legacy (11 Nov 2026): Abomination's Frenzy - each pull marks the enemy (353546: 20% more damage from
+  // the death knight and his minions for 12 sec), once per enemy per 20 sec internal cooldown (353447). Only the
+  // Blood TALENT's limb did this before; the covenant limb Frost and Unholy cast never did.
+  void impact( action_state_t* s ) override
+  {
+    death_knight_spell_t::impact( s );
+
+    if ( p()->shadowlands_legacy.abominations_frenzy && result_is_hit( s->result ) )
+    {
+      auto td = get_td( s->target );
+      if ( !td->debuff.legacy_abominations_frenzy_icd->check() )
+      {
+        td->debuff.legacy_abominations_frenzy->trigger();
+        td->debuff.legacy_abominations_frenzy_icd->trigger();
+      }
+    }
+  }
+
   void execute() override
   {
     death_knight_spell_t::execute();
@@ -13813,6 +13850,10 @@ struct legacy_abomination_limb_buff_t final : public buff_t
       damage( new legacy_abomination_limb_damage_t( p ) )
   {
     cooldown->duration = 0_ms;  // Controlled by the action
+    // BracketSim legacy (11 Nov 2026): Abomination's Frenzy - "Abomination Limb's duration is increased by 4 sec"
+    // (353447 effect 1, label 1078).
+    if ( p->shadowlands_legacy.abominations_frenzy )
+      set_duration( buff_duration() + p->find_spell( 353447 )->effectN( 1 ).time_value() );
     set_tick_callback( [ this ]( buff_t*, int, timespan_t ) { damage->execute(); } );
     set_partial_tick( true );
   }
@@ -14273,6 +14314,34 @@ void runeforge::init_runeforges()
 
 // Resource Manipulation ====================================================
 
+double death_knight_t::composite_player_target_multiplier( player_t* t, school_e s ) const
+{
+  double m = parse_player_effects_t::composite_player_target_multiplier( t, s );
+
+  if ( shadowlands_legacy.abominations_frenzy )
+  {
+    const death_knight_td_t* td = get_target_data( t );
+    if ( td && td->debuff.legacy_abominations_frenzy->check() )
+      m *= 1.0 + td->debuff.legacy_abominations_frenzy->data().effectN( 1 ).percent();
+  }
+
+  return m;
+}
+
+double death_knight_t::composite_player_target_pet_damage_multiplier( player_t* t, bool guardian ) const
+{
+  double m = parse_player_effects_t::composite_player_target_pet_damage_multiplier( t, guardian );
+
+  if ( shadowlands_legacy.abominations_frenzy )
+  {
+    const death_knight_td_t* td = get_target_data( t );
+    if ( td && td->debuff.legacy_abominations_frenzy->check() )
+      m *= 1.0 + td->debuff.legacy_abominations_frenzy->data().effectN( guardian ? 3 : 2 ).percent();
+  }
+
+  return m;
+}
+
 double death_knight_t::resource_gain( resource_e resource_type, double amount, gain_t* g, action_t* action )
 {
   double actual_amount = player_t::resource_gain( resource_type, amount, g, action );
@@ -14292,6 +14361,13 @@ double death_knight_t::resource_gain( resource_e resource_type, double amount, g
 double death_knight_t::resource_loss( resource_e resource_type, double amount, gain_t* g, action_t* action )
 {
   double actual_amount = player_t::resource_loss( resource_type, amount, g, action );
+
+  // BracketSim legacy (11 Nov 2026): Insatiable Hunger - "The damage is increased by 2% for every 1 Runic Power spent
+  // while Swarming Mist was active" (353699 / 353729). The total was reset on every cast but never added to, so the
+  // explosion never grew.
+  if ( resource_type == RESOURCE_RUNIC_POWER && shadowlands_legacy.insatiable_hunger &&
+       buffs.legacy_swarming_mist && buffs.legacy_swarming_mist->check() )
+    legacy_insatiable_hunger_rp += actual_amount;
 
   if ( resource_type == RESOURCE_RUNE )
   {
@@ -16244,6 +16320,10 @@ void death_knight_t::init_spells()
   {
     legacy_abomination_limb_proc->duration =
         timespan_t::from_seconds( legacy_covenant.abomination_limb->effectN( 4 ).base_value() );
+    // BracketSim legacy (11 Nov 2026): Abomination's Frenzy - "the frequency it grants Bone Shield / Rime / Runic
+    // Corruption is increased by 2 sec" (353447 effect 2), the tooltip's reading (Shadowlands' sim cut the cooldown).
+    if ( shadowlands_legacy.abominations_frenzy )
+      legacy_abomination_limb_proc->duration -= timespan_t::from_seconds( find_spell( 353447 )->effectN( 2 ).base_value() );
     legacy_apl_actions.emplace_back( "abomination_limb" );
   }
 
@@ -16258,6 +16338,10 @@ void death_knight_t::init_spells()
   // Decay's one cooldown instead of being a second button beside it. Unholy and Frost only cast Death and Decay in
   // their AoE lists, so it still has to be put in front of the rotation for single target.
   if ( legacy_covenant.deaths_due->ok() )
+    legacy_apl_actions.emplace_back( "death_and_decay" );
+  // BracketSim legacy (11 Nov 2026): Phearomones' haste lives in Death and Decay, which single target Unholy and Frost
+  // never press, so the legendary gave 0. Its wearers press it on cooldown (Shadowlands' lists did).
+  else if ( shadowlands_legacy.phearomones && specialization() != DEATH_KNIGHT_BLOOD )
     legacy_apl_actions.emplace_back( "death_and_decay" );
 
   legacy_conduits.parse();
@@ -17347,19 +17431,26 @@ void death_knight_t::create_buffs()
                                          ->set_default_value_from_effect( 1 )
                                          ->set_pct_buff_type( STAT_PCT_BUFF_STRENGTH )
                                          ->set_chance( legacy_covenant.deaths_due->ok() ? 1.0 : 0.0 );
+  // BracketSim legacy (11 Nov 2026): Rampant Transference - "The Strength gained from Death's Due is increased by 3%
+  // and persists for 2 sec longer" (353882 effects 1 and 2; Death's Due 324165 lists them as its modifiers). They had
+  // been put on Death Turf, Phearomones' haste buff, so a player without Phearomones got nothing.
+  if ( shadowlands_legacy.rampant_transference )
+  {
+    buffs.legacy_deaths_due_strength->modify_default_value( find_spell( 353882 )->effectN( 1 ).percent() );
+    buffs.legacy_deaths_due_strength->modify_duration( find_spell( 353882 )->effectN( 2 ).time_value() );
+  }
   buffs.legacy_death_turf = make_buff( this, "legacy_death_turf", find_spell( 335180 ) )
                                 ->set_default_value_from_effect( 1 )
                                 ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
                                 ->set_chance( shadowlands_legacy.phearomones ? 1.0 : 0.0 );
-  // The tooltip halves the haste for Blood, and Rampant Transference lengthens
-  // the window and raises the value again.
+  // The tooltip halves the haste for Blood.
   if ( shadowlands_legacy.phearomones && specialization() == DEATH_KNIGHT_BLOOD )
     buffs.legacy_death_turf->default_value = find_spell( 335177 )->effectN( 2 ).percent();
-  if ( shadowlands_legacy.rampant_transference )
-  {
-    buffs.legacy_death_turf->modify_default_value( find_spell( 353882 )->effectN( 1 ).percent() )
-                           ->modify_duration( find_spell( 353882 )->effectN( 2 ).time_value() );
-  }
+  // BracketSim legacy (11 Nov 2026): Final Sentence - "When Shackle the Unworthy is applied to an enemy, instantly gain
+  // a Rune and your damage is increased by 4%, stacking up to 20% for 15 sec" (353823: effect 2 Physical/Frost/Shadow
+  // damage, effect 3 pet damage). Only the Rune was given before.
+  buffs.legacy_final_sentence = make_buff( this, "legacy_final_sentence", find_spell( 353823 ) )
+                                    ->set_chance( shadowlands_legacy.final_sentence ? 1.0 : 0.0 );
   buffs.legacy_frenzied_monstrosity = make_buff( this, "legacy_frenzied_monstrosity", find_spell( 334896 ) )
                                           ->add_invalidate( CACHE_AUTO_ATTACK_SPEED )
                                           ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
@@ -18740,6 +18831,12 @@ void death_knight_t::apply_target_action_effects( action_t* a, bool pet )
 void death_knight_t::parse_player_effects()
 {
   // Shared
+  // BracketSim legacy (11 Nov 2026): Frenzied Monstrosity (Dark Transformation is Unholy's) was parsed only in the
+  // Blood branch, so the Unholy player who can wear it never got its damage or attack speed.
+  if ( shadowlands_legacy.frenzied_monstrosity )
+    parse_effects( buffs.legacy_frenzied_monstrosity );
+  if ( shadowlands_legacy.final_sentence )
+    parse_effects( buffs.legacy_final_sentence );
   parse_effects( buffs.blood_draw );
   parse_effects( buffs.icy_talons, talent.icy_talons );
   parse_effects( buffs.rune_mastery );
@@ -18766,10 +18863,6 @@ void death_knight_t::parse_player_effects()
       parse_effects( buffs.voracious );
       parse_effects( buffs.dancing_rune_weapon );
       parse_effects( buffs.vampiric_blood, effect_mask_t( true ).disable( 2, 4 ) );
-      // Legacy Shadowlands: Frenzied Monstrosity adds attack speed and damage
-      // while Dark Transformation is up.
-      if ( shadowlands_legacy.frenzied_monstrosity )
-        parse_effects( buffs.legacy_frenzied_monstrosity );
       parse_effects( buffs.sanguine_ground );
       parse_effects( buffs.bone_shield, IGNORE_STACKS );
       parse_effects( buffs.perseverance_of_the_ebon_blade );

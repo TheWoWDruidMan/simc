@@ -4341,6 +4341,13 @@ struct fel_devastation_t : public final_breath_trigger_t<demon_hunter_spell_t>
       heal->set_target( player );
       heal->execute();
     }
+
+    // BracketSim legacy (11 Nov 2026): Collective Anguish, Vengeance half.
+    if ( dh()->specialization() == DEMON_HUNTER_VENGEANCE && dh()->active.collective_anguish )
+    {
+      dh()->active.collective_anguish->set_target( target );
+      dh()->active.collective_anguish->execute();
+    }
   }
 
   void last_tick( dot_t* d ) override
@@ -4748,6 +4755,42 @@ struct collective_anguish_t : public demon_hunter_spell_t
     demon_hunter_spell_t::init();
 
     // Channeled dots get haste snapshotted in action_t::init() and we replicate that here
+    update_flags &= ~STATE_HASTE;
+  }
+};
+
+// BracketSim legacy (11 Nov 2026): Collective Anguish (7041) on Vengeance - "Fel Devastation summons an allied Havoc
+// Demon Hunter who casts Eye Beam". Only the Havoc half (Eye Beam -> a Vengeance ally's Fel Devastation) was ported, so
+// the Vengeance wearer got nothing. As Shadowlands: driver 346504 (2 sec, every 0.2 sec), damage 346505, which always
+// crits ("100% crit rate as of 9.0.5, does not appear to be in any spell data").
+struct legacy_collective_anguish_vengeance_t : public demon_hunter_spell_t
+{
+  struct tick_t : public demon_hunter_spell_t
+  {
+    tick_t( util::string_view name, demon_hunter_t* p ) : demon_hunter_spell_t( name, p, p->find_spell( 346505 ) )
+    {
+      dual = true;
+      aoe  = -1;
+    }
+
+    double composite_crit_chance() const override
+    {
+      return 1.0;
+    }
+  };
+
+  legacy_collective_anguish_vengeance_t( util::string_view name, demon_hunter_t* p )
+    : demon_hunter_spell_t( name, p, p->find_spell( 346504 ) )
+  {
+    may_miss = channeled = false;
+    dual                 = true;
+    tick_on_application  = false;
+    tick_action          = p->get_background_action<tick_t>( "collective_anguish_tick" );
+  }
+
+  void init() override
+  {
+    demon_hunter_spell_t::init();
     update_flags &= ~STATE_HASTE;
   }
 };
@@ -12240,6 +12283,11 @@ void demon_hunter_t::init_spells()
     default:
       break;
   }
+  // BracketSim legacy (11 Nov 2026): the Night Fae The Hunt keeps its damage over time on the ability itself (323639
+  // effect 4 -> 345335, 6 sec), not on the impact as the talents do, so the covenant version had no DoT at all - and the
+  // conduit Unnatural Malice (281), which raises only that DoT, did nothing (Shadowlands read it from effect 4 too).
+  if ( spec.the_hunt == legacy_covenant.the_hunt && legacy_covenant.the_hunt->ok() )
+    spec.the_hunt_dot = legacy_covenant.the_hunt->effectN( 4 ).trigger();
 
   // BracketSim legacy compatibility: The Hunt is injected only when the
   // covenant is its sole source. With the talent taken, the class's own action
@@ -12450,7 +12498,8 @@ void demon_hunter_t::init_spells()
   // action
   active.burning_wound = get_background_action<burning_wound_t>( "burning_wound" );
 
-  if ( talent.devourer.the_hunt->ok() || talent.havoc.the_hunt->ok() )
+  if ( talent.devourer.the_hunt->ok() || talent.havoc.the_hunt->ok() ||
+       ( spec.the_hunt == legacy_covenant.the_hunt && spec.the_hunt_dot->ok() ) )
   {
     active.the_hunt_dot = get_background_action<the_hunt_dot_t>( "the_hunt_dot" );
   }
@@ -12502,6 +12551,11 @@ void demon_hunter_t::init_spells()
   if ( talent.havoc.collective_anguish->ok() || ( shadowlands_legacy.collective_anguish && specialization() == DEMON_HUNTER_HAVOC ) )
   {
     active.collective_anguish = get_background_action<collective_anguish_t>( "collective_anguish" );
+  }
+  else if ( shadowlands_legacy.collective_anguish && specialization() == DEMON_HUNTER_VENGEANCE )
+  {
+    active.collective_anguish =
+        get_background_action<legacy_collective_anguish_vengeance_t>( "collective_anguish" );
   }
 
   if ( talent.vengeance.retaliation->ok() )

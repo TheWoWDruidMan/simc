@@ -958,11 +958,14 @@ using namespace helpers;
       // BracketSim legacy compatibility: Contained Perpetual Explosion. Effect 1
       // is what each EXTRA enemy the cloud passed through was worth, so on a
       // single target it correctly changes nothing.
+      // 11 Nov 2026: "Impending Catastrophe's damage over time is increased by 125% plus 15% for each enemy target
+      // hit on the way to its final target, to a maximum of 275%" (356259 effects 1, 2, 3). Effect 1 is the BASE
+      // 125%, not the per-target part, so a single target got nothing before.
       if ( p()->shadowlands_legacy.contained_perpetual_explosion )
       {
-        const int extra = std::max( num_targets_hit - 1, 0 );
-        dot_damage->base_multiplier =
-            1.0 + extra * p()->find_spell( 356259 )->effectN( 1 ).percent();
+        const spell_data_t* cpe = p()->find_spell( 356259 );
+        const int extra = std::min( std::max( num_targets_hit - 1, 0 ), as<int>( cpe->effectN( 3 ).base_value() ) );
+        dot_damage->base_multiplier = 1.0 + cpe->effectN( 1 ).percent() + extra * cpe->effectN( 2 ).percent();
       }
 
       // The curse the anima inflicted on landing is not modelled.

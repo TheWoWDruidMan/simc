@@ -12283,7 +12283,12 @@ void druid_t::create_buffs()
   buff.legacy_ravenous_frenzy =
       make_fallback( legacy_covenant.ravenous_frenzy->ok(), this, "ravenous_frenzy",
                      legacy_covenant.ravenous_frenzy )
-        ->set_period( 0_ms );
+        ->set_period( 0_ms )
+        ->set_cooldown( 0_ms ); // BracketSim 11 Nov 2026: the cooldown is the ability's, not the buff's
+  // BracketSim legacy (11 Nov 2026): Endless Thirst (conduit 280) adds crit per Ravenous Frenzy stack, but the buff
+  // never invalidated the crit cache, so the crit chance stayed at its pre-Frenzy value and the conduit gave 0.
+  if ( legacy_conduits.has( 280 ) )
+    buff.legacy_ravenous_frenzy->add_invalidate( CACHE_CRIT_CHANCE );
 
   // BracketSim legacy compatibility: Kindred Empowerment. Ten seconds, measured
   // three times in a live log at 9.924, 9.938 and 9.969 - spell 338142 is not

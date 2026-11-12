@@ -4878,6 +4878,8 @@ struct flurry_t final : public custom_state_spell_t<frost_mage_spell_t, flurry_d
     {
       p()->buffs.brain_freeze->decrement();
       p()->buffs.thermal_void->trigger();
+      // BracketSim legacy (11 Nov 2026): Sinful Delight, Frost - consuming Brain Freeze.
+      p()->legacy_trigger_sinful_delight();
     }
     p()->trigger_splinter( p()->target );
     p()->trigger_fof( p()->sets->set( MAGE_FROST, MID1, B2 )->effectN( 3 ).percent(), proc_fof );
@@ -5662,6 +5664,9 @@ struct fire_blast_t final : public fire_mage_spell_t
   void execute() override
   {
     fire_mage_spell_t::execute();
+
+    // BracketSim legacy (11 Nov 2026): Sinful Delight, Fire - consuming a Fire Blast charge.
+    p()->legacy_trigger_sinful_delight();
 
     // BracketSim legacy (4 Oct 2026): Infernal Cascade (conduit 30) - Fire Blast during Combustion stacks Fire damage.
     if ( p()->buffs.combustion->check() )
@@ -6959,6 +6964,8 @@ action_t* mage_t::create_action( std::string_view name, std::string_view options
 // BracketSim legacy compatibility: Sinful Delight shortens Mirrors of Torment.
 void mage_t::legacy_trigger_sinful_delight()
 {
+  // 11 Nov 2026: "Consuming Clearcast / a Fire Blast charge / Brain Freeze reduces Mirrors of Torment's cooldown by
+  // 4 sec" (354333). Only Arcane's Clearcasting called this before; Frost and Fire now do too.
   if ( !shadowlands_legacy.sinful_delight || !legacy_covenant.mirrors_of_torment->ok() )
     return;
 
@@ -7274,6 +7281,9 @@ void mage_t::init_spells()
   // reported a perfectly plausible number without it.
   if ( legacy_covenant.deathborne->ok() )
     legacy_apl_actions.emplace_back( "deathborne" );
+  // BracketSim legacy (11 Nov 2026): Grisly Icicle marks enemies hit by Frost Nova, which no damage list casts.
+  if ( shadowlands_legacy.grisly_icicle )
+    legacy_apl_actions.emplace_back( "frost_nova" );
 
   legacy_conduits.parse();
   legacy_conduits.drop_talent_duplicates( [ this ]( util::string_view n ) { return legacy_talent_taken( n ); } );

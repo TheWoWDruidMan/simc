@@ -6711,6 +6711,7 @@ struct ravager_t : public warrior_attack_t
   ravager_tick_t* ravager;
   timespan_t duration;
   int num_ticks;
+  action_t* legacy_unhinged_ms = nullptr;
   ravager_t( warrior_t* p, util::string_view options_str )
     : warrior_attack_t( "ravager", p, p->talents.shared.ravager ),
       ravager( new ravager_tick_t( p, "ravager_tick", p->spell.ravager->duration() ) ),
@@ -6718,6 +6719,13 @@ struct ravager_t : public warrior_attack_t
       num_ticks( 0 )
   {
     parse_options( options_str );
+    // BracketSim legacy (11 Nov 2026): Unhinged (335282) - "While Ravager is active, you automatically cast a total of
+    // 1 Mortal Strike". Only the Bladestorm half was ported; Level 60 Arms takes Ravager.
+    if ( p->shadowlands_legacy.unhinged && p->specialization() == WARRIOR_ARMS )
+    {
+      legacy_unhinged_ms = new mortal_strike_t( "mortal_strike_ravager_unhinged", p, true );
+      add_child( legacy_unhinged_ms );
+    }
     if ( sim->dbc->wowv() < wowv_t( 12, 1, 0 ) )
     {
       ignore_false_positive   = true;
@@ -6822,6 +6830,19 @@ struct ravager_t : public warrior_attack_t
           .x( target->x_position )
           .y( target->y_position ),
         false /* Immediate pulse */ );
+    }
+
+    // Unhinged: Shadowlands cast it on the Ravager's third tick.
+    if ( legacy_unhinged_ms )
+    {
+      timespan_t at = sim->dbc->wowv() >= wowv_t( 12, 1, 0 ) ? p()->spell.ravager->effectN( 2 ).period() * 3
+                                                             : compute_tick_time() * 3;
+      action_t* ms = legacy_unhinged_ms;
+      player_t* t = target;
+      make_event( *sim, at, [ ms, t ] {
+        if ( !t->is_sleeping() )
+          ms->execute_on_target( t );
+      } );
     }
   }
 
@@ -9652,6 +9673,7 @@ void warrior_t::create_buffs()
   // BracketSim legacy compatibility: Conqueror's Banner's Mastery rating.
   buff.legacy_conquerors_banner =
       make_buff( this, "conquerors_banner", legacy_covenant.conquerors_banner )
+          ->set_cooldown( 0_ms ) // BracketSim 11 Nov 2026: the cooldown is the ability's, not the buff's
           ->add_invalidate( CACHE_MASTERY )
           ->set_default_value_from_effect( 1 )
           ->set_chance( legacy_covenant.conquerors_banner->ok() ? 1.0 : 0.0 );

@@ -3860,9 +3860,9 @@ void priest_t::init_spells()
   if ( legacy_covenant.boon_of_the_ascended->ok() )
     legacy_apl_actions.emplace_back( "boon_of_the_ascended" );
   if ( legacy_covenant.boon_of_the_ascended->ok() )
-    legacy_apl_actions.emplace_back( "ascended_blast,if=buff.boon_of_the_ascended.up" );
+    legacy_apl_actions.emplace_back( "^ascended_blast,if=buff.boon_of_the_ascended.up" );
   if ( legacy_covenant.boon_of_the_ascended->ok() )
-    legacy_apl_actions.emplace_back( "ascended_nova,if=buff.boon_of_the_ascended.up&spell_targets.ascended_nova>1" );
+    legacy_apl_actions.emplace_back( "^ascended_nova,if=buff.boon_of_the_ascended.up&spell_targets.ascended_nova>1" );
   if ( legacy_covenant.unholy_nova->ok() )
     legacy_apl_actions.emplace_back( "unholy_nova" );
   if ( legacy_covenant.fae_guardians->ok() )
@@ -4145,6 +4145,7 @@ void priest_t::create_buffs()
   // one live log rather than read from data - see PORT_STATE.md.
   buffs.legacy_fae_guardians =
       make_buff( this, "fae_guardians", legacy_covenant.fae_guardians )
+          ->set_cooldown( 0_ms ) // BracketSim 11 Nov 2026: the cooldown is the ability's, not the buff's
           ->set_chance( legacy_covenant.fae_guardians->ok() ? 1.0 : 0.0 );
 
   buffs.legacy_wrathful_faerie_icd =
@@ -4173,6 +4174,7 @@ void priest_t::create_buffs()
 
   buffs.legacy_boon_of_the_ascended =
       make_buff( this, "boon_of_the_ascended", legacy_covenant.boon_of_the_ascended )
+          ->set_cooldown( 0_ms ) // BracketSim 11 Nov 2026: the cooldown is the ability's, not the buff's
           ->set_max_stack( 99 )
           ->set_default_value_from_effect( 5, 0.01 )
           ->set_chance( legacy_covenant.boon_of_the_ascended->ok() ? 1.0 : 0.0 )
@@ -4183,7 +4185,7 @@ void priest_t::create_buffs()
             if ( background_actions.legacy_ascended_eruption )
             {
               auto e = background_actions.legacy_ascended_eruption;
-              e->base_multiplier = 1.0 + b->check() * b->default_value;
+              e->base_multiplier = 1.0 + old_ * b->default_value; // 11 Nov 2026: check() is already 0 here
               e->execute_on_target( target );
             }
 

@@ -4908,11 +4908,44 @@ void player_t::create_actions()
       } );
     };
 
+    // BracketSim legacy (11 Nov 2026): a line written "^name,if=..." is one that must be checked on EVERY pass, not
+    // only when the cooldown list is called - Ascended Blast during Boon of the Ascended was cast 3 times a fight from
+    // the cds list instead of every 3 sec. Those go to the front of the default list, the '^' stripped.
+    std::vector<std::string> front_actions;
+    for ( const auto& action : legacy_apl_actions )
+      if ( !action.empty() && action[ 0 ] == '^' )
+        front_actions.push_back( action.substr( 1 ) );
+    if ( cds && !front_actions.empty() )
+    {
+      auto& fdef = get_action_priority_list( "default" )->action_list;
+      auto fat = fdef.begin();
+      for ( auto it = fdef.begin(); it != fdef.end(); ++it )
+      {
+        if ( util::str_in_str_ci( it->action_, "call_action_list" ) || util::str_in_str_ci( it->action_, "run_action_list" ) )
+        {
+          fat = it;
+          break;
+        }
+        if ( util::str_prefix_ci( it->action_, "variable" ) || util::str_prefix_ci( it->action_, "snapshot_stats" ) )
+          fat = it + 1;
+      }
+      auto* fdef_list = get_action_priority_list( "default" );
+      for ( const auto& action : front_actions )
+      {
+        if ( already_injected( fdef_list, action ) )
+          continue;
+        fat = fdef.insert( fat, { action, "BracketSim legacy ability" } ) + 1;
+        sim->print_debug( "{} legacy APL injection into default (front): {}", *this, action );
+      }
+    }
+
     if ( cds )
     {
       auto at = cds->action_list.begin();
       for ( const auto& action : legacy_apl_actions )
       {
+        if ( !action.empty() && action[ 0 ] == '^' )
+          continue;
         if ( already_injected( cds, action ) )
           continue;
         at = cds->action_list.insert( at, { action, "BracketSim legacy ability" } ) + 1;
@@ -4943,8 +4976,10 @@ void player_t::create_actions()
     }
 
     auto* def_list = get_action_priority_list( "default" );
-    for ( const auto& action : legacy_apl_actions )
+    for ( auto action : legacy_apl_actions )
     {
+      if ( !action.empty() && action[ 0 ] == '^' )
+        action = action.substr( 1 );
       if ( already_injected( def_list, action ) )
         continue;
       at = def.insert( at, { action, "BracketSim legacy ability" } ) + 1;

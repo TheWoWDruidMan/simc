@@ -4211,6 +4211,7 @@ void paladin_t::create_buffs()
 
   buffs.legacy_blessing_of_summer =
       make_buff( this, "blessing_of_summer", legacy_covenant.blessing_of_summer )
+          ->set_cooldown( 0_ms ) // BracketSim 11 Nov 2026: the cooldown is the ability's, not the buff's
           ->set_default_value_from_effect( 1, 0.01 )
           ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
           // BracketSim legacy compatibility: the conduit The Long Summer (210)
@@ -4223,6 +4224,7 @@ void paladin_t::create_buffs()
 
   buffs.legacy_blessing_of_autumn =
       make_buff( this, "blessing_of_autumn", legacy_covenant.blessing_of_autumn )
+          ->set_cooldown( 0_ms ) // BracketSim 11 Nov 2026: the cooldown is the ability's, not the buff's
           ->set_default_value_from_effect( 1, 0.01 )
           ->set_chance( legacy_covenant.blessing_of_autumn->ok() ? 1.0 : 0.0 );
 
@@ -4944,6 +4946,12 @@ void paladin_t::init_spells()
   // damage, and pressing Divine Toll there LOSES it - a Kyrian Holy without the talent -0.56% (no soulbinds), -0.58%
   // Kleia, -0.52% Mikanikos; with the talent, a line before Holy Shock -0.15..-0.59% at every bracket.
   if ( !talents.divine_toll->ok() && legacy_covenant.divine_toll->ok() && specialization() != PALADIN_HOLY )
+    legacy_apl_actions.emplace_back( "divine_toll" );
+  // BracketSim legacy (11 Nov 2026): ...except with Divine Resonance (7679 / Unity), which adds Holy Shocks to it and
+  // gave 0 because it was never pressed (pressed: +1.9% at 60). Ringing Clarity (conduit 216) alone is NOT a reason:
+  // measured, the 4 Tolls cost 4 Judgments and the conduit's extra Holy Shocks only win those back (-0.09%).
+  else if ( !talents.divine_toll->ok() && legacy_covenant.divine_toll->ok() && specialization() == PALADIN_HOLY &&
+            shadowlands_legacy.divine_resonance )
     legacy_apl_actions.emplace_back( "divine_toll" );
   talents.unbound_freedom                 = find_talent_spell( talent_tree::CLASS, "Unbound Freedom" );
   talents.sanctified_plates               = find_talent_spell( talent_tree::CLASS, "Sanctified Plates" );

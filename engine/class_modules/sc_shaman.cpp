@@ -8809,7 +8809,21 @@ struct earthquake_base_t : public shaman_spell_t
       m *= 1.0 + p()->buff.master_of_the_elements->default_value;
     }
 
+    // BracketSim legacy (11 Nov 2026): Echoes of Great Sundering - the next Earthquake deals 120% more (336217
+    // effect 2). The buff was triggered by the spender but nothing ever read or spent it.
+    if ( p()->buff.legacy_echoes_of_great_sundering->check() )
+      m *= 1.0 + p()->buff.legacy_echoes_of_great_sundering->check_value();
+
     return m;
+  }
+
+  // ... and costs no Maelstrom (336217 effect 1, -100%).
+  double cost_pct_multiplier() const override
+  {
+    double c = shaman_spell_t::cost_pct_multiplier();
+    if ( p()->buff.legacy_echoes_of_great_sundering->check() )
+      c *= 1.0 + p()->buff.legacy_echoes_of_great_sundering->data().effectN( 1 ).percent();
+    return c;
   }
 
   void execute() override
@@ -8824,6 +8838,9 @@ struct earthquake_base_t : public shaman_spell_t
           .target( execute_state->target )
           .duration( eq_duration )
           .action( rumble ) );
+
+    // Spent after the rumble is made, so the rumble keeps the multiplier as persistent (as Shadowlands did).
+    p()->buff.legacy_echoes_of_great_sundering->expire();
 
     // BracketSim legacy compatibility: the conduit Shake the Foundations (103).
     // Shadowlands picked a random target from the rumble's list; on the single
@@ -12401,6 +12418,12 @@ void shaman_t::init_spells()
   // rotation. SimulationCraft's own action lists never press them.
   if ( legacy_covenant.vesper_totem->ok() )
     legacy_apl_actions.emplace_back( "vesper_totem" );
+  // BracketSim legacy (11 Nov 2026): Echoes of Great Sundering spends itself on an Earthquake, which single target
+  // Elemental never casts; Deeptremor Stone lives on the Earth Elemental, which no damage list summons.
+  if ( shadowlands_legacy.echoes_of_great_sundering )
+    legacy_apl_actions.emplace_back( "^earthquake,if=buff.legacy_echoes_of_great_sundering.up" );
+  if ( shadowlands_legacy.deeptremor_stone )
+    legacy_apl_actions.emplace_back( "earth_elemental" );
   if ( legacy_covenant.chain_harvest->ok() )
     legacy_apl_actions.emplace_back( "chain_harvest" );
   if ( legacy_covenant.primordial_wave->ok() )
@@ -14153,6 +14176,7 @@ void shaman_t::create_buffs()
 
   buff.legacy_vesper_totem =
       make_buff( this, "vesper_totem", legacy_covenant.vesper_totem )
+          ->set_cooldown( 0_ms ) // BracketSim 11 Nov 2026: the cooldown is the ability's, not the buff's
           ->set_max_stack( std::max( 1, as<int>( legacy_covenant.vesper_totem->effectN( 2 ).base_value() ) ) )
           ->set_chance( legacy_covenant.vesper_totem->ok() ? 1.0 : 0.0 );
 
