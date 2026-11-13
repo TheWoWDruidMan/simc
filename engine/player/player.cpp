@@ -3606,6 +3606,18 @@ void player_t::init_talents()
     talents_str = generate_traits_hash( this );
   }
 
+  // BRACKETSIM (13 Nov 2026): no hero talents below level 71 (the game opens them at 71). Drop the hero picks, the
+  // hero-tree choice and the active hero tree, so neither talent effects nor hero_tree.* rotation checks see them (with
+  // only the talents zeroed, a level 30 Frost DK with Deathbringer picks followed the Deathbringer rotation: -1.3%).
+  if ( true_level < 71 )
+  {
+    range::erase_remove( player_traits, []( const auto& t ) {
+      return std::get<0>( t ) == talent_tree::HERO || std::get<0>( t ) == talent_tree::SELECTION;
+    } );
+    player_sub_traits.clear();
+    player_sub_trees.clear();
+  }
+
   // Generate talent effect overrides based on parsed trait information
   for ( const auto& player_trait : player_traits )
   {
@@ -12632,6 +12644,14 @@ static player_talent_t create_talent_obj( const player_t* player, const trait_da
   // added to the profile or sim_t::enable_all_talents is set
   if ( _tree == talent_tree::HERO && !player->player_sub_trees.count( trait->id_sub_tree ) &&
        !range::contains( player->player_sub_traits, trait->id_trait_node_entry ) && !player->sim->enable_all_talents )
+  {
+    rank = 0U;
+  }
+
+  // BRACKETSIM (13 Nov 2026): hero talents open at level 71 in game. Below it, hero picks in a pasted talent string or
+  // hero_talents= are inert - they counted before (a level 30 Frost DK given Deathbringer simmed +7.5%, Reaper's Mark
+  // cast 7 times).
+  if ( _tree == talent_tree::HERO && player->true_level < 71 )
   {
     rank = 0U;
   }
