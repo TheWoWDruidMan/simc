@@ -2545,7 +2545,10 @@ void relic_of_the_frozen_wastes_use( special_effect_t& effect )
     }
   };
 
-  auto proc = create_proc_action<frozen_heart_t>( "frozen_heart", effect );
+  // BracketSim (12 Nov 2026, item audit vs 9.2.7): Frozen Heart is the EQUIP effect's proc (355301 -> 355759, damage on
+  // 355301 effect 1). Built from the on-use effect it read Frostlord's Call (355303), whose effect 1 is an area trigger,
+  // so every Frozen Heart hit for 0 and its 30 sec debuff (which the on-use's Carapace Spikes look for) never applied.
+  auto proc = create_proc_action<frozen_heart_t>( "frozen_heart", *equip );
   equip->execute_action = proc;
   new dbc_proc_callback_t( effect.player, *equip );
 
