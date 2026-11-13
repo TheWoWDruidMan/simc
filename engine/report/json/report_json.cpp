@@ -384,7 +384,9 @@ void gear_to_json( JsonOutput root, const player_t& p )
   for ( slot_e slot = SLOT_MIN; slot < SLOT_MAX; slot++ )
   {
     const item_t& item = p.items[ slot ];
-    if ( !item.active() || !item.has_stats() )
+    // BracketSim (13 Nov 2026): every worn item, stats or not. An item with no stats (a proc-only trinket or weapon:
+    // Scars of Fraternal Strife, The Jackhammer) was left out, so the site could not show its item level.
+    if ( !item.active() )
     {
       continue;
     }

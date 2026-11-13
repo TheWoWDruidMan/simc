@@ -5578,6 +5578,11 @@ static void hfc_berserkers_fury( special_effect_t& effect )
 // project does not simulate a healing profile.
 void item::souldrinker( special_effect_t& effect )
 {
+  // 13 Nov 2026, the author: in game every Souldrinker copy stops above level 49. Blizzard's data caps only the Normal
+  // driver (107895, max level 49); Raid Finder 109829 and Heroic 109832 (and the Drain Life spells) carry no cap,
+  // so those two copies kept firing at 50+. Cap every copy here.
+  if ( effect.player->true_level > 49 ) { effect.type = SPECIAL_EFFECT_NONE; return; }
+
   effect.name_str     = "drain_life";
   effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;
   effect.proc_flags2_ = PF2_ALL_HIT;
