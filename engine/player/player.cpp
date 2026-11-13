@@ -9663,7 +9663,11 @@ void player_t::target_mitigation( school_e, result_amount_type dmg_type, action_
       return;
 
     // BracketSim: every physical hit armor applies to, at whatever armor the target had (0 included).
-    if ( !s->action->player->is_enemy() && !s->action->ignores_armor && s->action->get_school() == SCHOOL_PHYSICAL )
+    // 13 Nov 2026: only actions that read the target's armor (STATE_TGT_ARMOR). Mark of the Distant Army's arrows and
+    // Devilsaur's Bite never snapshot it, so they hit "at 0 armor" and the report showed a boss armor reduction that no
+    // ability made (a Level 60 Guardian, 288 -> 246). Damage is unchanged - only the tracker skips them.
+    if ( !s->action->player->is_enemy() && !s->action->ignores_armor && s->action->get_school() == SCHOOL_PHYSICAL &&
+         ( s->action->snapshot_flags & STATE_TGT_ARMOR ) )
     {
       double coeff = s->action->player->current.armor_coeff;
       bracketsim.armor_hits += 1;
