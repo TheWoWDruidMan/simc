@@ -1332,6 +1332,50 @@ void item::molten_ironfoe( special_effect_t& effect )
   new dbc_proc_callback_t( effect.item, effect );
 }
 
+/*
+ * NO'KALED, THE ELEMENTS OF DEATH (77188 / 78472 / 78481; drivers 107786 normal, 109866 LFR, 109873 heroic), 13 Nov 2026,
+ * old-expansion item audit. The driver is a Dummy aura, 7% on White + Yellow Melee: "a chance to blast your enemy with
+ * Fire, Shadow, or Frost". It was registered as "<shadowblast>Trigger", which gave Shadowblast only and rolled on EVERY
+ * melee hit, off-hand swings included: a level 35 Outlaw rogue with it in the main hand rolled ~240 times a minute
+ * (58.6 main-hand + 58.4 off-hand swings, poison, Main Gauche, abilities) for 17.0 blasts a minute. It now rolls by the
+ * chance-on-hit rules every other old weapon follows (an auto attack only for its own hand - the author's logs, see
+ * chance_on_hit_cb_t), and each proc casts one of the three blasts at random (same damage, their own school). The
+ * original 4.3 engine also picked one of the three and rolled only from the weapon's own hand.
+ */
+struct nokaled_blast_t : public generic_proc_t
+{
+  std::vector<action_t*> blasts;
+  nokaled_blast_t( const special_effect_t& e, unsigned fire, unsigned shadow, unsigned frost )
+    : generic_proc_t( e, "nokaled", spell_data_t::nil() )
+  {
+    callbacks = may_crit = may_miss = harmful = false;
+    quiet = background = true;
+    for ( auto [ name, id ] : { std::pair{ "flameblast", fire }, std::pair{ "shadowblast", shadow },
+                                std::pair{ "iceblast", frost } } )
+      blasts.push_back( create_proc_action<generic_proc_t>( name, e, e.player->find_spell( id ) ) );
+  }
+  void execute() override
+  {
+    blasts[ rng().range( blasts.size() ) ]->execute_on_target( target );
+  }
+};
+
+static void nokaled( special_effect_t& effect )
+{
+  unsigned fire = 107785, shadow = 107787, frost = 107789;  // normal
+  if ( effect.spell_id == 109866 )
+    fire = 109871, shadow = 109867, frost = 109869;  // LFR
+  else if ( effect.spell_id == 109873 )
+    fire = 109872, shadow = 109868, frost = 109870;  // heroic
+
+  effect.name_str     = "nokaled";
+  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;  // the driver's White + Yellow Melee
+  effect.proc_flags2_ = PF2_ALL_HIT;
+  effect.disable_buff();
+  effect.execute_action = create_proc_action<nokaled_blast_t>( "nokaled", effect, fire, shadow, frost );
+  chance_on_hit( effect );
+}
+
 void item::chillpike( special_effect_t& effect )
 {
   effect.name_str     = "frost_blast";
@@ -10218,9 +10262,9 @@ void unique_gear::register_special_effects()
   register_special_effect( 45355,   item::dislodged_foreign_object   );
   register_special_effect( 364917,  "17499Trigger"   ); /* Malown's Slam */
   register_special_effect( 258885,  "258888Trigger"  ); /* Gahz'rilla Fang */
-  register_special_effect( 107786,  "107787Trigger"  ); /* No'Kaled, the Elements of Death */
-  register_special_effect( 109866,  "109867Trigger"  ); /* No'Kaled, the Elements of Death */
-  register_special_effect( 109873,  "109868Trigger"  ); /* No'Kaled, the Elements of Death */
+  register_special_effect( 107786,  nokaled          ); /* No'Kaled, the Elements of Death (normal) */
+  register_special_effect( 109866,  nokaled          ); /* No'Kaled, the Elements of Death (LFR) */
+  register_special_effect( 109873,  nokaled          ); /* No'Kaled, the Elements of Death (heroic) */
   register_special_effect( 222015,  item::goblet_of_nightmarish_ichor ); /* Goblet of Nightmarish Ichor (BracketSim, 7 Oct 2026) */
   register_special_effect( 443545,  item::ceaseless_swarmgland ); /* Ceaseless Swarmgland (BracketSim, 7 Oct 2026) */
   register_special_effect( 366057,  item::sepulchers_savior ); /* Sepulcher's Savior, passive (BracketSim, 7 Oct 2026) */
