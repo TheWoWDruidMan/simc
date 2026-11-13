@@ -727,8 +727,10 @@ int item_database::scaled_stat( const item_t& item, const dbc_t& dbc, size_t idx
         return item._dbc_stats[ idx ].socket_mul;
       return 0.0f;
     };
-    // Socket penalty is rounded using banker's rounding (X.5 is rounded to the nearest even integer).
-    double v_socket_penalty = std::nearbyint( socket_mul( item.parsed.data, idx ) * dbc.item_socket_cost( new_ilevel ) );
+    // BracketSim (13 Nov 2026): the socket penalty rounds HALF UP in game. 17 ICC items shift-compared at level 30
+    // (Carapace of Forgotten Kings, Bloodfall, Geistlord's Punishment Sack ...): every 4.5 penalty is 5 in game; banker's
+    // rounding (std::nearbyint) gave 4, one to two rating points too many per piece.
+    double v_socket_penalty = std::floor( socket_mul( item.parsed.data, idx ) * dbc.item_socket_cost( new_ilevel ) + 0.5 );
     double v_raw = item.parsed.data.stat_alloc[ idx ] * item_budget * 0.0001 - v_socket_penalty;
     auto stat_type = static_cast<item_mod_type>( item.parsed.data.stat_type_e[ idx ] );
 

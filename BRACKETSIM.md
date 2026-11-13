@@ -261,3 +261,4 @@ script that runs these steps.
 
 - 2026-11-13 (Souldrinker): every copy of Souldrinker stops working above level 49, as in game. The game data capped only the Normal copy, so the Raid Finder and Heroic copies kept draining at level 50 and up.
 - 2026-11-13 (JSON report gear): the JSON report lists every worn item, with stats or not, so an item that only has a proc (a trinket or weapon with no stats) shows its item level. Damage is unchanged.
+- 2026-11-13 (socket penalty): the stat cut on gear that gained sockets at a lower item level rounds half up, as in game - a 4.5 cut is 5, not 4. Checked against in-game item comparisons of 22 items; legacy gear with sockets now has one stat point less where the game does.
