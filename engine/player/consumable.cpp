@@ -19,6 +19,7 @@
 #include "util/rng.hpp"
 #include "util/static_map.hpp"
 #include "util/string_view.hpp"
+#include "legacy_conduits.hpp"
 
 #include <string>
 
@@ -768,6 +769,31 @@ struct food_t : public dbc_consumable_base_t
   // automatically applied.
   void initialize_consumable() override
   {
+    // BracketSim (13 Nov 2026, a Level 60 player's suggestion; the author: it replaces buff food): food=born_anew is the Well
+    // Fed a druid's Born Anew (any spec, a Finesse conduit, 258, spell 341280) gives on Rebirth - Well Fed 341449, +primary
+    // stat for 1 hour. Midnight's data has neither spell, so the buff is built here. Value = the conduit's rank 13 (the
+    // 9.2.7 ConduitRank table, legacy_conduits.hpp): the author checked it in game 13 Nov - an Enhanced item level 278 conduit
+    // (rank 11 + 2) gave "Strength increased by 44" (278 -> 323 Strength on the sheet). Not doubled for Pandaren: it is
+    // not a food.
+    if ( util::str_compare_ci( consumable_name, "born_anew" ) )
+    {
+      double value = 44.0;
+      std::size_t n = 0;
+      const auto* rows = legacy_conduit::table( n );
+      for ( std::size_t i = 0; i < n; ++i )
+        if ( rows[ i ].id == 258 )
+          value = rows[ i ].rank[ 12 ];
+
+      id = 341449;
+      name_str_reporting = "born_anew";
+      auto buff = make_buff<stat_buff_t>( player, "well_fed_born_anew" );
+      buff->add_stat( player->convert_hybrid_stat( STAT_STR_AGI_INT ), value );
+      buff->set_duration( timespan_t::from_seconds( 3600 ) );
+      buff->set_cooldown( 0_ms );
+      consumable_buff = buff;
+      return;
+    }
+
     dbc_consumable_base_t::initialize_consumable();
 
     if ( !consumable_buff )
