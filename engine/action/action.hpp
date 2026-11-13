@@ -919,6 +919,11 @@ public:
 
   virtual double composite_target_crit_chance( player_t* ) const;
 
+  // BracketSim (13 Nov 2026, Hellfire Citadel class trinkets): item effects that change ONE ability's damage or crit,
+  // often per target (Mental Fatigue, Flamelicked, Shatterlance). Each function returns a multiplier (bs_target_mult)
+  // or an added crit chance (bs_target_crit) for this action against that target. Empty unless an item adds one.
+  std::vector<std::function<double( const action_t*, player_t* )>> bs_target_mult, bs_target_crit;
+
   virtual double composite_target_crit_damage_bonus_multiplier( player_t* ) const
   { return 1.0; }
 

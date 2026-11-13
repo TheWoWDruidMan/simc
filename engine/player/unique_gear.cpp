@@ -1337,10 +1337,15 @@ void item::molten_ironfoe( special_effect_t& effect )
  * old-expansion item audit. The driver is a Dummy aura, 7% on White + Yellow Melee: "a chance to blast your enemy with
  * Fire, Shadow, or Frost". It was registered as "<shadowblast>Trigger", which gave Shadowblast only and rolled on EVERY
  * melee hit, off-hand swings included: a level 35 Outlaw rogue with it in the main hand rolled ~240 times a minute
- * (58.6 main-hand + 58.4 off-hand swings, poison, Main Gauche, abilities) for 17.0 blasts a minute. It now rolls by the
- * chance-on-hit rules every other old weapon follows (an auto attack only for its own hand - the author's logs, see
- * chance_on_hit_cb_t), and each proc casts one of the three blasts at random (same damage, their own school). The
- * original 4.3 engine also picked one of the three and rolled only from the weapon's own hand.
+ * (58.6 main-hand + 58.4 off-hand swings, poison, Main Gauche, abilities) for 17.0 blasts a minute. Each proc now casts
+ * one of the three blasts at random (same damage, their own school), as the original 4.3 engine did.
+ *
+ * EITHER HAND (13 Nov 2026, the author asked why it could not proc from the other hand). The first version of this fix took the
+ * engine's default own-hand rule (an auto attack rolls a weapon proc only for the hand holding it), which is upstream
+ * SimulationCraft's and the 4.3 original's model, not something a log showed. the author's logs disproved that default for the
+ * three old weapons measured with a proc aura like this one - Heartrazor, Eskhandar's Right Claw and Bryntroll (Bryntroll:
+ * 60 Drain Lifes from 302 hits with one in each hand; own hand gives ~36, either hand ~68) - and no log has No'Kaled. So
+ * it rolls on every landed melee hit of either hand, as those do; the rest of the chance-on-hit rules still apply.
  */
 struct nokaled_blast_t : public generic_proc_t
 {
@@ -1373,7 +1378,7 @@ static void nokaled( special_effect_t& effect )
   effect.proc_flags2_ = PF2_ALL_HIT;
   effect.disable_buff();
   effect.execute_action = create_proc_action<nokaled_blast_t>( "nokaled", effect, fire, shadow, frost );
-  chance_on_hit( effect );
+  static_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) )->hand = nullptr;  // either hand (see above)
 }
 
 void item::chillpike( special_effect_t& effect )
@@ -5044,6 +5049,506 @@ void item::dislodged_foreign_object( special_effect_t& effect )
   }
 }
 
+/*
+ * VICTOR'S CALL / VENGEANCE OF THE FORSAKEN (Rising Fury 67738, heroic 67747) and TALISMAN / FETISH OF VOLATILE POWER
+ * (Volatile Power 67736, heroic 67744), 13 Nov 2026 (old-expansion item audit; the author: "Ok fix the WOTLK ones approved").
+ * The use effect is a 20 sec WINDOW: "Each time you strike an enemy with a melee attack [cast a harmful spell], you gain
+ * X attack power [haste]. Stacks up to N times. Entire effect lasts 20 sec." The per-stack auras (Risen Fury 67737 /
+ * 67746, 5 stacks; Volatility 67735 / 67743, 8 stacks) are `Aura (infinite)` in this client - the duration lives on the
+ * window - and nothing was registered, so the press gave ONE stack that never dropped: a level 30 Outlaw rogue log had
+ * stack 1 at 0.8 sec, stack 2 at the second press (121.7 sec), up 99.7% of the fight (the WotLK original: 20%). Now the
+ * press opens the window, every qualifying hit inside it adds a stack, and the stacks drop with the window - the
+ * Blackened Naaru Sliver shape (window_stack_cb_t), on a use effect.
+ */
+// A hit inside the window adds a stack (the first one included); the window callback is only active while it is open.
+struct window_hit_stack_cb_t final : public dbc_proc_callback_t
+{
+  buff_t* stacks;
+  window_hit_stack_cb_t( const special_effect_t& e, buff_t* b ) : dbc_proc_callback_t( e.player, e ), stacks( b ) {}
+  void execute( const spell_data_t*, player_t*, action_state_t* ) override
+  {
+    stacks->trigger();
+  }
+};
+
+static void window_of_stacks_on_use( special_effect_t& effect )
+{
+  player_t* p = effect.player;
+  const spell_data_t* window = effect.driver();
+  const spell_data_t* per_stack = window->effectN( 1 ).trigger();
+  if ( !per_stack->ok() )
+  {
+    effect.type = SPECIAL_EFFECT_NONE;
+    return;
+  }
+  const bool spells = window->id() == 67736 || window->id() == 67744;  // Volatile Power: harmful spells
+
+  auto stacks = make_buff<stat_buff_t>( p, util::tokenize_fn( per_stack->name_cstr() ), per_stack, effect.item );
+  stacks->set_duration( 0_ms );  // the window ends it
+  stacks->set_max_stack( std::max( 1, as<int>( per_stack->max_stacks() ) ) );
+
+  auto win = make_buff( p, util::tokenize_fn( window->name_cstr() ) + "_window", window, effect.item );
+  win->set_duration( window->duration() > 0_ms ? window->duration() : 20_s );
+  win->set_cooldown( 0_ms );
+  win->set_quiet( true );
+  win->set_stack_change_callback( [ stacks ]( buff_t*, int, int now ) {
+    if ( !now )
+      stacks->expire();
+  } );
+  effect.custom_buff = win;
+
+  auto hits          = new special_effect_t( p );
+  hits->name_str     = win->name_str + "_stack";
+  hits->type         = SPECIAL_EFFECT_EQUIP;
+  hits->source       = SPECIAL_EFFECT_SOURCE_ITEM;
+  hits->spell_id     = per_stack->id();  // not the window: that id is registered to this function
+  hits->proc_flags_  = spells ? PF_MAGIC_SPELL : ( PF_MELEE | PF_MELEE_ABILITY );
+  hits->proc_flags2_ = spells ? PF2_CAST_DAMAGE : PF2_ALL_HIT;
+  hits->proc_chance_ = 1.0;
+  hits->cooldown_    = 0_ms;
+  p->special_effects.push_back( hits );
+  auto cb = new window_hit_stack_cb_t( *hits, stacks );
+  cb->activate_with_buff( win, true );
+}
+
+/*
+ * REIGN OF THE UNLIVING / REIGN OF THE DEAD (drivers 67712 normal, 67758 heroic), 13 Nov 2026 (same audit, the author
+ * approved). "You gain a Mote of Flame each time you cause a non-periodic spell critical strike. When you reach 3 Motes,
+ * they will release, firing a Pillar of Flame ... Mote of Flame cannot be gained more often than once every 2 sec." It
+ * was registered as "<pillar>Trigger": a Pillar on EVERY harmful spell hit (2 sec cooldown), 25 a minute on a level 30
+ * Shadow priest against the WotLK original's 6.1. Now a direct spell CRIT gives a mote (2 sec cooldown, the driver's), and
+ * the third mote fires one Pillar and clears them. The mote aura (18350) has no data in this client: a plain counter.
+ */
+struct reign_of_the_unliving_cb_t final : public dbc_proc_callback_t
+{
+  buff_t* motes;
+  action_t* pillar;
+  int needed;
+  reign_of_the_unliving_cb_t( const special_effect_t& e, buff_t* m, action_t* a, int n )
+    : dbc_proc_callback_t( e.item, e ), motes( m ), pillar( a ), needed( n ) {}
+  void execute( const spell_data_t*, player_t* t, action_state_t* ) override
+  {
+    motes->trigger();
+    if ( motes->check() >= needed )
+    {
+      motes->expire();
+      pillar->execute_on_target( t );
+    }
+  }
+};
+
+static void reign_of_the_unliving( special_effect_t& effect )
+{
+  player_t* p = effect.player;
+  const int needed = std::max( 1, as<int>( effect.driver()->effectN( 1 ).base_value() ) );  // 3
+  const unsigned pillar_id = effect.spell_id == 67758 ? 67760 : 67714;
+  const std::string tag = effect.spell_id == 67758 ? "shard_of_flame" : "mote_of_flame";
+
+  auto motes = make_buff( p, tag, spell_data_t::nil() )->set_max_stack( needed )->set_duration( 0_ms );
+  action_t* pillar = p->find_action( tag == "shard_of_flame" ? "pillar_of_flame_heroic" : "pillar_of_flame" );
+  if ( !pillar )
+    pillar = create_proc_action<generic_proc_t>( tag == "shard_of_flame" ? "pillar_of_flame_heroic" : "pillar_of_flame",
+                                                 effect, p->find_spell( pillar_id ) );
+
+  effect.proc_flags_  = PF_MAGIC_SPELL;
+  effect.proc_flags2_ = PF2_CRIT;  // direct spell crits only (periodic damage is its own proc type)
+  effect.disable_buff();
+  new reign_of_the_unliving_cb_t( effect, motes, pillar, needed );
+}
+
+/*
+ * HELLFIRE CITADEL CLASS TRINKETS (13 Nov 2026; the author: "The hellfire citadel class trinkets still work"). Reaper's Harvest,
+ * Seed of Creation, Talisman of the Master Tracker, Tome of Shifting Words, Sacred Draenic Incense, Libram of Vindication,
+ * Repudiation of War, Bleeding Hollow Toxin Vessel, Core of the Primal Elements, Fragment of the Dark Star, Worldbreaker's
+ * Resolve: one passive per spec (the client loads only the wearer's spec's). Nothing was registered, so all of them were
+ * stat sticks. The texts are today's (Legion-era updates: Marrowrend, Run Through -> Dispatch, Shadowstrike...), and every
+ * value scales with the trinket's item level ("Scaling Class: Primary Attribute", base 0), so all amounts are
+ * effectN( n ).average( item ). The Legion 7.3.5 original codes the same set (class modules, register 1848xx/1849xx).
+ *
+ *   modifiers (hfc_modifiers): the "Add Percent Modifier" effects, applied to every action / buff the effect lists:
+ *     184897 Unholy Coil (Marrowrend damage)          184877 Wildcat Celerity (Tiger's Fury / Berserk duration)
+ *     184900 Beastlord (Bestial Wrath duration)       184902 Blackness (Mongoose Bite damage)
+ *     184917 Eviscerating Blade (Dispatch damage)     184918 From the Shadows (Shadowstrike damage)
+ *     184919 Elemental Bellows (Flame Shock damage + duration)   184920 Furious Winds (Windfury Attack damage)
+ *     184922 Epidemic (Agony / Corruption / Unstable Affliction duration and tick time)
+ *   184898 Frozen Obliteration   Obliterate deals X% more as Frost
+ *   184983 Wandering Plague      disease ticks: X% chance to deal the tick again, split among enemies within 8 yd
+ *   184904 Pyrosurge             Fire Blast: X% chance to also cast Flamestrike (Flamestrike 2120 from data)
+ *   184905 Shatterlance          Ice Lance cast right after a Frostbolt deals X% more
+ *   184908 Furious Sun           Fists of Fury / Blackout Kick / Rising Sun Kick: X% chance of a free Rising Sun Kick
+ *   184911 Focus of Vengeance    Crusader Strike (or Templar Strike/Slash, which replace it): +X% damage done for 10 sec, 3 stacks
+ *   184915 Mental Fatigue        Mind Flay damage: target takes +X% from Mind spells for 10 sec, 5 stacks
+ *   184916 Toxic Mutilator       Mutilate +X% crit chance while Envenom is up
+ *   184924 Flamelicked           Incinerate: +X% crit chance of the listed spells on that target, 10 sec, 5 stacks
+ *   184925 Tactical Surge        auto attacks: X% chance to reset Colossus Smash
+ *   184926 Berserker's Fury      auto attacks: +X% haste for 6 sec, 10 stacks
+ * NOT simulated (listed in docs/audit-2026-11-13-old-expansions.md): healing / defensive ones (Stalwart Guardian, Flourish,
+ * Eluding Movements, Soothing Breeze, Naaru's Discipline, Complete Healing, Shield Mastery), Longview (target distance),
+ * Wild Arcanist (Arcane Power is not in today's kit), Starshards and Swarm of Gul'dan (they cast a class
+ * ability for free - class-module work), the Furious Winds +Maelstrom half.
+ */
+namespace hfc
+{
+// A hit that copies an amount already computed (X% of a hit, a tick again): no multipliers, no crit, no armor.
+struct echo_t : public generic_proc_t
+{
+  echo_t( const special_effect_t& e, util::string_view n, const spell_data_t* s, school_e sch )
+    : generic_proc_t( e, n, s )
+  {
+    may_crit = callbacks = false;
+    background = true;
+    base_dd_min = base_dd_max = 0;
+    spell_power_mod.direct = attack_power_mod.direct = 0;
+    school = sch;
+  }
+  double composite_da_multiplier( const action_state_t* ) const override { return 1.0; }
+  double composite_target_multiplier( player_t* ) const override { return 1.0; }
+  double composite_versatility( const action_state_t* ) const override { return 1.0; }
+  void hit( player_t* t, double amount )
+  {
+    base_dd_min = base_dd_max = amount;
+    execute_on_target( t );
+  }
+};
+
+// One callback whose test and action are lambdas - most of these are "on hit of ability X, do Y".
+struct cb_t final : public dbc_proc_callback_t
+{
+  std::function<bool( action_state_t* )> test;
+  std::function<void( action_state_t* )> act;
+  cb_t( const special_effect_t& e, std::function<bool( action_state_t* )> t, std::function<void( action_state_t* )> a )
+    : dbc_proc_callback_t( e.player, e ), test( std::move( t ) ), act( std::move( a ) ) {}
+  void trigger( const proc_data_t& d, player_t* t, action_state_t* s, proc_trigger_type_e type ) override
+  {
+    if ( !s || !s->action || s->action->player != listener || !test( s ) )
+      return;
+    dbc_proc_callback_t::trigger( d, t, s, type );
+  }
+  void execute( const spell_data_t*, player_t*, action_state_t* s ) override
+  {
+    if ( s )
+      act( s );
+  }
+};
+
+static special_effect_t* listener_effect( const special_effect_t& e, util::string_view tag, unsigned flags, unsigned flags2,
+                                          double chance )
+{
+  auto x          = new special_effect_t( e.player );
+  x->name_str     = std::string( e.name() ) + "_" + std::string( tag );
+  x->type         = SPECIAL_EFFECT_EQUIP;
+  x->source       = SPECIAL_EFFECT_SOURCE_ITEM;
+  x->item         = e.item;
+  x->spell_id     = e.spell_id;
+  x->proc_flags_  = flags;
+  x->proc_flags2_ = flags2;
+  x->proc_chance_ = chance;
+  x->cooldown_    = 0_ms;
+  e.player->special_effects.push_back( x );
+  return x;
+}
+
+static bool named( const action_state_t* s, std::initializer_list<const char*> names )
+{
+  for ( auto n : names )
+    if ( s->action->name_str == n )
+      return true;
+  return false;
+}
+
+// Per-target stacking debuff, made on first use.
+struct target_stacks_t
+{
+  player_t* source;
+  const spell_data_t* spell;
+  std::string name;
+  std::unordered_map<player_t*, buff_t*> on;
+  buff_t* get( player_t* t )
+  {
+    auto& b = on[ t ];
+    if ( !b )
+      b = make_buff( actor_pair_t( t, source ), name, spell );
+    return b;
+  }
+  int stacks( player_t* t ) const
+  {
+    auto it = on.find( t );
+    return it == on.end() || !it->second ? 0 : it->second->check();
+  }
+};
+
+static double avg( const special_effect_t& e, size_t n )
+{
+  return e.driver()->effectN( n ).average( e.item );  // in the tooltip's units
+}
+}  // namespace hfc
+
+// The client loads EVERY spec's passive on the trinket (an Elemental shaman got Furious Winds and Enhancement got
+// Elemental Bellows): each applies only for its own spec, as in game ("the effects only show when you login per class").
+static bool hfc_spec_ok( special_effect_t& e )
+{
+  specialization_e want = SPEC_NONE;
+  switch ( e.spell_id )
+  {
+    case 184897: want = DEATH_KNIGHT_BLOOD; break;      case 184898: want = DEATH_KNIGHT_FROST; break;
+    case 184983: want = DEATH_KNIGHT_UNHOLY; break;     case 184877: want = DRUID_FERAL; break;
+    case 184900: want = HUNTER_BEAST_MASTERY; break;    case 184902: want = HUNTER_SURVIVAL; break;
+    case 184904: want = MAGE_FIRE; break;               case 184905: want = MAGE_FROST; break;
+    case 184911: want = PALADIN_RETRIBUTION; break;     case 184908: want = MONK_WINDWALKER; break;     case 184915: want = PRIEST_SHADOW; break;
+    case 184916: want = ROGUE_ASSASSINATION; break;     case 184917: want = ROGUE_OUTLAW; break;
+    case 184918: want = ROGUE_SUBTLETY; break;          case 184919: want = SHAMAN_ELEMENTAL; break;
+    case 184920: want = SHAMAN_ENHANCEMENT; break;      case 184922: want = WARLOCK_AFFLICTION; break;
+    case 184924: want = WARLOCK_DESTRUCTION; break;     case 184925: want = WARRIOR_ARMS; break;
+    case 184926: want = WARRIOR_FURY; break;
+    default: break;
+  }
+  if ( want != SPEC_NONE && e.player->specialization() == want )
+    return true;
+  e.type = SPECIAL_EFFECT_NONE;
+  return false;
+}
+
+static void hfc_modifiers( special_effect_t& effect )
+{
+  if ( !hfc_spec_ok( effect ) )
+    return;
+  const spell_data_t* drv = effect.driver();
+  const item_t* item      = effect.item;
+  const std::string nm    = effect.name();
+  effect.type = SPECIAL_EFFECT_NONE;  // passive: nothing to proc
+  effect.player->register_init_finished_callback( [ drv, item, nm ]( player_t* p ) {
+    for ( size_t n = 1; n <= drv->effect_count(); n++ )
+    {
+      const spelleffect_data_t& fx = drv->effectN( n );
+      if ( fx.subtype() != A_ADD_PCT_MODIFIER )
+        continue;
+      const double x = fx.average( item ) / 100.0;
+      if ( x == 0 )
+        continue;
+      for ( action_t* a : p->action_list )
+      {
+        if ( !a->data().ok() || !a->data().affected_by( fx ) )
+          continue;
+        switch ( fx.property_type() )
+        {
+          case P_GENERIC:     a->base_dd_multiplier *= 1.0 + x; break;
+          case P_TICK_DAMAGE: a->base_td_multiplier *= 1.0 + x; break;
+          case P_DURATION:    a->dot_duration *= 1.0 + x; break;
+          case P_TICK_TIME:   a->base_tick_time *= 1.0 + x; break;
+          default: break;
+        }
+        p->sim->print_debug( "{} {}: {} property {} x{:.4f}", *p, nm, a->name(), (int)fx.property_type(), 1.0 + x );
+      }
+      if ( fx.property_type() == P_DURATION )
+        for ( buff_t* b : p->buff_list )
+          if ( b->data().ok() && b->data().affected_by( fx ) && b->buff_duration() > 0_ms )
+          {
+            b->set_duration( b->buff_duration() * ( 1.0 + x ) );
+            p->sim->print_debug( "{} {}: buff {} duration x{:.4f}", *p, nm, b->name(), 1.0 + x );
+          }
+    }
+  } );
+}
+
+static void hfc_frozen_obliteration( special_effect_t& effect )
+{
+  if ( !hfc_spec_ok( effect ) )
+    return;
+  const double x = hfc::avg( effect, 1 ) / 100.0;
+  auto echo = new hfc::echo_t( effect, "frozen_obliteration", spell_data_t::nil(), SCHOOL_FROST );
+  auto x_e  = hfc::listener_effect( effect, "hits", PF_MELEE_ABILITY, PF2_ALL_HIT, 1.0 );
+  new hfc::cb_t( *x_e,
+    []( action_state_t* s ) { return s->result_amount > 0 && s->action->name_str.rfind( "obliterate", 0 ) == 0; },
+    [ echo, x ]( action_state_t* s ) { echo->hit( s->target, s->result_amount * x ); } );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+static void hfc_wandering_plague( special_effect_t& effect )
+{
+  if ( !hfc_spec_ok( effect ) )
+    return;
+  const double chance = hfc::avg( effect, 1 ) / 100.0;
+  auto echo = new hfc::echo_t( effect, "wandering_plague", effect.player->find_spell( 184899 ), SCHOOL_SHADOWFROST );
+  echo->aoe = -1;
+  echo->split_aoe_damage = true;
+  auto x_e = hfc::listener_effect( effect, "ticks", PF_PERIODIC, PF2_ALL_HIT, chance );  // PF2_PERIODIC_DAMAGE alone registers nothing
+  new hfc::cb_t( *x_e,
+    []( action_state_t* s ) { return s->result_amount > 0 && hfc::named( s, { "virulent_plague", "frost_fever", "blood_plague", "dread_plague" } ); },
+    [ echo ]( action_state_t* s ) { echo->hit( s->target, s->result_amount ); } );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+static void hfc_pyrosurge( special_effect_t& effect )
+{
+  if ( !hfc_spec_ok( effect ) )
+    return;
+  const double chance = hfc::avg( effect, 1 ) / 100.0;
+  action_t* fs = create_proc_action<generic_proc_t>( "pyrosurge_flamestrike", effect, effect.player->find_spell( 2120 ) );
+  fs->aoe = -1;
+  auto x_e = hfc::listener_effect( effect, "fire_blast", PF_MAGIC_SPELL, PF2_ALL_HIT, chance );
+  new hfc::cb_t( *x_e, []( action_state_t* s ) { return hfc::named( s, { "fire_blast" } ); },
+                 [ fs ]( action_state_t* s ) { fs->execute_on_target( s->target ); } );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+static void hfc_shatterlance( special_effect_t& effect )
+{
+  if ( !hfc_spec_ok( effect ) )
+    return;
+  const double x = hfc::avg( effect, 1 ) / 100.0;
+  // Ice Lance computes its damage on impact, after its own cast event: the bonus is decided at the Ice Lance cast
+  // (was the previous real cast a Frostbolt?) and read on impact. Frozen Orb / Flurry bolts are not casts.
+  struct st_t { bool after_frostbolt = false, boosted = false; };
+  auto st = std::make_shared<st_t>();
+  auto x_e = hfc::listener_effect( effect, "casts", PF_MAGIC_SPELL | PF_NONE_HARMFUL, PF2_CAST_DAMAGE | PF2_CAST_GENERIC, 1.0 );
+  new hfc::cb_t( *x_e, []( action_state_t* s ) { return !s->action->background; },
+                 [ st ]( action_state_t* s ) {
+                   if ( s->action->name_str == "ice_lance" )
+                     st->boosted = st->after_frostbolt;
+                   st->after_frostbolt = s->action->name_str == "frostbolt";
+                 } );
+  effect.player->register_init_finished_callback( [ st, x ]( player_t* p ) {
+    for ( action_t* a : p->action_list )
+      if ( a->name_str == "ice_lance" )
+        a->bs_target_mult.push_back( [ st, x ]( const action_t*, player_t* ) { return st->boosted ? 1.0 + x : 1.0; } );
+  } );
+  effect.player->register_combat_begin( [ st ]( player_t* ) { st->after_frostbolt = st->boosted = false; } );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+static void hfc_focus_of_vengeance( special_effect_t& effect )
+{
+  if ( !hfc_spec_ok( effect ) )
+    return;
+  player_t* p = effect.player;
+  const double per = hfc::avg( effect, 1 ) / 10000.0;  // "${$m1/100}.2%" per stack
+  buff_t* b = make_buff( p, "focus_of_vengeance", p->find_spell( 185102 ) );
+  auto x_e = hfc::listener_effect( effect, "cs", PF_MELEE_ABILITY, PF2_ALL_HIT, 1.0 );
+  new hfc::cb_t( *x_e, []( action_state_t* s ) { return hfc::named( s, { "crusader_strike", "templar_strike", "templar_slash" } ); },
+                 [ b ]( action_state_t* ) { b->trigger(); } );
+  p->register_init_finished_callback( [ b, per ]( player_t* pl ) {
+    for ( action_t* a : pl->action_list )
+      a->bs_target_mult.push_back( [ b, per ]( const action_t*, player_t* ) { return 1.0 + per * b->check(); } );
+  } );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+// Furious Sun (Windwalker): X% chance to perform a free Rising Sun Kick after each Fists of Fury, Blackout Kick or normal
+// Rising Sun Kick. The free kick is the Rising Sun Kick damage action (no cost, no cooldown, does not chain).
+static void hfc_furious_sun( special_effect_t& effect )
+{
+  if ( !hfc_spec_ok( effect ) )
+    return;
+  player_t* p = effect.player;
+  const double chance = hfc::avg( effect, 1 ) / 100.0;
+  // The casts (fists_of_fury, rising_sun_kick) raise no cast event here, so listen to the damage: Blackout Kick's hit,
+  // a normal Rising Sun Kick's hit (not the free one), Fists of Fury's FIRST tick of each channel; first target only.
+  auto x_e = hfc::listener_effect( effect, "hits", PF_MELEE_ABILITY, PF2_ALL_HIT, 1.0 );
+  struct st_t { action_t* rsk = nullptr; action_t* fof = nullptr; bool free_kick = false; };
+  auto st = std::make_shared<st_t>();
+  new hfc::cb_t( *x_e,
+    [ st ]( action_state_t* s ) {
+      if ( s->chain_target != 0 || st->free_kick )
+        return false;
+      if ( hfc::named( s, { "blackout_kick", "rising_sun_kick_damage" } ) )
+        return true;
+      return s->action->name_str == "fists_of_fury_damage" && st->fof && st->fof->get_dot( s->target )->current_tick == 1;
+    },
+    [ p, st, chance ]( action_state_t* s ) {
+      if ( st->rsk && p->rng().roll( chance ) )
+      {
+        st->free_kick = true;
+        st->rsk->execute_on_target( s->target );
+        st->free_kick = false;
+      }
+    } );
+  p->register_init_finished_callback( [ st ]( player_t* pl ) {
+    st->rsk = pl->find_action( "rising_sun_kick_damage" );
+    st->fof = pl->find_action( "fists_of_fury" );
+  } );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+static void hfc_mental_fatigue( special_effect_t& effect )
+{
+  if ( !hfc_spec_ok( effect ) )
+    return;
+  player_t* p = effect.player;
+  const double per = hfc::avg( effect, 1 ) / 10000.0;
+  const spell_data_t* debuff = p->find_spell( 185104 );
+  auto st = std::make_shared<hfc::target_stacks_t>( hfc::target_stacks_t{ p, debuff, "mental_fatigue", {} } );
+  auto x_e = hfc::listener_effect( effect, "flay", PF_MAGIC_SPELL | PF_PERIODIC, PF2_ALL_HIT | PF2_PERIODIC_DAMAGE, 1.0 );
+  new hfc::cb_t( *x_e, []( action_state_t* s ) { return s->result_amount > 0 && hfc::named( s, { "mind_flay", "mind_flay_insanity" } ); },
+                 [ st ]( action_state_t* s ) { st->get( s->target )->trigger(); } );
+  p->register_init_finished_callback( [ st, per, debuff ]( player_t* pl ) {
+    for ( action_t* a : pl->action_list )
+      if ( a->data().ok() && a->data().affected_by( debuff->effectN( 1 ) ) )
+        a->bs_target_mult.push_back( [ st, per ]( const action_t*, player_t* t ) { return 1.0 + per * st->stacks( t ); } );
+  } );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+static void hfc_flamelicked( special_effect_t& effect )
+{
+  if ( !hfc_spec_ok( effect ) )
+    return;
+  player_t* p = effect.player;
+  const spell_data_t* debuff = p->find_spell( 185229 );
+  const double per = debuff->effectN( 1 ).average( effect.item ) / 100.0;
+  auto st = std::make_shared<hfc::target_stacks_t>( hfc::target_stacks_t{ p, debuff, "flamelicked", {} } );
+  auto x_e = hfc::listener_effect( effect, "incinerate", PF_MAGIC_SPELL, PF2_ALL_HIT, 1.0 );
+  new hfc::cb_t( *x_e, []( action_state_t* s ) { return hfc::named( s, { "incinerate" } ); },
+                 [ st ]( action_state_t* s ) { st->get( s->target )->trigger(); } );
+  p->register_init_finished_callback( [ st, per, debuff ]( player_t* pl ) {
+    for ( action_t* a : pl->action_list )
+      if ( a->data().ok() && a->data().affected_by( debuff->effectN( 1 ) ) )
+        a->bs_target_crit.push_back( [ st, per ]( const action_t*, player_t* t ) { return per * st->stacks( t ); } );
+  } );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+static void hfc_toxic_mutilator( special_effect_t& effect )
+{
+  if ( !hfc_spec_ok( effect ) )
+    return;
+  const double x = hfc::avg( effect, 1 ) / 100.0;
+  effect.player->register_init_finished_callback( [ x ]( player_t* p ) {
+    buff_t* env = buff_t::find( p, "envenom" );
+    if ( !env )
+      return;
+    for ( action_t* a : p->action_list )
+      if ( a->name_str == "mutilate_mh" || a->name_str == "mutilate_oh" )
+        a->bs_target_crit.push_back( [ env, x ]( const action_t*, player_t* ) { return env->check() ? x : 0.0; } );
+  } );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+static void hfc_tactical_surge( special_effect_t& effect )
+{
+  if ( !hfc_spec_ok( effect ) )
+    return;
+  const double chance = hfc::avg( effect, 1 ) / 100.0;
+  auto x_e = hfc::listener_effect( effect, "swings", PF_MELEE, PF2_ALL_HIT, chance );
+  player_t* p = effect.player;
+  new hfc::cb_t( *x_e, []( action_state_t* ) { return true; },
+                 [ p ]( action_state_t* ) { p->get_cooldown( "colossus_smash" )->reset( false ); } );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
+static void hfc_berserkers_fury( special_effect_t& effect )
+{
+  if ( !hfc_spec_ok( effect ) )
+    return;
+  player_t* p = effect.player;
+  const double per = hfc::avg( effect, 1 ) / 10000.0;
+  buff_t* b = make_buff( p, "berserkers_fury", p->find_spell( 185230 ) )
+                  ->set_default_value( per )
+                  ->set_pct_buff_type( STAT_PCT_BUFF_HASTE );
+  auto x_e = hfc::listener_effect( effect, "swings", PF_MELEE, PF2_ALL_HIT, 1.0 );
+  new hfc::cb_t( *x_e, []( action_state_t* ) { return true; }, [ b ]( action_state_t* ) { b->trigger(); } );
+  effect.type = SPECIAL_EFFECT_NONE;
+}
+
 // ===========================================================================
 // SOULDRINKER, the Dragon Soul one-hander, items 78488 / 77193 / 78479.
 //
@@ -5145,8 +5650,8 @@ void item::souldrinker( special_effect_t& effect )
 // SEVERAL can be up at once. pet_spawner_t already handles that - it is what
 // Nibelung's Val'kyr uses above - so the hard part needs nothing new.
 //
-// THE SUMMON IS MODELLED. THE DAMAGE IS DELIBERATELY ZERO. Read this before
-// changing TENTACLE_TICK_DAMAGE:
+// THE SUMMON IS MODELLED. The damage was zero until the author's 19 Sep 2026 log (275 a tick,
+// flat - see TENTACLE_TICK_DAMAGE below). History of why it was zero:
 //
 // SimulationCraft's own Cataclysm-era implementation (simc-cataclysm,
 // engine/sc_unique_gear.cpp, register_gurthalak) is the best source there is for
@@ -5233,7 +5738,12 @@ struct lash_of_the_deep_t final : public spell_t
     // The duration is the channel itself, so one tentacle channels once and the
     // 12 second life covers it - which is also the Cataclysm implementation's
     // "3 Mind Flays of 3 ticks each", 8-9 ticks in one go.
-    cooldown->duration = CHANNEL_TIME;
+    //
+    // BracketSim 13 Nov 2026: the cooldown WAS CHANNEL_TIME (9 s). The channel starts at the summon and ends 9 s later,
+    // the cooldown came back at that same moment, inside the 12 s life, so every tentacle channelled TWICE - and the second
+    // channel kept ticking after the tentacle was gone: 18 ticks per tentacle, double the 8-9 the Cataclysm implementation
+    // gives. A cooldown longer than the life means one channel per tentacle.
+    cooldown->duration = TENTACLE_TIME * 2;
     // Cannot miss, can crit on its ticks, and is NOT hasted - all three from the
     // Cataclysm implementation.
     may_miss          = false;
@@ -10244,8 +10754,12 @@ void unique_gear::register_special_effects()
   // flags. This only tells the generic builder what to build.
   register_special_effect( 67702,   item::deaths_verdict ); /* Death's Verdict - Paragon */
   register_special_effect( 67771,   item::deaths_verdict ); /* Death's Verdict (heroic) */
-  register_special_effect( 67712,   "67714Trigger"   ); /* Reign of the Unliving - Pillar of Flame */
-  register_special_effect( 67758,   "67760Trigger"   ); /* Reign of the Unliving (heroic) */
+  register_special_effect( 67712,   reign_of_the_unliving ); /* Reign of the Unliving - Pillar of Flame */
+  register_special_effect( 67738,   window_of_stacks_on_use ); /* Victor's Call / Vengeance of the Forsaken - Rising Fury */
+  register_special_effect( 67747,   window_of_stacks_on_use ); /* (heroic) */
+  register_special_effect( 67736,   window_of_stacks_on_use ); /* Talisman / Fetish of Volatile Power */
+  register_special_effect( 67744,   window_of_stacks_on_use ); /* (heroic) */
+  register_special_effect( 67758,   reign_of_the_unliving ); /* Reign of the Unliving (heroic) */
   /* Dislodged Foreign Object. Was "71600Trigger"/"71643Trigger", which triggers
    * the per-stack aura directly - and that aura is infinite in this client,
    * because the real 20s duration lives on 71601/71644. One permanent stack per
@@ -10621,6 +11135,27 @@ void unique_gear::register_special_effects()
   /* Warlords of Draenor 6.2 */
   register_special_effect( 184270, item::mirror_of_the_blademaster      );
   register_special_effect( 184291, item::soul_capacitor                 );
+  // Hellfire Citadel class trinkets, one passive per spec (13 Nov 2026) - see hfc_modifiers.
+  register_special_effect( 184897, hfc_modifiers ); /* HFC class trinket: Unholy Coil (Reaper's Harvest, Blood) */
+  register_special_effect( 184877, hfc_modifiers ); /* HFC class trinket: Wildcat Celerity (Seed of Creation, Feral) */
+  register_special_effect( 184900, hfc_modifiers ); /* HFC class trinket: Beastlord (Talisman of the Master Tracker, BM) */
+  register_special_effect( 184902, hfc_modifiers ); /* HFC class trinket: Blackness (Talisman of the Master Tracker, Survival) */
+  register_special_effect( 184917, hfc_modifiers ); /* HFC class trinket: Eviscerating Blade (Bleeding Hollow Toxin Vessel, Outlaw) */
+  register_special_effect( 184918, hfc_modifiers ); /* HFC class trinket: From the Shadows (Bleeding Hollow Toxin Vessel, Subtlety) */
+  register_special_effect( 184919, hfc_modifiers ); /* HFC class trinket: Elemental Bellows (Core of the Primal Elements, Elemental) */
+  register_special_effect( 184920, hfc_modifiers ); /* HFC class trinket: Furious Winds (Core of the Primal Elements, Enhancement) */
+  register_special_effect( 184922, hfc_modifiers ); /* HFC class trinket: Epidemic (Fragment of the Dark Star, Affliction) */
+  register_special_effect( 184898, hfc_frozen_obliteration ); /* HFC class trinket: Frozen Obliteration (Reaper's Harvest, Frost) */
+  register_special_effect( 184983, hfc_wandering_plague ); /* HFC class trinket: Wandering Plague (Reaper's Harvest, Unholy) */
+  register_special_effect( 184904, hfc_pyrosurge ); /* HFC class trinket: Pyrosurge (Tome of Shifting Words, Fire) */
+  register_special_effect( 184905, hfc_shatterlance ); /* HFC class trinket: Shatterlance (Tome of Shifting Words, Frost) */
+  register_special_effect( 184908, hfc_furious_sun ); /* HFC class trinket: Furious Sun (Sacred Draenic Incense, Windwalker) */
+  register_special_effect( 184911, hfc_focus_of_vengeance ); /* HFC class trinket: Focus of Vengeance (Libram of Vindication, Retribution) */
+  register_special_effect( 184915, hfc_mental_fatigue ); /* HFC class trinket: Mental Fatigue (Repudiation of War, Shadow) */
+  register_special_effect( 184916, hfc_toxic_mutilator ); /* HFC class trinket: Toxic Mutilator (Bleeding Hollow Toxin Vessel, Assassination) */
+  register_special_effect( 184924, hfc_flamelicked ); /* HFC class trinket: Flamelicked (Fragment of the Dark Star, Destruction) */
+  register_special_effect( 184925, hfc_tactical_surge ); /* HFC class trinket: Tactical Surge (Worldbreaker's Resolve, Arms) */
+  register_special_effect( 184926, hfc_berserkers_fury ); /* HFC class trinket: Berserker's Fury (Worldbreaker's Resolve, Fury) */
   register_special_effect( 183942, item::insatiable_hunger              );
   register_special_effect( 184066, item::prophecy_of_fear               );
   register_special_effect( 183951, item::unblinking_gaze_of_sethe       );
@@ -10662,9 +11197,12 @@ void unique_gear::register_special_effects()
   register_special_effect( 146251, item::thoks_tail_tip                 );
 
   /* Mists of Pandaria: 5.2 */
-  register_special_effect( 139116, item::rune_of_reorigination          );
+  // Rune of Re-Origination (139116) and Unerring Vision of Lei Shen (138964): their procs NEVER fire in the live game
+  // (the author, 13 Nov 2026: "the MOP trinkets listed from throne of thunder they never proc anymore sadly") - they sim as
+  // stats only. The handlers item::rune_of_reorigination / unerring_vision_of_leishen are kept for if that ever changes.
+  register_special_effect( 139116, bs_no_effect                          );
   register_special_effect( 138957, item::spark_of_zandalar              );
-  register_special_effect( 138964, item::unerring_vision_of_leishen     );
+  register_special_effect( 138964, bs_no_effect                          );
 
   register_special_effect( 138728, "Reverse"                            ); /* Steadfast Talisman of the Shado-Pan Assault */
   register_special_effect( 138701, "ProcOn/Hit"                         ); /* Brutal Talisman of the Shado-Pan Assault */

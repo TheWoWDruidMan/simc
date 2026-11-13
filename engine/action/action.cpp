@@ -1709,11 +1709,21 @@ double action_t::composite_target_armor( const action_state_t* s ) const
 
 double action_t::composite_target_crit_chance( player_t* t ) const
 {
-  return player->composite_player_target_crit_chance( t );
+  double c = player->composite_player_target_crit_chance( t );
+  for ( const auto& f : bs_target_crit )
+    c += f( this, t );
+  return c;
 }
 
 double action_t::composite_target_multiplier( player_t* t ) const
 {
+  if ( !bs_target_mult.empty() )
+  {
+    double m = player->composite_player_target_multiplier( t, get_school() );
+    for ( const auto& f : bs_target_mult )
+      m *= f( this, t );
+    return m;
+  }
   return player->composite_player_target_multiplier( t, get_school() );
 }
 
