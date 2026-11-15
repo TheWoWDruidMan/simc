@@ -309,6 +309,10 @@ struct chance_on_hit_cb_t : public dbc_proc_callback_t
   bool weapon_rule = true;  // shield attacks excluded; Shadowmourne (an aura) clears it
   bool demon_blades = false;  // Landslide on a Demon Hunter: Demon Blades rolls it too (item::landslide_dh)
   bool melee_range_only = false;  // Crusader: never from the ranged attacks below
+  // 14 Nov 2026 (the author: "be careful extending this beyond chance on hit effects because things like souldrinker work
+  // differently"): false for equip-aura procs (item effect trigger 1 - Souldrinker, No'Kaled), which the 14 Nov rules below
+  // (off-hand items vs no-weapon hits, Main Gauche, Fury off-hand abilities, Keg Smash / Immolation Aura) were not measured on.
+  bool chance_on_hit_item = true;
 
   chance_on_hit_cb_t( const special_effect_t& effect )
     : dbc_proc_callback_t( effect.item, effect ),
@@ -341,11 +345,72 @@ struct chance_on_hit_cb_t : public dbc_proc_callback_t
     if ( !lands_as_melee_hit( state, weapon_rule ) )
       return;
 
+    /*
+     * FURY: AN OFF-HAND ABILITY HIT ALSO ROLLS THE MAIN-HAND ITEM (14 Nov 2026, the author: "I'm 100% sure things like whirlwind
+     * proc it even in offhand"). the author's Fury raids, gear per fight: a main-hand Untamed Blade procs from Rampage's off-hand
+     * hit (184707, which also procs an off-hand Singing Crystal Axe 21/483) at its full rate, 69 / 1,189 lone hits = 5.8%,
+     * and from off-hand Whirlwind hits whose main-hand hit was parried, 4 / 118 (lone parries never proc: 0 / 121). Total
+     * fit, every fight: main-hand Untamed 2,792 procs = 8.3% over main-hand hits + Rampage alone, 5.5% with the off-hand
+     * Whirlwind / Raging Blow / Execute hits (lone-hit rate 5.7-6.2%), 4.9% if off-hand auto attacks counted too - so they
+     * do not; Destiny the same (7.7 / 4.8 / 4.4%). The other way never: main-hand hits -> off-hand Singing Axe 3 / 949
+     * Bloodthirsts, 0 / 23 lone main-hand Whirlwinds. Weapon items only.
+     */
+    const bool fury_offhand_ability = chance_on_hit_item && effect.source == SPECIAL_EFFECT_SOURCE_ITEM && state && state->action &&
+                                      state->action->special && listener->type == WARRIOR &&
+                                      listener->specialization() == WARRIOR_FURY && hand == &( listener->main_hand_weapon ) &&
+                                      state->action->weapon == &( listener->off_hand_weapon );
     if ( state && state->action && state->action->weapon && hand &&
-         state->action->weapon != hand )
+         state->action->weapon != hand && !fury_offhand_ability )
     {
       return;
     }
+
+    /*
+     * ...BUT NOT EVERY OFF-HAND WHIRLWIND HIT (14 Nov 2026, the author's Fury logs, all 248 wearer rows, main-hand item fights,
+     * lone hits, expected = each item's own lone Bloodthirst + main-hand Rampage rate in the same fights; Shadowmourne left
+     * out, it is an equip aura): the FIRST off-hand Whirlwind hit (44949) rolls the main-hand item at its full rate, 8 / 101
+     * (expected 7.9), and so does Rampage's off-hand hit, 284 / 3,978 (340); the LATER off-hand hits (199851, the
+     * "whirlwind_oh_others" here) only 5 / 200 against 15.7 expected - 0.32 of the rate (Untamed 2/98, Bonereaver 3/84,
+     * Destiny 0/17). A 30 Fury single-target sim lands ~154 of those a fight, so it is not a rounding error.
+     */
+    if ( fury_offhand_ability && state->action->data().id() == 199851 && !listener->rng().roll( 0.32 ) )
+      return;
+
+    // Keg Smash and Immolation Aura roll no weapon item: Brewmaster main-hand Right Claw 0 / 329 lone Keg Smashes (Windwalker
+    // 0 / 23) against Tiger Palm 4.0%, Rushing Jade Wind 5.7%; Vengeance Immolation Aura 0 / 112 (initial) and 5 / 672.
+    // Souldrinker (an equip aura) is the other way round on Keg Smash (14 Nov 2026, the author's Brewmaster logs, two Souldrinkers,
+    // each copy's own Drain Life spell): Keg Smash procs BOTH, 33 + 34 of 251 lone hits (15% each), as Spinning Crane Kick
+    // (537 + 525 of 3,522) and Blackout Kick do; Tiger Palm only the main-hand copy (29 / 190, off-hand copy 0). Immolation
+    // Aura procs it no more than the weapons: 1 / 332 lone hits (Vengeance, main-hand Souldrinker), ~50 expected.
+    if ( effect.source == SPECIAL_EFFECT_SOURCE_ITEM && hand && state && state->action )
+    {
+      switch ( state->action->data().id() )
+      {
+        case 121253:
+          if ( chance_on_hit_item )
+            return;
+          break;
+        case 258920: case 258921: case 258922:
+          return;
+        default:
+          break;
+      }
+    }
+
+    /*
+     * A HIT WITH NO WEAPON IS A MAIN-HAND ROLL; MAIN GAUCHE ROLLS NO ITEM (14 Nov 2026, the author: "be SURE proven"). Outlaw
+     * raids with Eskhandar's Right Claw, gear read per fight: Claw OFF hand (27 fights) - 126 procs / 2,772 off-hand swings
+     * (split by size) = 4.55%, its own 4.33% a roll, so nothing else rolls it: Pistol Shot 0 of 87 lone hits, and Main
+     * Gauche's 1,310 hits or the off hand's Instant Poisons would add ~57 / ~60. Claw MAIN hand (56 fights): 573 procs
+     * = 4.44% only over main-hand swings + abilities + every Instant Poison + Blade Flurry (13,709 rolls); without the
+     * poisons it would be 8.4%, against ~3.4% on lone hits (Pistol Shot 9 of 189). The sim rolled the off-hand Claw on
+     * Pistol Shot, Between the Eyes and Main Gauche: 21 procs a fight, 6.2% of its off-hand swings (game 4.55%).
+     */
+    if ( chance_on_hit_item && effect.source == SPECIAL_EFFECT_SOURCE_ITEM && state && state->action && hand &&
+         hand == &( listener->off_hand_weapon ) && !state->action->weapon )
+      return;
+    if ( chance_on_hit_item && effect.source == SPECIAL_EFFECT_SOURCE_ITEM && hand && state && state->action && state->action->data().id() == 86392 )
+      return;
 
     /*
      * 12 Oct 2026, a level 30 Havoc dummy log (player report via the author; WarcraftLogs bBn9cJd2f6PjDmvg, 299.8 s, Eskhandar's
@@ -1374,11 +1439,21 @@ static void nokaled( special_effect_t& effect )
     fire = 109872, shadow = 109868, frost = 109870;  // heroic
 
   effect.name_str     = "nokaled";
-  effect.proc_flags_  = PF_MELEE | PF_MELEE_ABILITY;  // the driver's White + Yellow Melee
+  // ABILITIES ONLY (14 Nov 2026 evening): the driver carries "Only Proc From Class Abilities" (attribute 415), and a
+  // Vengeance log with No'Kaled in both hands shows 0 blasts after 587 lone auto attacks.
+  effect.proc_flags_  = PF_MELEE_ABILITY;
   effect.proc_flags2_ = PF2_ALL_HIT;
   effect.disable_buff();
   effect.execute_action = create_proc_action<nokaled_blast_t>( "nokaled", effect, fire, shadow, frost );
-  static_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) )->hand = nullptr;  // either hand (see above)
+  // OWN HAND, 18% (14 Nov 2026, the author: the either-hand rule "needs to be proven not assumed"). A level 35 Havoc with
+  // heroic No'Kaled in the main hand (WarcraftLogs MD34WcTLNjba2vGk, 5 fights, gear read per fight; each blast lands
+  // 16-100 ms after the hit that rolled it): 0 blasts after 182 off-hand Chaos Strike / Annihilation hits, 25 after 120
+  // main-hand ones with no other hit within 110 ms (20.8%); 118 blasts / ~700 main-hand weapon hits = 17% overall. The
+  // driver's 7% is not this client's rate. The 13 Nov either-hand rule (above) was inferred from other weapons, whose own
+  // logs now show own hand too (see Heartrazor).
+  effect.proc_chance_ = 0.18;
+  if ( auto cb = dynamic_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) ) )
+    cb->chance_on_hit_item = false;  // an equip aura (trigger 1), not a "Chance on hit" item
 }
 
 void item::chillpike( special_effect_t& effect )
@@ -1547,6 +1622,19 @@ void item::jackhammer( special_effect_t& effect )
 //
 // A second copy (a dual-wielded Heartrazor) shares the buff but gets its own
 // roll, as each hand's proc did.
+// 14 Nov 2026: poison hits roll the MAIN-HAND item (whichever hand applied the poison), never the off-hand one - see
+// chance_on_hit_cb_t (Outlaw, Right Claw) and Heartrazor. Only for items measured so.
+static void main_hand_poison_rolls( special_effect_t& effect, buff_t* buff, double chance )
+{
+  if ( !buff || !effect.item || effect.item->slot != SLOT_MAIN_HAND || !effect.player )
+    return;
+  player_t* p = effect.player;
+  p->bracketsim.poison_hit_listeners.push_back( [ p, buff, chance ]( player_t*, const weapon_t* ) {
+    if ( p->rng().roll( chance ) )
+      buff->trigger();
+  } );
+}
+
 static void weapon_stat_proc( special_effect_t& effect, const std::string& name, double ppm,
                               double fallback_speed, bool any_hand = false, double chance_per_hit = 0 )
 {
@@ -1579,9 +1667,30 @@ static void weapon_stat_proc( special_effect_t& effect, const std::string& name,
  */
 // 12 Oct 2026, second log (the author's a test character, Heartrazor OFF hand, 120.6 s): 6 procs from 306 landed weapon hits, all on
 // hits without a poison. Both logs pooled: 43 procs / 1,220 hits = 3.52% a hit, either hand (1.17 PPM x 1.8 sec).
+// OWN HAND, RATES REFITTED (14 Nov 2026, the author: "that "either hand" rule needs to be proven not assumed"). the author's
+// raid logs with each fight's own gear (WarcraftLogs combatant info per fight; raw logs per COMBATANT_INFO), hands fixed
+// by spell id (Fury's main-hand and off-hand Raging Blow / Whirlwind / Execute halves, Bloodthirst main hand only), hits
+// with no hit of the other hand within 20 ms: the item never procs from the other hand - Destiny (main hand) 1 of 744
+// off-hand hits vs 9.3% of its own; Singing Crystal Axe (off hand) 3 of 2,009 main-hand hits (raw logs 0 of 774); The
+// Untamed Blade (main hand) 3 of 914 (raw logs 1 of 37). Heartrazor (same-speed daggers, so swings split by size, only
+// those far from the cut): 0 of 403 clear off-hand swings vs 4.1% of clear main-hand ones (the 13 Sep dummy: 0 of 96).
+// The earlier either-hand reading came from fights where the wearer had swapped weapons (two Untamed Blades, or the blade
+// in the other hand) under a gear row read from one fight. RATE = procs / own-hand landed hits on single-target fights
+// (that hand's spell-id hits + half the swings + half of Rampage): Untamed Blade 408 / 5,238 = 7.8% (1.37 PPM x 3.4 sec),
+// Destiny 981 / 11,756 = 8.3% (all fights; 1.38 PPM x 3.6), Singing Crystal Axe 587 / 9,985 = 5.9% (0.98 PPM x 3.6),
+// Heartrazor 97 / 1,321 = 7.3% (raid + dummy; 2.33 PPM x 1.8 = 7.0%, the raid's single-target value).
+// RATES RE-PROVEN, 14 Nov 2026 evening (the refit above was wrong: it counted only weapon hits as rolls, and procs are
+// logged at an ability's cast). Each item, lone own-hand hits (no other hit within 120 ms, proc within 100 ms), single
+// target: Untamed Blade (Fury, swings split by size) Bloodthirst 90/1,580, Rampage 134/2,188, main-hand swings 37/863 =
+// 5.7% = the old 1.0 PPM x 3.4, which also fits the 8 Oct Frost DK dummy (25 in game, 24.4 simmed). Destiny 78/1,440 =
+// 5.4% (0.90 PPM x 3.6). Singing Crystal Axe Fury off hand 43/743 + Arms 91/1,368 = 6.35% (1.06 PPM x 3.6).
+// Heartrazor (Assassination, main hand; raw logs + raids) 3.3% on lone hits, and 214 procs / (own-hand weapon hits +
+// every Deadly Poison hit, 6,125) = 3.5%; weapon hits alone would need 7% - so poison hits roll it (main hand), at
+// 1.17 PPM x 1.8 = 3.51%, the old rate. Bryntroll 2 PPM own hand stands (Blood 2H ~12%, Fury main hand 12-17%).
 void item::heartrazor( special_effect_t& effect )
 {
-  weapon_stat_proc( effect, "heartrazor", 1.17, 1.8, true );
+  weapon_stat_proc( effect, "heartrazor", 1.17, 1.8 );
+  main_hand_poison_rolls( effect, effect.custom_buff, effect.proc_chance_ );
 }
 
 /*
@@ -1605,7 +1714,10 @@ void item::heartrazor( special_effect_t& effect )
  */
 static void night_blade_family( special_effect_t& effect, const std::string& name )
 {
-  weapon_stat_proc( effect, name, 0.85, 1.8, true );  // 0.85 PPM x 1.8 sec = 2.55% a hit
+  // 14 Nov 2026: OWN HAND, like every chance-on-hit weapon the author's logs could test (see Heartrazor). No log has a Night
+  // Blade with its gear known, so this is the measured rule applied, not measured on it. Its 12 Oct dummy log refitted
+  // under it: 12 procs / (153 own-hand weapon hits + 164 poison hits) = 3.8% a roll (1.27 PPM x 1.8 sec).
+  weapon_stat_proc( effect, name, 1.27, 1.8 );
 
   buff_t* buff = effect.custom_buff;
   player_t* p = effect.player;
@@ -1636,7 +1748,7 @@ static void gloaming_blade( special_effect_t& effect ) { night_blade_family( eff
 void item::untamed_blade( special_effect_t& effect )
 {
   const bool off_hand = effect.item && effect.item->slot == SLOT_OFF_HAND;
-  weapon_stat_proc( effect, off_hand ? "untamed_fury_oh" : "untamed_fury", 1.0, 3.4, true );
+  weapon_stat_proc( effect, off_hand ? "untamed_fury_oh" : "untamed_fury", 1.0, 3.4 );  // own hand, 14 Nov (see Heartrazor)
 }
 
 /*
@@ -1650,12 +1762,12 @@ void item::untamed_blade( special_effect_t& effect )
  */
 void item::singing_crystal_axe( special_effect_t& effect )
 {
-  weapon_stat_proc( effect, "the_blades_song", 0.44, 3.6, true );
+  weapon_stat_proc( effect, "the_blades_song", 1.06, 3.6 );  // own hand, 14 Nov (see Heartrazor)
 }
 
 void item::destiny( special_effect_t& effect )
 {
-  weapon_stat_proc( effect, "destiny", 0.80, 3.6, true );
+  weapon_stat_proc( effect, "destiny", 0.90, 3.6 );  // own hand, 14 Nov (see Heartrazor)
 }
 
 // BracketSim: Blackout Truncheon (27901) and Despair (28573), 23 September 2026 -
@@ -4254,10 +4366,16 @@ void item::eskhandars_right_claw( special_effect_t& effect )
   buff->set_chance( 1.0 );
   effect.custom_buff = buff;
 
-  // EITHER HAND (12 Oct 2026, the Havoc log in chance_on_hit_cb_t): 33 procs from 758 landed weapon hits of both hands =
-  // 4.35% a hit, this weapon's own 1 PPM at 2.6 sec (4.33%); its own hand's hits alone would need 6.8%.
-  auto cb = static_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) );
-  cb->hand = nullptr;
+  // OWN HAND (14 Nov 2026, the author: "is it auto attacks or abilities that trigger a OH attack ... that needs challenging and
+  // proof"). The 12 Oct either-hand rule came from a Havoc dummy log whose gear was unknown (33 procs / 758 hits of both
+  // hands), so it could not tell the hands apart. Logs with the gear known, hands split by swing size (the off hand hits
+  // for about half): the author's raw raid logs, Claw in the main hand: 31 procs from 627 isolated main-hand swings (4.9%) and
+  // 7 from 746 off-hand swings (0.9%, mostly misread main-hand swings). Uploaded raids, 7 players with the Claw in the OFF
+  // hand: 51 / 1,974 off-hand swings, 14 / 1,227 main-hand swings, and 0 from 404 Sinister Strikes, 153 Tiger Palms, 106
+  // Dispatches and every other main-hand ability (either hand would give ~17 from the Sinister Strikes alone). So its own
+  // hand's hits only (the default hand rule), at the same 4.33% a hit.
+  chance_on_hit( effect );
+  main_hand_poison_rolls( effect, buff, effect.proc_chance_ );  // 14 Nov evening, see chance_on_hit_cb_t
 }
 
 /*
@@ -4298,7 +4416,12 @@ void item::bryntroll( special_effect_t& effect )
   effect.proc_flags2_ = PF2_ALL_HIT;
   const weapon_t* w   = effect.item ? effect.item->weapon() : nullptr;
   const double speed  = ( w && w->swing_time > timespan_t::zero() ) ? w->swing_time.total_seconds() : 3.6;
-  effect.proc_chance_ = chance_on_hit_from_ppm( 1.65, speed );
+  // OWN HAND, 2 PPM (14 Nov 2026, the author: "needs to be proven not assumed"). Two level 30 Fury raiders with heroic
+  // Bryntroll in the main hand and another weapon in the off hand (WarcraftLogs ARx4ThB2JGD9KLXv, gear per fight): 0 Drain
+  // Lifes after 144 off-hand hits (spell-id hands, no main-hand hit within 20 ms) vs 43 after 253 main-hand ones; 197 Drain
+  // Lifes / 1,622 main-hand landed hits = 12.1% = 2 PPM at 3.6 sec (wowsims/wotlk's rate). The 13 Oct both-hands dummy
+  // (gear not in the log) is not used.
+  effect.proc_chance_ = chance_on_hit_from_ppm( 2.0, speed );
   effect.ppm_         = 0;
 
   action_t* a = effect.player->find_action( effect.name_str );
@@ -4306,8 +4429,7 @@ void item::bryntroll( special_effect_t& effect )
     a = create_proc_action<generic_proc_t>( effect.name_str, effect, effect.driver() );
   effect.execute_action = a;
 
-  auto cb = static_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) );
-  cb->hand = nullptr;
+  chance_on_hit( effect );
 }
 
 // Shadowmourne, item 49623.
@@ -5645,7 +5767,8 @@ void item::souldrinker( special_effect_t& effect )
 
   effect.execute_action = new drain_life_t( effect, share );
 
-  chance_on_hit( effect );
+  if ( auto cb = dynamic_cast<chance_on_hit_cb_t*>( chance_on_hit( effect ) ) )
+    cb->chance_on_hit_item = false;  // an equip aura (trigger 1), not a "Chance on hit" item - see chance_on_hit_cb_t
 }
 
 // ===========================================================================

@@ -51,10 +51,8 @@ struct holy_word_sanctify_t final : public priest_heal_t
   {
     priest_heal_t::execute();
 
-    if ( priest().talents.holy.eternal_sanctity.enabled() )
-    {
-      priest().buffs.apotheosis->extend_duration( priest().talents.holy.eternal_sanctity->effectN( 1 ).time_value() );
-    }
+    // Eternal Sanctity is a passive +12 s on Apotheosis (game data, applied with the spell data), not a per-cast
+    // extension (15 Nov 2026: per-cast made Apotheosis endless).
 
     if ( priest().talents.holy.divine_image.enabled() || priest().legacy_divine_image_roll() )
     {
@@ -88,10 +86,8 @@ struct holy_word_serenity_t final : public priest_heal_t
   {
     priest_heal_t::execute();
 
-    if ( priest().talents.holy.eternal_sanctity.enabled() )
-    {
-      priest().buffs.apotheosis->extend_duration( priest().talents.holy.eternal_sanctity->effectN( 1 ).time_value() );
-    }
+    // Eternal Sanctity is a passive +12 s on Apotheosis (game data, applied with the spell data), not a per-cast
+    // extension (15 Nov 2026: per-cast made Apotheosis endless).
 
     if ( priest().talents.holy.divine_image.enabled() || priest().legacy_divine_image_roll() )
     {
@@ -419,10 +415,8 @@ struct holy_word_chastise_t final : public priest_spell_t
   {
     priest_spell_t::execute();
 
-    if ( priest().talents.holy.eternal_sanctity.enabled() )
-    {
-      priest().buffs.apotheosis->extend_duration( priest().talents.holy.eternal_sanctity->effectN( 1 ).time_value() );
-    }
+    // Eternal Sanctity is a passive +12 s on Apotheosis (game data, applied with the spell data), not a per-cast
+    // extension (15 Nov 2026: per-cast made Apotheosis endless).
 
     if ( priest().talents.holy.divine_image.enabled() || priest().legacy_divine_image_roll() )
     {

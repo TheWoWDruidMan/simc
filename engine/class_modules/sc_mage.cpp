@@ -7941,9 +7941,14 @@ void mage_t::create_buffs()
                                             ->set_default_value_from_effect( 1 )
                                             ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
                                             ->set_chance( shadowlands_legacy.fevered_incantation );
+  // Firestorm (333097) is a 1.66 RPPM proc rolled when Hot Streak activates (spell data; official Shadowlands simc:
+  // set_trigger_spell( runeforge.firestorm )). 15 Nov 2026: a bool chance made it fire on every Hot Streak.
   buffs.legacy_firestorm                = make_buff( this, "legacy_firestorm", find_spell( 333100 ) )
-                                            ->set_default_value_from_effect( 2 )
-                                            ->set_chance( shadowlands_legacy.firestorm );
+                                            ->set_default_value_from_effect( 2 );
+  if ( shadowlands_legacy.firestorm )
+    buffs.legacy_firestorm->set_trigger_spell( dbc::find_spell( static_cast<const player_t*>( this ), 333097 ) );
+  else
+    buffs.legacy_firestorm->set_chance( 0.0 );
   buffs.legacy_molten_skyfall           = make_buff( this, "legacy_molten_skyfall", find_spell( 333170 ) )
                                             ->set_chance( shadowlands_legacy.molten_skyfall );
   buffs.legacy_molten_skyfall_ready     = make_buff( this, "legacy_molten_skyfall_ready", find_spell( 333182 ) );

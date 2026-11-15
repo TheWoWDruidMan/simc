@@ -431,7 +431,11 @@ struct judgment_holy_t : public judgment_t
     judgment_t( p, name, options_str, p->find_spell( 275773 ) )
   {
     parse_options( options_str );
-    base_multiplier *= 1.0 + p->spec.holy_paladin->effectN( 11 ).percent();
+    // BracketSim (14 Nov 2026, the author: "im 100% sus of 30 holy paladin saying 3,331 dps.. judgment is 46.7% of total
+    // damage"): the aura's effect 11 is no longer Judgment's - in this build's data it is Eternal Flame's +198% periodic
+    // healing (260932) - so Judgment was multiplied by 2.98 on top of the aura's real Judgment effects (#3 +X% by level,
+    // #17 +58%), which the generic spell-effect parser already applies. Level 30: 4,370 a hit with a 10.6x multiplier,
+    // three times the spell data's 3.56x. Removed.
   }
   /* This background constructor doesn't seem to have any use?
   judgment_holy_t( paladin_t* p, util::string_view name ) :

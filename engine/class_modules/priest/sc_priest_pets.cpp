@@ -1447,6 +1447,9 @@ void priest_t::priest_pets_t::set_pet_defaults( priest_t& p )
 
   auto shadowfiend_spell = p.find_spell( 1280172 );
   shadowfiend.set_default_duration( shadowfiend_spell->duration() );
+  // BracketSim (15 Nov 2026, the author's in-game logs): Discipline and Shadow keep at most 8 Shadowfiends; a new one replaces the oldest.
+  if ( p.specialization() == PRIEST_DISCIPLINE || p.specialization() == PRIEST_SHADOW )
+    shadowfiend.set_max_pets( 8 ).set_replacement_strategy( spawner::pet_replacement_strategy::REPLACE_OLDEST );
 
   auto mindbender_spell = p.find_spell( 200174 );
   mindbender.set_default_duration( mindbender_spell->duration() );
