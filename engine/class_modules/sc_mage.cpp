@@ -7920,9 +7920,12 @@ void mage_t::create_buffs()
 
   // BracketSim legacy (4 Oct 2026): Shadowlands conduits, values from legacy_conduits.hpp, mechanics as upstream
   // shadowlands built them (336832 and 337090 are not in current data, so duration and stacks are stated).
+  // Flame Accretion (conduit 53) does nothing in game (12.1.5): its Mastery is effect #2 of the Pyrotechnics aura 157644,
+  // and only the old Pyrotechnics passive 157642 applies that aura - no Fire spec spell or talent any more. the author's combat
+  // logs 16 Nov 2026 (two talent builds, 16 non-crit Fireballs): 157644 never applied. So it never triggers here either.
   buffs.legacy_flame_accretion  = make_buff( this, "flame_accretion", find_spell( 157644 ) )
                                     ->set_default_value( legacy_conduits.value( 53 ) )
-                                    ->set_chance( legacy_conduits.has( 53 ) ? 1.0 : 0.0 )
+                                    ->set_chance( 0.0 )
                                     ->set_pct_buff_type( STAT_PCT_BUFF_MASTERY );
   buffs.legacy_infernal_cascade = make_buff( this, "infernal_cascade" )
                                     ->set_duration( 5_s )

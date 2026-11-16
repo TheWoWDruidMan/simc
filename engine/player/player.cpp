@@ -3618,6 +3618,18 @@ void player_t::init_talents()
     player_sub_trees.clear();
   }
 
+  // BRACKETSIM (16 Nov 2026): no apex talents below level 81 (the game opens them at 81). An imported or pasted string
+  // can still carry an apex point (a level 60 Fire Mage's report ran Fired Up at 70% uptime); drop it so neither its
+  // effects nor apex.N / talent.* rotation checks see it.
+  if ( true_level < 81 )
+  {
+    range::erase_remove( player_traits, [ this ]( const auto& t ) {
+      const auto trait = trait_data_t::find( std::get<1>( t ), is_ptr() );
+      return trait && trait->node_type == NODE_TIERED &&
+             static_cast<talent_tree>( trait->tree_index ) == talent_tree::SPECIALIZATION;
+    } );
+  }
+
   // Generate talent effect overrides based on parsed trait information
   for ( const auto& player_trait : player_traits )
   {
@@ -12652,6 +12664,12 @@ static player_talent_t create_talent_obj( const player_t* player, const trait_da
   // hero_talents= are inert - they counted before (a level 30 Frost DK given Deathbringer simmed +7.5%, Reaper's Mark
   // cast 7 times).
   if ( _tree == talent_tree::HERO && player->true_level < 71 )
+  {
+    rank = 0U;
+  }
+
+  // BRACKETSIM (16 Nov 2026): apex talents (the tiered spec-tree node) open at level 81 in game; inert below it.
+  if ( _tree == talent_tree::SPECIALIZATION && trait->node_type == NODE_TIERED && player->true_level < 81 )
   {
     rank = 0U;
   }
