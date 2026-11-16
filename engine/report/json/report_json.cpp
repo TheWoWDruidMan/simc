@@ -183,6 +183,31 @@ void to_json( JsonOutput root, const buff_t* b )
   {
     root[ "stack_uptime" ] = b->uptime_array;
   }
+
+  // BRACKETSIM (16 Nov 2026): uptime at each stack count, the HTML report's "Stack Uptimes" figures, for a buff seen at
+  // two or more stack counts (the site shows an item proc's breakdown, e.g. Bonereaver's Edge at 3 stacks). Report only.
+  unsigned stack_levels = 0;
+  for ( size_t j = 1; j < b->stack_uptime.size(); j++ )
+  {
+    if ( b->stack_uptime[ j ].uptime_sum.mean() > 0 )
+    {
+      stack_levels++;
+    }
+  }
+  if ( stack_levels >= 2 )
+  {
+    auto stacks = root[ "stack_pct" ].make_array();
+    for ( size_t j = 1; j < b->stack_uptime.size(); j++ )
+    {
+      double uptime = b->stack_uptime[ j ].uptime_sum.mean();
+      if ( uptime > 0 )
+      {
+        auto&& entry = stacks.add();
+        entry[ "stacks" ] = as<unsigned>( j );
+        entry[ "pct" ] = uptime * 100.0;
+      }
+    }
+  }
 }
 
 void buffs_to_json( JsonOutput root, const player_t& p )
