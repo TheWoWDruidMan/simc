@@ -7,8 +7,9 @@ please do not report problems with this version to the SimulationCraft project.
 Licence: GNU General Public License, version 3, the same as SimulationCraft (see `LICENSE`). Every change here is
 released under that licence.
 
-Based on upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2026,
-"[Evoker] Increase default simplified player ilvl to 328"). The changes are one commit on top of it.
+Forked from upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2026) and merged with upstream
+since; the latest merge is upstream `c20e2ad` (4 November 2026, live game data 12.1.5.70783). Every change and merge is
+its own commit on the `bracketsim` branch, and each is listed by date below.
 
 ## What is changed, and when
 
