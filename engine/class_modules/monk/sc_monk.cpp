@@ -1615,8 +1615,12 @@ struct blackout_kick_t : overwhelming_force_t<charred_passions_t<teachings_of_th
     if ( p()->legacy_azerite.swift_roundhouse.ok() )
       p()->buff.swift_roundhouse->trigger();
 
+    // BracketSim legacy (20 Nov 2026 legendary audit): every ox out stomps. Only Call to Arms (Kyrian unity
+    // legendary) puts a second Niuzao next to the invoked one - Weapons of Order is cast inside Invoke Niuzao, so
+    // the second ox only meleed (+0.8%). In Shadowlands its own ox stomped on its own (9.2.7 call_to_arms_niuzao).
     if ( p()->buff.invoke_niuzao->check() )
-      p()->pets.niuzao.active_pet()->stomp->execute();
+      for ( auto ox : p()->pets.niuzao.active_pets() )
+        ox->stomp->execute();
 
     p()->buff.shuffle->trigger(
         timespan_t::from_seconds( p()->baseline.brewmaster.blackout_kick->effectN( 2 ).base_value() ) );
@@ -5874,6 +5878,13 @@ struct legacy_weapons_of_order_t : public monk_spell_t
           break;
         case MONK_BREWMASTER:
           p()->pets.niuzao.spawn( 12_s, 1 );
+          // BracketSim legacy (20 Nov 2026 legendary audit): Niuzao only stomps while Invoke Niuzao's buff is up,
+          // and the summon above never set it, so the call-to-arms ox did nothing (0.78%; original 9.2.7 also
+          // triggered invoke_niuzao for the summon). Give the buff at least 12 seconds.
+          if ( !p()->buff.invoke_niuzao->check() )
+            p()->buff.invoke_niuzao->trigger( 1, buff_t::DEFAULT_VALUE(), -1.0, 12_s );
+          else if ( p()->buff.invoke_niuzao->remains() < 12_s )
+            p()->buff.invoke_niuzao->extend_duration( 12_s - p()->buff.invoke_niuzao->remains() );
           break;
         default:
           break;
@@ -7422,9 +7433,12 @@ void monk_t::create_buffs()
   // BracketSim legacy (12 Nov 2026): Vision of Perfection invokes Niuzao (132578) even without the talent.
   const bool vop_niuzao = specialization() == MONK_BREWMASTER && !talent.brewmaster.invoke_niuzao_the_black_ox->ok() &&
                           find_azerite_essence( "Vision of Perfection" ).is_major();
-  buff.invoke_niuzao = make_buff_fallback( talent.brewmaster.invoke_niuzao_the_black_ox->ok() || vop_niuzao, this,
+  // BracketSim legacy (20 Nov 2026): Call to Arms' Niuzao needs the buff even without the talent.
+  const bool cta_niuzao = specialization() == MONK_BREWMASTER && shadowlands_legacy.call_to_arms;
+  buff.invoke_niuzao = make_buff_fallback( talent.brewmaster.invoke_niuzao_the_black_ox->ok() || vop_niuzao || cta_niuzao, this,
                                            "invoke_niuzao_the_black_ox",
-                                           vop_niuzao ? find_spell( 132578 ) : talent.brewmaster.invoke_niuzao_the_black_ox )
+                                           talent.brewmaster.invoke_niuzao_the_black_ox->ok() ? talent.brewmaster.invoke_niuzao_the_black_ox
+                                                                                              : find_spell( 132578 ) )
                            ->set_default_value_from_effect( 2 )
                            ->set_cooldown( timespan_t::zero() )
                            ->add_invalidate( CACHE_MASTERY );
