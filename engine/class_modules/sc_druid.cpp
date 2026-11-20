@@ -698,6 +698,7 @@ struct druid_t final : public parse_player_effects_t
     // BracketSim legacy compatibility: Lycara's Fleeting Glimpse (7110).
     action_t* legacy_lycaras_cat = nullptr;
     action_t* legacy_lycaras_moonkin = nullptr;
+    action_t* legacy_lycaras_bear = nullptr;  // 20 Nov 2026: Barkskin in Bear Form
     // BracketSim legacy compatibility (12 Nov 2026): Frenzyband's bleed (Frenzied Assault 340056).
     action_t* legacy_frenzied_assault = nullptr;
     // BracketSim legacy compatibility (12 Nov 2026): Kindred Empowerment's Arcane damage (338411).
@@ -5799,9 +5800,9 @@ struct berserk_bear_base_t : public bear_attack_t
     // cooldown modifier already carrying its own sign (-30000 ms), so it is
     // added rather than subtracted.
     //
-    // Its other two halves are not ported. The Leech is defensive, and the
-    // damage half rode a Shadowlands-only spec spell (berserk_bear_2) that has
-    // no equivalent here - so this models the cooldown and nothing else.
+    // The damage and Leech halves are Berserk/Incarnation effects 6-9, which
+    // the game turns on only with the legendary's aura (339062) - see
+    // druid_t::parse_action_effects and parse_player_effects (20 Nov 2026).
     if ( p->shadowlands_legacy.legacy_of_the_sleeper )
     {
       cooldown->duration +=
@@ -7827,9 +7828,11 @@ struct barkskin_t final : public druid_spell_t
       name_str += "+brambles";
       replace_stats( this, brambles );
 
-      p->buff.barkskin->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) {
-        brambles->execute();
-      } );
+      // 20 Nov 2026: the first Barkskin built (the action list's) keeps the pulses; Lycara's Barkskin reuses them.
+      if ( !p->buff.barkskin->tick_callback )
+        p->buff.barkskin->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) {
+          brambles->execute();
+        } );
     }
   }
 
@@ -13537,6 +13540,17 @@ void druid_t::create_actions()
       a->gain = get_gain( "lycaras_fleeting_glimpse" );
       active.legacy_lycaras_moonkin = a;
     }
+    // 20 Nov 2026 (the author: "fix two engine bugs"): "Bear Form: Barkskin" (340059) was never cast - 9.3 Barkskins with or
+    // without the legendary. Free and off its own cooldown, like the Shadowlands proxy (free_cast LYCARAS).
+    if ( specialization() == DRUID_GUARDIAN )
+    {
+      auto a = get_secondary_action<barkskin_t>( "barkskin_lycaras" );
+      a->name_str_reporting = "barkskin";
+      a->background = true;
+      a->proc = true;
+      a->cooldown->duration = 0_ms;
+      active.legacy_lycaras_bear = a;
+    }
   }
 
 
@@ -14777,7 +14791,7 @@ void druid_t::combat_begin()
   buff.blooming_infusion_heal_counter->expire();
 
   // BracketSim legacy compatibility: Lycara's Fleeting Glimpse (7110), every 45 sec in combat.
-  if ( active.legacy_lycaras_cat || active.legacy_lycaras_moonkin )
+  if ( active.legacy_lycaras_cat || active.legacy_lycaras_moonkin || active.legacy_lycaras_bear )
   {
     timespan_t period = timespan_t::from_seconds( find_spell( 340059 )->effectN( 1 ).base_value() > 0
                                                       ? find_spell( 340059 )->effectN( 1 ).base_value() : 45.0 );
@@ -14788,6 +14802,8 @@ void druid_t::combat_begin()
         active.legacy_lycaras_cat->execute_on_target( target );
       else if ( buff.moonkin_form->check() && active.legacy_lycaras_moonkin )
         active.legacy_lycaras_moonkin->execute_on_target( target );
+      else if ( buff.bear_form->check() && active.legacy_lycaras_bear )
+        active.legacy_lycaras_bear->execute();
     } );
   }
 }
@@ -15911,6 +15927,16 @@ void druid_t::parse_action_effects( action_t* action )
   _a->parse_effects( buff.answered_calling );
   _a->parse_effects( buff.berserk_bear, effect_mask_t( true ).disable( 6, 7, 8, 9 ) );
   _a->parse_effects( buff.incarnation_bear, effect_mask_t( true ).disable( 6, 7, 8, 9, 14, 15, 16, 17 ) );
+  // BracketSim legacy (20 Nov 2026, the author: "fix two engine bugs"): Legacy of the Sleeper (339062). Berserk and
+  // Incarnation: Guardian of Ursoc each carry +25% direct, +25% periodic, +25% auto attack damage (effects 6-8) and
+  // +15% Leech (effect 9) that the game applies only with the legendary's aura ("$?a339062[...]" in their text; the
+  // same values the Shadowlands spells held as effects 5-8). They were always masked off, so the legendary gave only
+  // its -30 s cooldown and read 3% below no legendary (its second Incarnation drifts off Ravenous Frenzy).
+  if ( shadowlands_legacy.legacy_of_the_sleeper )
+  {
+    _a->parse_effects( buff.berserk_bear, effect_mask_t( false ).enable( 6, 7, 8 ) );
+    _a->parse_effects( buff.incarnation_bear, effect_mask_t( false ).enable( 6, 7, 8 ) );
+  }
   // additional effects if astral insight is talented
   if ( talent.astral_insight.ok() )
   {
@@ -15980,6 +16006,12 @@ void druid_t::parse_player_effects()
   parse_effects( buff.bear_form, effect_mask_t( true ).disable( 13, 14 ) );
   parse_effects( spec.bear_form_passive, [ this ] { return form == BEAR_FORM; } );
   parse_effects( spec.bear_form_passive_2, [ this ] { return form == BEAR_FORM; } );
+  // BracketSim legacy (20 Nov 2026): Legacy of the Sleeper's Leech (Berserk/Incarnation effect 9) - see parse_action_effects.
+  if ( shadowlands_legacy.legacy_of_the_sleeper )
+  {
+    parse_effects( buff.berserk_bear, effect_mask_t( false ).enable( 9 ) );
+    parse_effects( buff.incarnation_bear, effect_mask_t( false ).enable( 9 ) );
+  }
   parse_effects( spec.cat_form_speed, [ this ] { return form == CAT_FORM; } );
   parse_effects( buff.moonkin_form, effect_mask_t( true ).disable( 12, 13 ) );
 
