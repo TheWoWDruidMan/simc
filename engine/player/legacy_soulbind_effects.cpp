@@ -867,6 +867,28 @@ void effects_t::create_buffs( player_t* p )
       make_buff<stat_buff_t>( p, "volatile_solvent_humanoid" )
           ->add_stat( STAT_MASTERY_RATING, volatile_solvent_humanoid_rating( p ) )
           ->set_duration( timespan_t::from_seconds( VOLATILE_SOLVENT_DURATION ) );
+
+  /*
+   * FLESHCRAFT IN THE BUFF LIST AND THE MALDRAXXUS QUEST SET (20 Nov 2026, a player's report: a level 60 Necrolord Fire Mage in the full set
+   * simmed without the bonus). Fleshcraft's shield (324867, 2 min) is now a
+   * buff, so it shows in the report. Rationale of Maldraxxus (item set 1460, the Bladesworn Conjurer's quest pieces and
+   * the other armour types) 5-piece, Flesh Infusion 345672: "While Fleshcraft is active your primary stat is increased by
+   * 100" - it triggers 345673 (Mod Stat, 2 min) for 100 (live game data; the player's tooltip says +100). Neither
+   * spell is in this client's data, so both are built by hand. The shield's absorb is not modelled (damage-only sims), so
+   * the stat lasts its full 2 min from each Fleshcraft, as the triggered buff does in game. The 3-piece (out-of-combat
+   * regeneration) and 8-piece (on a kill) do nothing on a training dummy.
+   */
+  fleshcraft = make_buff( p, "fleshcraft", p->find_spell( 324867 ) )->set_duration( 120_s );
+  {
+    std::vector<unsigned> worn;
+    for ( const auto& item : p->items )
+      if ( item.parsed.data.id && item.parsed.data.id_set == 1460 && std::find( worn.begin(), worn.end(), item.parsed.data.id ) == worn.end() )
+        worn.push_back( item.parsed.data.id );
+    rationale_pieces = static_cast<unsigned>( worn.size() );
+  }
+  flesh_infusion = make_buff<stat_buff_t>( p, "flesh_infusion" )
+                       ->add_stat( p->convert_hybrid_stat( STAT_STR_AGI_INT ), 100 )
+                       ->set_duration( 120_s );
 }
 
 void effects_t::covenant_ability_cast( player_t* p, covenant_e cov, cooldown_t* host_cd )
@@ -1248,6 +1270,12 @@ struct fleshcraft_t : public spell_t
 
     if ( volatile_solvent && player->legacy_soulbinds.volatile_solvent_humanoid )
       player->legacy_soulbinds.volatile_solvent_humanoid->trigger();
+
+    // The shield, and the Maldraxxus quest set's 5-piece with it (20 Nov 2026; see create_buffs).
+    if ( player->legacy_soulbinds.fleshcraft )
+      player->legacy_soulbinds.fleshcraft->trigger();
+    if ( player->legacy_soulbinds.rationale_pieces >= 5 && player->legacy_soulbinds.flesh_infusion )
+      player->legacy_soulbinds.flesh_infusion->trigger();
 
     // Pustule Eruption: a pre-pull cast has no channel, so it hands over the full 9 (Shadowlands did the same).
     if ( is_precombat && player->legacy_soulbinds.trembling_pustules )

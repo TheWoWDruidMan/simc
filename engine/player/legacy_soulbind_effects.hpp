@@ -273,6 +273,9 @@ struct effects_t
   shuffled_rng_t* newfound_doubt = nullptr;   // built at init, as class modules do (a mid-fight build crashed)
   buff_t* party_favors[ 4 ]     = {};        // the Mad Duke's Teas this actor may drink (one per fight)
   buff_t* trembling_pustules    = nullptr;   // Pustule Eruption: pustules from Fleshcraft
+  buff_t* fleshcraft            = nullptr;   // Fleshcraft's shield (324867), shown in the buff list (20 Nov 2026)
+  buff_t* flesh_infusion        = nullptr;   // Rationale of Maldraxxus 5-piece: +100 primary while Fleshcraft is up
+  unsigned rationale_pieces     = 0;         // Rationale of Maldraxxus (item set 1460) pieces worn
   buff_t* brons_call            = nullptr;   // Bron's Call to Action: casts counted towards Bron
   unsigned party_favor_count    = 0;
 
