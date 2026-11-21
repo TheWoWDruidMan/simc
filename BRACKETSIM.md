@@ -8,7 +8,7 @@ Licence: GNU General Public License, version 3, the same as SimulationCraft (see
 released under that licence.
 
 Forked from upstream SimulationCraft `midnight` at commit `6ade30e` (19 September 2026) and merged with upstream
-since; the latest merge is upstream `c20e2ad` (4 November 2026, live game data 12.1.5.70783). Every change and merge is
+since; the latest merge is upstream `6924096` (18 November 2026, live game data 12.1.5.70961). Every change and merge is
 its own commit on the `bracketsim` branch, and each is listed by date below.
 
 ## What is changed, and when
@@ -277,3 +277,4 @@ script that runs these steps.
 - 2026-11-20 (Fleshcraft, Maldraxxus quest set): Fleshcraft now shows as a buff (2 min) in the report. The Rationale of Maldraxxus 5-piece (Flesh Infusion) now gives +100 primary stat for 2 min from each Fleshcraft; before, the set bonus did nothing. Same seed, a level 60 Necrolord Fire Mage wearing five pieces: +23% DPS (Intellect 447 -> 557 with Arcane Intellect).
 - 2026-11-20 (Call to Arms, Brewmaster): the Niuzao that Call to Arms summons now gets Invoke Niuzao's buff (even without the talent), and every Niuzao out stomps on Blackout Kick. Before, Weapons of Order is cast inside Invoke Niuzao, so only one ox stomped and the extra ox only meleed. Same seed, a level 60 Kyrian Brewmaster: the legendary's gain goes from +0.39% to +1.49%; 320 other characters unchanged.
 - 2026-11-21 (Shadowlands soulbinds): Soothing Shade and Grove Invigoration are now procs at the game's rate (1 and 2 per minute, not sped up by haste; Soothing Shade from class abilities only with its 20 s cooldown) - before, each was a timer that also gave a free proc at the pull. Exacting Preparation now raises flask, food and the other effects the game data labels for it by 20% (it was a flat 0.5%). Wild Hunt Strategem now needs a hit that Wild Hunt Tactics boosts to arm it before its +5% below 35% health starts (it was on for the whole execute). Gnashing Chompers gives one stack per kill (each simmed fight used to add another kill callback). The engine refuses a bracketsim_raid_haste / bracketsim_timed_stat period under 1 second. Same seed, a level 60 Guardian over 5 minutes: Soothing Shade uptime 21.7% -> 16.5%; Exacting Preparation with flask and feast +0.52%; 320-character regress: 5 characters with Soothing Shade moved -0.8% to -1.5%, no other changed.
+- 2026-11-21 (game data): merged upstream SimulationCraft up to `6924096` - live game data 12.1.5.70961 (Blizzard's hotfixes since 70783) and upstream class changes. Our Death Knight pet and Feral changes kept. On the 320 BracketSim test lists only Death Knight, Feral and Rogue results move, by at most 1.1%.
