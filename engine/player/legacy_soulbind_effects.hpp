@@ -217,6 +217,16 @@ action_t* create_action( player_t* p, std::string_view name, std::string_view op
 double effusive_anima_cdr_per_enemy( double host_cooldown_seconds );
 double effusive_anima_cdr_cap( double host_cooldown_seconds );
 
+/*
+ * EXACTING PREPARATION (331580, Nadjia), 21 Nov 2026 (outside audit BS-01): "The benefits of Well Fed, Flask, and weapon
+ * enchant effects are increased by 20%." The trait is six label modifiers (+20%): labels 958 (flasks), 959 (Well Fed),
+ * 960 (Shadowlands weapon enchants) and 961 on effect 1, 962 on effect 2, 963 on effect 3 (Death Knight runeforges). The
+ * Midnight client has no label rows for these spells, so the 9.2.7 SpellLabel list is carried here. Returns 1.2 when this
+ * actor took the trait and `spell_id`'s effect `effect` (1-3) carries one of those labels, else 1.0. It was a flat
+ * x1.005 on all damage, even with no food, flask or enchant.
+ */
+double exacting_preparation_multiplier( const player_t* p, unsigned spell_id, unsigned effect = 1 );
+
 struct effects_t
 {
   set_t chosen;
@@ -248,10 +258,8 @@ struct effects_t
   // Quiet repeat drivers. A buff's own period is bounded by its duration, so
   // anything that has to re-fire on a longer cadence than it lasts needs one.
   buff_t* marrowed_gemstone_driver  = nullptr;
-  buff_t* grove_invigoration_driver = nullptr;
 
   buff_t* soothing_shade         = nullptr;
-  buff_t* soothing_shade_driver  = nullptr;
 
   // The covenant-gated four, fired by covenant_ability_cast() below.
   buff_t* combat_meditation      = nullptr;
@@ -261,6 +269,7 @@ struct effects_t
   buff_t* soulglow_spectrometer  = nullptr;
   buff_t* dream_delver           = nullptr;
   buff_t* wild_hunt_stratagem    = nullptr;
+  buff_t* wild_hunt_stratagem_tracking = nullptr;   // BS-18: armed by Wild Hunt Tactics hits, 60 s
 
   // Volatile Solvent's Humanoid benefit, triggered by casting Fleshcraft.
   buff_t* volatile_solvent_humanoid = nullptr;

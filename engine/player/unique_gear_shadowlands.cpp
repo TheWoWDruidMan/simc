@@ -238,6 +238,9 @@ void celestial_guidance( special_effect_t& effect )
   {
     effect.custom_buff = make_buff<SL_buff_t>( effect.player, "celestial_guidance", effect.player->find_spell( 324748 ) )
       ->set_pct_buff_type_from_data( true );
+    // BracketSim (21 Nov 2026, BS-01): Exacting Preparation, +20% (5% -> 6%).
+    effect.custom_buff->set_default_value( effect.custom_buff->default_value *
+                                           legacy_soulbind::exacting_preparation_multiplier( effect.player, 324748 ) );
   }
 
   new dbc_proc_callback_t( effect.player, effect );
@@ -258,6 +261,8 @@ void lightless_force( special_effect_t& effect )
 
       // hardcoded as a dummy effect
       spell_power_mod.direct = data().effectN( 2 ).percent();
+      // BracketSim (21 Nov 2026, BS-01): Exacting Preparation, +20% to its damage (effect 1, label 960).
+      base_multiplier *= legacy_soulbind::exacting_preparation_multiplier( e.player, 324184 );
     }
 
     double composite_total_spell_power() const override
@@ -5271,7 +5276,12 @@ void register_target_data_initializers( sim_t& sim )
       td->debuff.sinful_revelation->reset();
 
       if ( active )
+      {
         td->debuff.sinful_revelation->set_default_value_from_effect_type( A_MOD_DAMAGE_FROM_CASTER );
+        // BracketSim (21 Nov 2026, BS-01): Exacting Preparation, +20% (label 960 on 324260).
+        td->debuff.sinful_revelation->set_default_value( td->debuff.sinful_revelation->default_value *
+            legacy_soulbind::exacting_preparation_multiplier( td->source, 324260 ) );
+      }
     }
   };
 

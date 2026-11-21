@@ -380,7 +380,8 @@ struct flask_base_t : public dbc_consumable_base_t
     // things will happen, but that's a relatively good presumption.
     if ( auto buff = dynamic_cast<stat_buff_t*>( consumable_buff ) )
     {
-      double mul = 1.0;
+      // BracketSim (21 Nov 2026, BS-01): Exacting Preparation, +20% to a flask's effect 1 (label 958).
+      double mul = legacy_soulbind::exacting_preparation_multiplier( player, buff->data().id(), 1 );
 
       range::for_each( buff->stats, [ mul ]( stat_buff_t::buff_stat_t& s ) {
         s.amount *= mul;
@@ -811,6 +812,14 @@ struct food_t : public dbc_consumable_base_t
       range::for_each( buff->stats, [ mul ]( stat_buff_t::buff_stat_t& s ) {
         s.amount *= mul;
       } );
+
+      // BracketSim (21 Nov 2026, BS-01): Exacting Preparation raises Well Fed's EFFECT 1 by 20% (label 959) - the
+      // first stat, and only when effect 1 is a stat (a two-stat food's second stat is not raised). Born Anew's Well
+      // Fed (341449) carries no label: unchanged (the author 21 Nov: "Born anew is correct how it is already").
+      double ep = legacy_soulbind::exacting_preparation_multiplier( player, buff->data().id(), 1 );
+      auto sub  = buff->data().effectN( 1 ).subtype();
+      if ( ep != 1.0 && !buff->stats.empty() && ( sub == A_MOD_STAT || sub == A_MOD_RATING ) )
+        buff->stats.front().amount *= ep;
     }
   }
 

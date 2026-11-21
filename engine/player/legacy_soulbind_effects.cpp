@@ -3,6 +3,8 @@
 
 #include "player/legacy_soulbind_effects.hpp"
 
+#include <unordered_set>
+
 #include "action/action_state.hpp"
 #include "action/dbc_proc_callback.hpp"
 #include "action/dot.hpp"
@@ -154,6 +156,36 @@ double effusive_anima_cdr_per_enemy( double host_cooldown_seconds )
 double effusive_anima_cdr_cap( double host_cooldown_seconds )
 {
   return host_cooldown_seconds / 3.0;
+}
+
+double exacting_preparation_multiplier( const player_t* p, unsigned spell_id, unsigned effect )
+{
+  // 9.2.7 SpellLabel rows (simc-shadowlands sc_spell_data.inc __spelllabel_data), by the label's effect.
+  static const std::unordered_set<unsigned> effect_1 = {
+    // 958 flasks
+    251836, 251837, 251838, 251839, 298836, 298837, 298839, 298841, 307166, 307185, 307187,
+    // 959 Well Fed (and two other food buffs)
+    257408, 257410, 257413, 257415, 257418, 257420, 257422, 257424, 259448, 259449, 259452, 259453, 259454, 259455,
+    259456, 259457, 288074, 288075, 290467, 290468, 290469, 297034, 297035, 297037, 297039, 297040, 297116, 297117,
+    297118, 297119, 308430, 308434, 308474, 308488, 308504, 308506, 308509, 308514, 308520, 308525, 308629, 308646,
+    327701, 327702, 327704, 327705, 327706, 327707, 327708, 327709, 327715, 327851, 327864, 332915,
+    // 960 Shadowlands weapon enchants: Lightless Force, Eternal Grace, Ascended Vigor, Sinful Revelation, Celestial Guidance
+    324184, 324202, 324226, 324260, 324748,
+    // 961 Death Knight runeforges, effect 1
+    50401, 51714, 53365, 62157, 326808, 326867, 326868, 326918, 326984 };
+  static const std::unordered_set<unsigned> effect_2 = { 53365, 62157, 326913, 326982, 326984 };  // 962
+  static const std::unordered_set<unsigned> effect_3 = { 326984 };                                // 963
+
+  if ( !p )
+    return 1.0;
+  // Parsed here rather than read from effects_t::enabled: enchants and consumables are built before create_buffs runs.
+  set_t taken;
+  taken.option = p->legacy_soulbinds.chosen.option;
+  taken.parse();
+  if ( !taken.has( EXACTING_PREPARATION ) )
+    return 1.0;
+  const auto& ids = effect == 1 ? effect_1 : effect == 2 ? effect_2 : effect_3;
+  return ids.count( spell_id ) ? 1.2 : 1.0;
 }
 
 namespace
@@ -553,7 +585,6 @@ void effects_t::create_buffs( player_t* p )
                           ->set_duration( 10_s )
                           ->set_default_value( 0.03 )
                           ->set_pct_buff_type( STAT_PCT_BUFF_HASTE );
-
   // PRIMARY STAT, NOT INTELLECT (audit part 2 E1, 10 Nov 2026). The in-game
   // text was read on a caster, so it said "Intellect"; the game gives the
   // character's primary stat, as Shadowlands SimulationCraft had it (Strength,
@@ -637,6 +668,15 @@ void effects_t::create_buffs( player_t* p )
                           ->set_duration( 10_s )
                           ->set_default_value( 0.03 )
                           ->set_pct_buff_type( STAT_PCT_BUFF_HASTE );
+  // BS-15: registered once, here, after the buff exists (combat_begin runs every fight; callbacks_on_kill is never cleared).
+  if ( has( GNASHING_CHOMPERS ) )
+  {
+    buff_t* chompers = gnashing_chompers;
+    p->register_on_kill_callback( [ chompers ]( player_t* ) {
+      if ( !chompers->sim->event_mgr.canceled )
+        chompers->trigger();
+    } );
+  }
 
   // "moving within 3 yd of a party or raid member ... increasing Mastery by
   // 10". A flat rating, and a small one: 10 mastery rating is close to nothing
@@ -741,13 +781,24 @@ void effects_t::create_buffs( player_t* p )
                        ->add_stat( STAT_MASTERY_RATING, 138.0 )
                        ->set_duration( 12_s );
 
-  soothing_shade_driver = make_buff( p, "soothing_shade_driver" )
-                              ->set_quiet( true )
-                              ->set_duration( timespan_t::zero() )
-                              ->set_period( 60_s )
-                              ->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) {
-                                soothing_shade->trigger();
-                              } );
+  // 21 Nov 2026 (BS-09, 9.2.7 data 336239): a real proc - 1 RPPM, no haste scaling, 20 sec internal cooldown, only
+  // from class abilities (direct damage, heals and periodic ticks). It was a fixed timer that fired at the pull and
+  // every 60 sec after, which handed every fight a free proc at 0:00.
+  if ( has( SOOTHING_SHADE ) )
+  {
+    auto shade = new special_effect_t( p );
+    shade->name_str     = "soothing_shade";
+    shade->type         = SPECIAL_EFFECT_EQUIP;
+    shade->proc_flags_  = PF_MELEE_ABILITY | PF_RANGED_ABILITY | PF_NONE_HARMFUL | PF_MAGIC_SPELL | PF_MAGIC_HEAL |
+                          PF_PERIODIC;
+    shade->proc_flags2_ = PF2_ALL_HIT | PF2_PERIODIC_DAMAGE | PF2_PERIODIC_HEAL;
+    shade->ppm_         = -1.0;
+    shade->rppm_scale_  = RPPM_NONE;
+    shade->cooldown_    = 20_s;
+    shade->set_can_only_proc_from_class_abilities( true );
+    shade->custom_buff  = soothing_shade;
+    new dbc_proc_callback_t( p, *shade );
+  }
 
   // "Damaging or healing a target analyzes its merit over 15 sec, increasing
   // your damage or healing to it by 1%, increasing by an additional 1% every
@@ -786,17 +837,28 @@ void effects_t::create_buffs( player_t* p )
   // your damage and healing to such targets by 5% for 10 sec." Only live in the
   // execute window, and only alongside Wild Hunt Tactics, which is the trait
   // that arms it.
+  // 21 Nov 2026 (BS-18, 9.2.7 data 352805/353286/353254): a hit Wild Hunt Tactics boosts (target above 75%) arms it for
+  // 60 sec; the next hit on an enemy below 35% starts +5% to such targets for 10 sec. It was +5% all execute long.
   wild_hunt_stratagem = make_buff( p, "wild_hunt_stratagem" )
-                            ->set_duration( timespan_t::zero() )
+                            ->set_duration( 10_s )
                             ->set_default_value( 0.05 );
+  wild_hunt_stratagem_tracking = make_buff( p, "wild_hunt_stratagem_armed" )->set_duration( 60_s );
 
-  grove_invigoration_driver = make_buff( p, "redirected_anima_driver" )
-                                  ->set_quiet( true )
-                                  ->set_duration( timespan_t::zero() )
-                                  ->set_period( 30_s )  // ~2 procs per minute (Wowhead), as their average
-                                  ->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) {
-                                    grove_invigoration->trigger();
-                                  } );
+  // 21 Nov 2026 (BS-09, 9.2.7 data 322721): a real proc - 2 RPPM, no haste scaling, from auto attacks, abilities,
+  // heals and periodic ticks; each proc is one 30 sec stack. It was a fixed 30 sec timer that fired at the pull.
+  if ( has( GROVE_INVIGORATION ) )
+  {
+    auto grove = new special_effect_t( p );
+    grove->name_str     = "grove_invigoration";
+    grove->type         = SPECIAL_EFFECT_EQUIP;
+    grove->proc_flags_  = PF_MELEE | PF_MELEE_ABILITY | PF_RANGED | PF_RANGED_ABILITY | PF_NONE_HARMFUL |
+                          PF_MAGIC_SPELL | PF_MAGIC_HEAL | PF_PERIODIC;
+    grove->proc_flags2_ = PF2_ALL_HIT | PF2_PERIODIC_DAMAGE | PF2_PERIODIC_HEAL;
+    grove->ppm_         = -2.0;
+    grove->rppm_scale_  = RPPM_NONE;
+    grove->custom_buff  = grove_invigoration;
+    new dbc_proc_callback_t( p, *grove );
+  }
 
   // ------------------------------------------------- The covenant-gated four --
   // These do nothing on their own: each fires from its own covenant's class
@@ -1030,9 +1092,6 @@ void effects_t::combat_begin( player_t* p )
   if ( has( FIRST_STRIKE ) )
     first_strike->trigger();
 
-  if ( has( GROVE_INVIGORATION ) )
-    grove_invigoration_driver->trigger();
-
   // Better Together is up for anyone standing near an ally, which in a raid
   // sim is everyone, for the whole fight.
   if ( has( BETTER_TOGETHER ) )
@@ -1041,20 +1100,8 @@ void effects_t::combat_begin( player_t* p )
   // Gnashing Chompers needs something to die, so it fires from the kill
   // callback rather than at the start. On Patchwerk nothing dies and it
   // correctly measures nothing at all.
-  if ( has( GNASHING_CHOMPERS ) )
-  {
-    buff_t* chompers = gnashing_chompers;
-    p->register_on_kill_callback( [ chompers ]( player_t* ) {
-      if ( !chompers->sim->event_mgr.canceled )
-        chompers->trigger();
-    } );
-  }
-
-  if ( has( SOOTHING_SHADE ) )
-  {
-    soothing_shade->trigger();
-    soothing_shade_driver->trigger();
-  }
+  // (21 Nov 2026, BS-15) The kill callback is registered ONCE, in create_buffs: combat_begin runs every fight and
+  // callbacks_on_kill is never cleared, so fight N gave N stacks per kill.
 
   if ( has( SOULGLOW_SPECTROMETER ) )
     soulglow_spectrometer->trigger();
@@ -1064,8 +1111,7 @@ void effects_t::combat_begin( player_t* p )
 
   // Wild Hunt Stratagem only does anything for someone who also took Wild Hunt
   // Tactics, which is the trait that arms it.
-  if ( has( WILD_HUNT_STRATAGEM ) && has( WILD_HUNT_TACTICS ) )
-    wild_hunt_stratagem->trigger();
+  // (BS-18) nothing at the pull: armed by Wild Hunt Tactics hits, see target_multiplier.
 
   /*
    * Newfound Resolve's Doubt: 351149 rolls every 3 sec (Periodic Dummy). Shadowlands SimulationCraft's model, kept: a shuffled
@@ -1100,13 +1146,8 @@ double effects_t::player_multiplier( const player_t* p ) const
   if ( has( BATTLEFIELD_PRESENCE ) )
     m *= 1.0 + 0.01 * std::min( 3, active_enemies( p ) );
 
-  // "The benefits of Well Fed, Flask, and weapon enchant effects are increased
-  // by 20%." Raising each consumable's own value would mean reaching into the
-  // consumable system from here; the whole-character effect of 20% more of
-  // three buffs is small and flat, and is applied as such. Approximate, and
-  // marked as approximate rather than presented as exact.
-  if ( has( EXACTING_PREPARATION ) )
-    m *= 1.005;
+  // Exacting Preparation is no longer here (21 Nov 2026, BS-01): it raises the flask, food and weapon enchant effects
+  // themselves - exacting_preparation_multiplier().
 
   return m;
 }
@@ -1120,7 +1161,11 @@ double effects_t::target_multiplier( const player_t* p, const player_t* t ) cons
 
   // "Your damage to targets above 75% health ... is increased by 10%."
   if ( has( WILD_HUNT_TACTICS ) && t->health_percentage() > 75.0 )
+  {
     m *= 1.10;
+    if ( has( WILD_HUNT_STRATAGEM ) && wild_hunt_stratagem_tracking && t->is_enemy() )
+      wild_hunt_stratagem_tracking->trigger();
+  }
 
   // "The first enemy you damage in combat is marked as your Adversary. You deal
   // 3% more damage to them." With one target set that is the primary target.
@@ -1142,8 +1187,17 @@ double effects_t::target_multiplier( const player_t* p, const player_t* t ) cons
 
   // "increase your damage and healing to such targets by 5%" - such targets
   // being the ones below 35% health.
-  if ( has( WILD_HUNT_STRATAGEM ) && wild_hunt_stratagem->check() && t->health_percentage() < 35.0 )
-    m *= 1.0 + wild_hunt_stratagem->check_value();
+  if ( has( WILD_HUNT_STRATAGEM ) && t->is_enemy() && t->health_percentage() < 35.0 )
+  {
+    if ( wild_hunt_stratagem->check() )
+      m *= 1.0 + wild_hunt_stratagem->check_value();
+    else if ( wild_hunt_stratagem_tracking && wild_hunt_stratagem_tracking->check() )
+    {
+      // The activating hit itself gets no bonus (9.2.7 applies it after the hit).
+      wild_hunt_stratagem_tracking->expire();
+      wild_hunt_stratagem->trigger();
+    }
+  }
 
   // "When you damage an enemy that's below 35% health, 3% of the damage done is
   // repeated over 5 sec." Modelled as the multiplier it amounts to rather than

@@ -6810,6 +6810,8 @@ struct razorice_attack_t final : public death_knight_spell_t
     target_debuff     = p->runeforge_spell.razorice_debuff;
     // Note, razorice always attacks with the main hand weapon, regardless of which hand triggers it
     weapon = &p->main_hand_weapon;
+    // BracketSim (21 Nov 2026, BS-01): Exacting Preparation, +20% (label 961 on 50401).
+    base_multiplier *= legacy_soulbind::exacting_preparation_multiplier( p, 50401 );
   }
 
   void impact( action_state_t* s ) override
@@ -14224,6 +14226,8 @@ void runeforge::fallen_crusader( special_effect_t& effect )
     buff = make_buff( dk, "unholy_strength", dk->runeforge_spell.unholy_strength )
                ->set_default_value_from_effect_type( A_MOD_TOTAL_STAT_PERCENTAGE )
                ->set_pct_buff_type( STAT_PCT_BUFF_STRENGTH );
+    // BracketSim (21 Nov 2026, BS-01): Exacting Preparation, +20% Strength (label 961 on 53365 effect 1).
+    buff->set_default_value( buff->default_value * legacy_soulbind::exacting_preparation_multiplier( dk, 53365 ) );
   }
 
   effect.custom_buff    = buff;
@@ -17324,6 +17328,9 @@ inline death_knight_td_t::death_knight_td_t( player_t& target, death_knight_t& p
                                  *this, "razorice", p.runeforge_spell.razorice_debuff )
                         ->set_default_value_from_effect( 1 )
                         ->disable_ticking( true );
+  // BracketSim (21 Nov 2026, BS-01): Exacting Preparation, +20% to Razorice's per-stack value (label 961 on 51714).
+  debuff.razorice->set_default_value( debuff.razorice->default_value *
+                                      legacy_soulbind::exacting_preparation_multiplier( &p, 51714 ) );
 
   debuff.apocalypse_death = make_debuff( p.has_runeforge( RUNEFORGE_APOCALYPSE ), *this, "death",
                                          p.runeforge_spell.apocalypse_death_debuff );  // Effect not implemented

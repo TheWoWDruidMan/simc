@@ -5794,6 +5794,9 @@ void player_t::create_buffs()
     timespan_t period = timespan_t::from_seconds( util::to_double( parts[ 2 ] ) );
     if ( pct <= 0 || duration <= 0_ms || period <= 0_ms )
       throw std::invalid_argument( "bracketsim_raid_haste: every value must be positive" );
+    // 21 Nov 2026 (BS-28): a tiny period scheduled millions of events and hung the run. Same floor as the site.
+    if ( period < 1_s )
+      throw std::invalid_argument( "bracketsim_raid_haste: the period must be at least 1 second" );
 
     bracketsim.raid_haste_buff = make_buff( this, "bracketsim_raid_haste" )
       ->set_default_value( pct )
@@ -5838,6 +5841,9 @@ void player_t::create_buffs()
     timespan_t period = timespan_t::from_seconds( util::to_double( parts[ 3 ] ) );
     if ( amount <= 0 || duration <= 0_ms || period <= 0_ms )
       throw std::invalid_argument( "bracketsim_timed_stat: amount, duration and period must be positive" );
+    // 21 Nov 2026 (BS-28): a tiny period scheduled millions of events and hung the run. Same floor as the site.
+    if ( period < 1_s )
+      throw std::invalid_argument( "bracketsim_timed_stat: the period must be at least 1 second" );
 
     buff_t* buff;
     if ( fire_only )
