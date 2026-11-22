@@ -12,6 +12,7 @@
 #include "action/spell.hpp"
 #include "buff/buff.hpp"
 #include "dbc/dbc.hpp"
+#include "dbc/spell_item_enchantment.hpp"
 #include "item/item.hpp"
 #include "player/player.hpp"
 #include "player/pet.hpp"
@@ -199,7 +200,10 @@ int active_enemies( const player_t* p )
   return std::max( n, 1 );
 }
 
-// Armour slots carrying an enchant. Forgeborne Reveries reads this.
+// Head-to-back slots carrying a stat enchant. Forgeborne Reveries reads this. As Shadowlands SimulationCraft counts them
+// (soulbinds.cpp forgeborne_reveries, audit BS-29, 22 Nov 2026): slots SLOT_HEAD..SLOT_BACK (rings included, weapons
+// not) whose enchant carries a stat; an enchant that is only a proc or a use does not count. A hand-typed stat enchant
+// (enchant=...stats) counts.
 int enchanted_armor_pieces( const player_t* p )
 {
   int n = 0;
@@ -207,9 +211,16 @@ int enchanted_armor_pieces( const player_t* p )
   {
     if ( !i.active() )
       continue;
-    if ( i.slot == SLOT_MAIN_HAND || i.slot == SLOT_OFF_HAND )
+    if ( i.slot < SLOT_HEAD || i.slot > SLOT_BACK )
       continue;
-    if ( i.parsed.enchant_id != 0 || !i.parsed.encoded_enchant.empty() )
+    if ( i.parsed.enchant_id != 0 )
+    {
+      const auto& ench = p->dbc->item_enchantment( i.parsed.enchant_id );
+      if ( std::find( std::begin( ench.ench_type ), std::end( ench.ench_type ), ITEM_ENCHANTMENT_STAT ) !=
+           std::end( ench.ench_type ) )
+        n++;
+    }
+    else if ( !i.parsed.encoded_enchant.empty() )
       n++;
   }
   return n;
@@ -470,6 +481,31 @@ void effects_t::create_buffs( player_t* p )
                          ->set_duration( 15_s )
                          ->set_default_value( 0.10 )
                          ->set_pct_buff_type( primary_pct_buff_type( p ) );
+
+  // 22 Nov 2026 (outside audit #51: a Necrolord Fire Mage with the 5-piece and NO soulbind traits cast Fleshcraft but showed
+  // neither buff and got no +100) - built before the no-soulbinds return below, like newfound_resolve: Fleshcraft is the
+  // covenant ability and the quest set needs no soulbind.
+  /*
+   * FLESHCRAFT IN THE BUFF LIST AND THE MALDRAXXUS QUEST SET (20 Nov 2026, a player's report: a level 60 Necrolord Fire Mage in the full set
+   * simmed without the bonus). Fleshcraft's shield (324867, 2 min) is now a
+   * buff, so it shows in the report. Rationale of Maldraxxus (item set 1460, the Bladesworn Conjurer's quest pieces and
+   * the other armour types) 5-piece, Flesh Infusion 345672: "While Fleshcraft is active your primary stat is increased by
+   * 100" - it triggers 345673 (Mod Stat, 2 min) for 100 (live game data; the player's tooltip says +100). Neither
+   * spell is in this client's data, so both are built by hand. The shield's absorb is not modelled (damage-only sims), so
+   * the stat lasts its full 2 min from each Fleshcraft, as the triggered buff does in game. The 3-piece (out-of-combat
+   * regeneration) and 8-piece (on a kill) do nothing on a training dummy.
+   */
+  fleshcraft = make_buff( p, "fleshcraft", p->find_spell( 324867 ) )->set_duration( 120_s );
+  {
+    std::vector<unsigned> worn;
+    for ( const auto& item : p->items )
+      if ( item.parsed.data.id && item.parsed.data.id_set == 1460 && std::find( worn.begin(), worn.end(), item.parsed.data.id ) == worn.end() )
+        worn.push_back( item.parsed.data.id );
+    rationale_pieces = static_cast<unsigned>( worn.size() );
+  }
+  flesh_infusion = make_buff<stat_buff_t>( p, "flesh_infusion" )
+                       ->add_stat( p->convert_hybrid_stat( STAT_STR_AGI_INT ), 100 )
+                       ->set_duration( 120_s );
 
   enabled = !chosen.empty();
   if ( !enabled )
@@ -930,27 +966,6 @@ void effects_t::create_buffs( player_t* p )
           ->add_stat( STAT_MASTERY_RATING, volatile_solvent_humanoid_rating( p ) )
           ->set_duration( timespan_t::from_seconds( VOLATILE_SOLVENT_DURATION ) );
 
-  /*
-   * FLESHCRAFT IN THE BUFF LIST AND THE MALDRAXXUS QUEST SET (20 Nov 2026, a player's report: a level 60 Necrolord Fire Mage in the full set
-   * simmed without the bonus). Fleshcraft's shield (324867, 2 min) is now a
-   * buff, so it shows in the report. Rationale of Maldraxxus (item set 1460, the Bladesworn Conjurer's quest pieces and
-   * the other armour types) 5-piece, Flesh Infusion 345672: "While Fleshcraft is active your primary stat is increased by
-   * 100" - it triggers 345673 (Mod Stat, 2 min) for 100 (live game data; the player's tooltip says +100). Neither
-   * spell is in this client's data, so both are built by hand. The shield's absorb is not modelled (damage-only sims), so
-   * the stat lasts its full 2 min from each Fleshcraft, as the triggered buff does in game. The 3-piece (out-of-combat
-   * regeneration) and 8-piece (on a kill) do nothing on a training dummy.
-   */
-  fleshcraft = make_buff( p, "fleshcraft", p->find_spell( 324867 ) )->set_duration( 120_s );
-  {
-    std::vector<unsigned> worn;
-    for ( const auto& item : p->items )
-      if ( item.parsed.data.id && item.parsed.data.id_set == 1460 && std::find( worn.begin(), worn.end(), item.parsed.data.id ) == worn.end() )
-        worn.push_back( item.parsed.data.id );
-    rationale_pieces = static_cast<unsigned>( worn.size() );
-  }
-  flesh_infusion = make_buff<stat_buff_t>( p, "flesh_infusion" )
-                       ->add_stat( p->convert_hybrid_stat( STAT_STR_AGI_INT ), 100 )
-                       ->set_duration( 120_s );
 }
 
 void effects_t::covenant_ability_cast( player_t* p, covenant_e cov, cooldown_t* host_cd )

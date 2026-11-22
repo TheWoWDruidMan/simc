@@ -633,6 +633,9 @@ void collected_data_to_json( JsonOutput root, const ::report::json::report_confi
   }
   add_non_zero( root, "dps", cd.dps );
   add_non_zero( root, "dpse", cd.dpse );
+  // BracketSim (22 Nov 2026, outside audit #47): "dtps" below is the TOTAL damage taken (cd.dmg_taken) and only for
+  // tanks; profileset_metric=dtps ranks by the per-second value (cd.dtps), so the report needs it as its baseline.
+  add_non_zero( root, "dtps_per_second", cd.dtps );
 
   if ( p.role == ROLE_TANK || p.role == ROLE_HEAL )
   {
