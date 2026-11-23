@@ -483,28 +483,34 @@ void effects_t::create_buffs( player_t* p )
                          ->set_pct_buff_type( primary_pct_buff_type( p ) );
 
   // 22 Nov 2026 (outside audit #51: a Necrolord Fire Mage with the 5-piece and NO soulbind traits cast Fleshcraft but showed
-  // neither buff and got no +100) - built before the no-soulbinds return below, like newfound_resolve: Fleshcraft is the
+  // neither buff and got no primary stat) - built before the no-soulbinds return below, like newfound_resolve: Fleshcraft is the
   // covenant ability and the quest set needs no soulbind.
   /*
    * FLESHCRAFT IN THE BUFF LIST AND THE MALDRAXXUS QUEST SET (20 Nov 2026, a player's report: a level 60 Necrolord Fire Mage in the full set
    * simmed without the bonus). Fleshcraft's shield (324867, 2 min) is now a
-   * buff, so it shows in the report. Rationale of Maldraxxus (item set 1460, the Bladesworn Conjurer's quest pieces and
-   * the other armour types) 5-piece, Flesh Infusion 345672: "While Fleshcraft is active your primary stat is increased by
-   * 100" - it triggers 345673 (Mod Stat, 2 min) for 100 (live game data; the player's tooltip says +100). Neither
-   * spell is in this client's data, so both are built by hand. The shield's absorb is not modelled (damage-only sims), so
+   * buff, so it shows in the report. Rationale of Maldraxxus 5-piece, Flesh Infusion 345672: "While Fleshcraft is active
+   * your primary stat is increased" - it triggers 345673 (Mod Stat, 2 min). The four quest sets carry it: 1460 Bladesworn
+   * Conjurer's (cloth), 1475 Wraith's (leather), 1476 Tactician's (mail), 1477 Harbinger's (plate); pieces count per set,
+   * as in game (a cloak of another set does not count). VALUE +26, read on a level 60 character sheet in game (22 Nov
+   * 2026); the 100 in older game data / its tooltip is not what a level 60 gets. Until 23 Nov this counted set 1460 only
+   * and gave 100. Neither spell is in this client's data, so both are built by hand. The shield's absorb is not modelled (damage-only sims), so
    * the stat lasts its full 2 min from each Fleshcraft, as the triggered buff does in game. The 3-piece (out-of-combat
    * regeneration) and 8-piece (on a kill) do nothing on a training dummy.
    */
   fleshcraft = make_buff( p, "fleshcraft", p->find_spell( 324867 ) )->set_duration( 120_s );
   {
-    std::vector<unsigned> worn;
-    for ( const auto& item : p->items )
-      if ( item.parsed.data.id && item.parsed.data.id_set == 1460 && std::find( worn.begin(), worn.end(), item.parsed.data.id ) == worn.end() )
-        worn.push_back( item.parsed.data.id );
-    rationale_pieces = static_cast<unsigned>( worn.size() );
+    rationale_pieces = 0;
+    for ( int set : { 1460, 1475, 1476, 1477 } )
+    {
+      std::vector<unsigned> worn;
+      for ( const auto& item : p->items )
+        if ( item.parsed.data.id && item.parsed.data.id_set == set && std::find( worn.begin(), worn.end(), item.parsed.data.id ) == worn.end() )
+          worn.push_back( item.parsed.data.id );
+      rationale_pieces = std::max( rationale_pieces, static_cast<unsigned>( worn.size() ) );
+    }
   }
   flesh_infusion = make_buff<stat_buff_t>( p, "flesh_infusion" )
-                       ->add_stat( p->convert_hybrid_stat( STAT_STR_AGI_INT ), 100 )
+                       ->add_stat( p->convert_hybrid_stat( STAT_STR_AGI_INT ), 26 )
                        ->set_duration( 120_s );
 
   enabled = !chosen.empty();

@@ -284,7 +284,7 @@ struct effects_t
   buff_t* trembling_pustules    = nullptr;   // Pustule Eruption: pustules from Fleshcraft
   buff_t* fleshcraft            = nullptr;   // Fleshcraft's shield (324867), shown in the buff list (20 Nov 2026)
   buff_t* flesh_infusion        = nullptr;   // Rationale of Maldraxxus 5-piece: +100 primary while Fleshcraft is up
-  unsigned rationale_pieces     = 0;         // Rationale of Maldraxxus (item set 1460) pieces worn
+  unsigned rationale_pieces     = 0;         // Rationale of Maldraxxus pieces worn (sets 1460/1475/1476/1477: the most of one set)
   buff_t* brons_call            = nullptr;   // Bron's Call to Action: casts counted towards Bron
   unsigned party_favor_count    = 0;
 
