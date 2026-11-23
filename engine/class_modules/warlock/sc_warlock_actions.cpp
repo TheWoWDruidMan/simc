@@ -36,6 +36,7 @@ using namespace helpers;
       // named handful of spells rather than everything the class casts.
       bool legacy_ashen_remains = false;   // conduit 211, needs Immolate up
       bool legacy_withering_bolt = false;  // conduit 203, scales with dot count
+      double legacy_withering_bolt_scale = 1.0;  // 23 Nov 2026: Shadow Bolt 2x, Drain Soul 1x (tooltip 339576)
     } affected_by;
 
     struct triggers_t
@@ -632,7 +633,7 @@ using namespace helpers;
       // Shadow Bolt and Drain Soul by its value for EACH affliction dot on the
       // target, which is the whole of what makes it worth anything.
       if ( affected_by.legacy_withering_bolt )
-        m *= 1.0 + p()->legacy_conduits.percent( 203 ) * td( t )->count_affliction_dots();
+        m *= 1.0 + p()->legacy_conduits.percent( 203 ) * affected_by.legacy_withering_bolt_scale * td( t )->count_affliction_dots();
 
       return m;
     }
@@ -1170,6 +1171,8 @@ using namespace helpers;
       affected_by.deaths_embrace = affliction() && p->talents.deaths_embrace.ok();
       // BracketSim legacy compatibility: Withering Bolt (conduit 203) names this spell.
       affected_by.legacy_withering_bolt = true;
+      // 23 Nov 2026: the Shadowlands tooltip gives Shadow Bolt twice the per-DoT value (${$s1*2}%), Drain Soul once.
+      affected_by.legacy_withering_bolt_scale = 2.0;
 
       if ( demonology() )
       {
