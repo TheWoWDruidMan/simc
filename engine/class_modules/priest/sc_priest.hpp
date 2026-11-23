@@ -321,8 +321,11 @@ public:
   // every priest damage impact and tick.
   void trigger_legacy_wrathful_faerie( player_t* t );
 
+  // BracketSim 23 Nov 2026: the Venthyr spell first. talents.pvp.mindgames is a bare find_spell( 375901 ), always ok(),
+  // so the covenant cast used the Midnight talent's 11.25 spell power (Venthyr 323673: 3.0) - 3.75x the damage
+  // the author's log shows (solo Heroic Kel'Thuzad 23 Nov: ~2,300 a non-crit hit; sim 8,135 on his string).
   const spell_data_t* legacy_mindgames_spell() const
-  { return talents.pvp.mindgames->ok() ? talents.pvp.mindgames : legacy_covenant.mindgames; }
+  { return legacy_covenant.mindgames->ok() ? legacy_covenant.mindgames : talents.pvp.mindgames; }
 
   struct shadowlands_legacy_t
   {

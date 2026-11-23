@@ -1412,14 +1412,17 @@ struct mindgames_t final : public priest_spell_t
 
     // BracketSim legacy compatibility: Shadow Word: Manipulation (7704). One
     // stack per second still on Mindgames when the shield breaks, so the buff
-    // lands late by however much time was used up. Shadowlands added a
-    // Shattered Perceptions term to both figures; that conduit is not in this
-    // port, so the term is dropped rather than guessed at.
+    // lands late by however much time was used up. Shattered Perceptions
+    // (conduit 105) lengthens Mindgames by 2 s: its spell (338315) is gone from
+    // the data, but the author's solo Heroic Kel'Thuzad log (23 Nov 2026) shows the
+    // window as 10 s = 5 Venthyr + 3 this rune + 2 the conduit, and the stacks as
+    // the whole seconds left when the shield broke (6/6/8, 2-3 s after the cast).
     if ( priest().shadowlands_legacy.shadow_word_manipulation )
     {
       auto rune = priest().find_spell( 356392 );
       timespan_t window = priest().legacy_mindgames_spell()->duration() +
-                          rune->effectN( 1 ).time_value();
+                          rune->effectN( 1 ).time_value() +
+                          ( priest().legacy_conduits.percent( 105 ) > 0 ? 2_s : 0_ms );
       timespan_t stacks = timespan_t::from_seconds(
           priest().options.legacy_shadow_word_manipulation_seconds );
       timespan_t delay = std::max( 0_ms, window - stacks );
