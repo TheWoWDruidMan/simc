@@ -16141,7 +16141,9 @@ void druid_t::parse_action_target_effects( action_t* action )
   _a->parse_target_effects( d_fn( &druid_td_t::dots_t::thrash ), spec.thrash_bleed );
   // BracketSim legacy compatibility: Adaptive Swarm's own effect 2 raises the
   // damage its target takes from the druid's spells while the swarm is on it.
-  _a->parse_target_effects( d_fn( &druid_td_t::dots_t::adaptive_swarm ),
+  // Once, not per stack: 325733 effect 2 is flagged Suppress Points Stacking
+  // (+25% with the swarm on the target; counted per stack it was about +95%).
+  _a->parse_target_effects( d_fn( &druid_td_t::dots_t::adaptive_swarm, false ),
                             legacy_covenant.adaptive_swarm_damage );
 
   if ( talent.exacerbating_wounds.ok() )
