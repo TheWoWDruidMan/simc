@@ -8635,7 +8635,9 @@ struct elemental_blast_t : public shaman_spell_t
       if ( p()->shadowlands_legacy.windspeakers_lava_resurgence )
       {
         p()->buff.legacy_windspeakers_lava_resurgence->trigger();
-        p()->buff.lava_surge->trigger();
+        // 23 Nov 2026: a full Lava Surge as Shadowlands (resets Lava Burst unless one is being cast), not only the buff:
+        // the buff alone made the next Lava Burst instant but never gave an extra one (64.7 -> 64.8 casts a fight).
+        p()->trigger_lava_surge();
       }
     }
 
@@ -9272,7 +9274,9 @@ struct earth_shock_t : public shaman_spell_t
       if ( p()->shadowlands_legacy.windspeakers_lava_resurgence )
       {
         p()->buff.legacy_windspeakers_lava_resurgence->trigger();
-        p()->buff.lava_surge->trigger();
+        // 23 Nov 2026: a full Lava Surge as Shadowlands (resets Lava Burst unless one is being cast), not only the buff:
+        // the buff alone made the next Lava Burst instant but never gave an extra one (64.7 -> 64.8 casts a fight).
+        p()->trigger_lava_surge();
       }
 
       // BracketSim legacy compatibility: Pyroclastic Shock rolls to extend

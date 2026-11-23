@@ -5459,6 +5459,18 @@ struct cobra_shot_t : public cobra_shot_base_t
   {
     parse_options( options_str );
   }
+
+  // BracketSim legacy compatibility: Flamewaker's Cobra Sting (7008) - "Cobra Shot has a $h% chance to make your next
+  // Kill Command consume no Focus" (336822, 50%). 23 Nov 2026: rolled on the cast Cobra Shot as Shadowlands
+  // (cobra_shot_t::execute there); the port had it on Barbed Shot.
+  void execute() override
+  {
+    cobra_shot_base_t::execute();
+
+    if ( p()->shadowlands_legacy.flamewakers_cobra_sting &&
+         p()->rng().roll( p()->find_spell( 336822 )->proc_chance() ) )
+      p()->buffs.legacy_flamewakers_cobra_sting->trigger();
+  }
 };
 
 // Cobra Shot (Snakeskin Quiver)
@@ -5530,10 +5542,7 @@ struct barbed_shot_base_t : public hunter_ranged_attack_t
 
     p()->buffs.barbed_shot->trigger();
 
-    // BracketSim legacy compatibility: Flamewaker's Cobra Sting.
-    if ( p()->shadowlands_legacy.flamewakers_cobra_sting &&
-         p()->rng().roll( p()->find_spell( 336822 )->proc_chance() ) )
-      p()->buffs.legacy_flamewakers_cobra_sting->trigger();
+    // 23 Nov 2026: Flamewaker's Cobra Sting moved to Cobra Shot (cobra_shot_t::execute) - it rolled here on Barbed Shot.
 
     auto pet = p()->pets.main;
     if ( pet && p()->rng().roll( p()->talents.brutal_companion->effectN( 1 ).percent() ) )

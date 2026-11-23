@@ -10058,30 +10058,185 @@ struct heart_of_the_wild_t final : public druid_spell_t
 // Cost, cooldown, duration and damage all come from the covenant spells, which
 // still resolve in current client data.
 
+// BracketSim legacy (23 Nov 2026): Adaptive Swarm JUMPS, ported from the Shadowlands 9.2.7 engine (adaptive_swarm_t).
+// "Upon expiration, finds a new target, preferring to alternate between friend and foe up to 3 times" (325727 effect 1 =
+// 3 stacks). The old port cast the swarm once and noted "a solo sim has no second host", but the druid IS the friendly
+// host, so in a solo fight the swarm goes enemy (12 s) -> a friend (12 s) -> the enemy again (12 s). Each jump takes one
+// stack and flies range / 12 yards a second (range as Shadowlands: 5 or 25 yards, half each, sd 1; a damage swarm keeps
+// the range of the heal swarm it came from). The heal side only holds time (no healing is simmed); up to 20 friendly
+// swarms as the Shadowlands default (adaptive_swarm_friendly_targets), beyond that a heal swarm merges its stacks into a
+// random one. Locust Swarm (354123, 60%): each jump may split into two swarms. A damage swarm landing on a swarmed enemy
+// adds its stacks (incoming + existing - 1) and restarts the 12 s; the tick does not grow with stacks (Shadowlands
+// divided it back out).
+struct legacy_adaptive_swarm_t;
+
 struct legacy_adaptive_swarm_damage_t final : public druid_spell_t
 {
+  legacy_adaptive_swarm_t* owner = nullptr;
+  int incoming = 3;
+
   legacy_adaptive_swarm_damage_t( druid_t* p )
     : druid_spell_t( "adaptive_swarm_damage", p, p->legacy_covenant.adaptive_swarm_damage )
   {
-    background = true;
+    background = dual = true;
     may_miss = false;
+    dot_behavior = dot_behavior_e::DOT_CLIP;
+    // Every flight is scheduled by the owner (legacy_adaptive_swarm_t::fly), so the landing is instant here.
+    travel_speed = 0;
+    travel_delay = 0;
 
     // BracketSim legacy compatibility: Evolved Swarm (conduit 278) adds to the
     // damage Adaptive Swarm deals.
     base_td_multiplier *= 1.0 + p->legacy_conduits.percent( 278 );
   }
+
+  void impact( action_state_t* s ) override
+  {
+    int in = incoming;
+    int existing = get_dot( s->target )->current_stack();
+
+    druid_spell_t::impact( s );
+
+    get_dot( s->target )->increment( in + existing - 1 );
+  }
+
+  double calculate_tick_amount( action_state_t* s, double m ) const override
+  {
+    int stack = std::max( 1, find_dot( s->target )->current_stack() );
+    return druid_spell_t::calculate_tick_amount( s, m / stack );
+  }
+
+  void last_tick( dot_t* d ) override;
 };
 
 struct legacy_adaptive_swarm_t final : public druid_spell_t
 {
-  action_t* damage;
+  legacy_adaptive_swarm_damage_t* damage;
+  std::vector<std::pair<event_t*, std::shared_ptr<int>>> heal_swarms;  // live friendly swarms and their stacks
 
   legacy_adaptive_swarm_t( druid_t* p )
     : druid_spell_t( "adaptive_swarm", p, p->legacy_covenant.adaptive_swarm ),
       damage( new legacy_adaptive_swarm_damage_t( p ) )
   {
     may_miss = false;
+    damage->owner = this;
+    damage->stats = stats;
     add_child( damage );
+  }
+
+  double velocity() const
+  { return p()->legacy_covenant.adaptive_swarm_damage->missile_speed() > 0 ? p()->legacy_covenant.adaptive_swarm_damage->missile_speed() : 12.0; }
+
+  double new_range()
+  { return std::max( 0.0, rng().roll( 0.5 ) ? rng().gauss( 5.0, 1.0 ) : rng().gauss( 25.0, 1.0 ) ); }
+
+  bool locust_split()
+  {
+    return p()->shadowlands_legacy.unbridled_swarm &&
+           rng().roll( p()->find_spell( 354123 )->effectN( 1 ).percent() );
+  }
+
+  // Shadowlands' damage-target priority: an enemy with one of the druid's dots but no swarm, then no dot and no swarm,
+  // then a dot and a swarm, then the rest.
+  player_t* enemy_for_swarm( player_t* exclude )
+  {
+    std::vector<player_t*> tl;
+    for ( auto t : sim->target_non_sleeping_list )
+      if ( t != exclude && t->is_enemy() )
+        tl.push_back( t );
+    if ( tl.empty() )
+      return nullptr;
+    std::vector<player_t*> pri[ 4 ];
+    for ( auto t : tl )
+    {
+      auto td = p()->get_target_data( t );
+      bool swarm = td->dots.adaptive_swarm->is_ticking();
+      bool dot = td->dots.moonfire->is_ticking() || td->dots.rake->is_ticking() || td->dots.rip->is_ticking() ||
+                 td->dots.thrash->is_ticking() || td->dots.red_moon->is_ticking() ||
+                 td->dots.lunar_inspiration->is_ticking();
+      pri[ swarm ? ( dot ? 2 : 3 ) : ( dot ? 0 : 1 ) ].push_back( t );
+    }
+    for ( auto& v : pri )
+      if ( !v.empty() )
+        return v[ rng().range( v.size() ) ];
+    return nullptr;
+  }
+
+  void land_damage( player_t* t, int stacks )
+  {
+    if ( !t || t->is_sleeping() )
+      return;
+    damage->incoming = stacks;
+    damage->execute_on_target( t );
+  }
+
+  void fly_damage( player_t* t, int stacks, double range )
+  {
+    make_event( *sim, timespan_t::from_seconds( range / velocity() ), [ this, t, stacks ] { land_damage( t, stacks ); } );
+  }
+
+  // A friendly swarm: holds its stacks for the heal duration, then jumps back toward an enemy.
+  void fly_heal( int stacks, double range )
+  {
+    make_event( *sim, timespan_t::from_seconds( range / velocity() ), [ this, stacks, range ] {
+      timespan_t dur = p()->find_spell( 325748 )->duration();
+      if ( dur <= 0_ms )
+        dur = 12_s;
+      if ( as<int>( heal_swarms.size() ) < 20 )
+      {
+        auto st = std::make_shared<int>( stacks );
+        auto ev = make_event( *sim, dur, [ this, st, range ] {
+          heal_swarms.erase( std::remove_if( heal_swarms.begin(), heal_swarms.end(),
+                                             [ &st ]( const auto& h ) { return h.second == st; } ),
+                             heal_swarms.end() );
+          jump( *st, range, false, nullptr );
+        } );
+        heal_swarms.emplace_back( ev, st );
+      }
+      else
+      {
+        auto& h = heal_swarms[ rng().range( heal_swarms.size() ) ];
+        *h.second = std::min( 5, *h.second + stacks );
+        h.first->reschedule( dur );
+      }
+    } );
+  }
+
+  // Shadowlands jump_swarm(): one stack is spent per jump; damage swarms jump to a friend, friendly swarms to an enemy.
+  void jump( int stacks, double range, bool from_enemy, player_t* from )
+  {
+    int s = stacks - 1;
+    if ( s <= 0 )
+      return;
+
+    if ( from_enemy )
+    {
+      double r = new_range();
+      fly_heal( s, r );
+      if ( locust_split() )
+        fly_heal( s, r );
+    }
+    else
+    {
+      player_t* t = enemy_for_swarm( nullptr );
+      if ( !t )
+        return;
+      fly_damage( t, s, range );
+      if ( locust_split() )
+      {
+        player_t* t2 = enemy_for_swarm( t );
+        if ( t2 )
+          fly_damage( t2, s, range );
+        else
+          fly_heal( s, range );
+      }
+    }
+  }
+
+  void reset() override
+  {
+    druid_spell_t::reset();
+    heal_swarms.clear();
   }
 
   void execute() override
@@ -10094,27 +10249,23 @@ struct legacy_adaptive_swarm_t final : public druid_spell_t
     player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NECROLORD,
                                             cooldown );
 
-    // The swarm's bounce between friend and foe is not modelled: a solo sim has
-    // no second host for it to alternate onto.
-    damage->execute_on_target( target );
-
-    // BracketSim legacy compatibility: Locust Swarm. Effect 1 of the runeforge
-    // is the chance the swarm splits, and the split lands on a second enemy -
-    // so on a single target it correctly does nothing.
-    if ( !p()->shadowlands_legacy.unbridled_swarm ||
-         !rng().roll( p()->find_spell( 354123 )->effectN( 1 ).percent() ) )
-      return;
-
-    for ( auto t : target_list() )
-    {
-      if ( t != target )
-      {
-        damage->execute_on_target( t );
-        break;
-      }
-    }
+    int st = as<int>( p()->legacy_covenant.adaptive_swarm->effectN( 1 ).base_value() );
+    fly_damage( target, st > 0 ? st : 3, player->get_player_distance( *target ) );
   }
 };
+
+void legacy_adaptive_swarm_damage_t::last_tick( dot_t* d )
+{
+  druid_spell_t::last_tick( d );
+
+  // last_tick() also runs when a new swarm CLIPs this one (time left): that is a refresh, not a jump. A demised enemy
+  // with time left does jump (Shadowlands).
+  if ( d->remains() > 0_ms && !d->target->is_sleeping() )
+    return;
+
+  if ( owner )
+    owner->jump( d->current_stack(), 0.0, true, d->target );
+}
 
 // BracketSim legacy compatibility: Kindred Spirits. The bond itself is free and
 // lasts an hour; what matters is the ten second empowerment, which is what the
