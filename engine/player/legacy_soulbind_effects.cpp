@@ -793,12 +793,14 @@ void effects_t::create_buffs( player_t* p )
   // for 30 sec, and stacks overlap." Gained on a chance from damage, which at a
   // real cast rate settles near the cap, so it is ramped on a period instead of
   // rolled per cast.
-  // Bonded Hearts: "If any of the affected allies are of another covenant,
-  // Redirected Anima's Mastery and maximum health effects are increased by
-  // 50%." A raid has other covenants in it, so the larger value is the one a
-  // grouped player gets. The health half is not modelled; this port measures
-  // damage.
-  const double anima_mastery = has( BONDED_HEARTS ) ? 6.0 * 1.5 : 6.0;
+  // Bonded Hearts: "Gaining a stack of Redirected Anima from Grove Invigoration heals up to 5 nearby allies ... If any of
+  // the affected allies are of another covenant, Redirected Anima's Mastery and maximum health effects are increased by
+  // 50% for 5 sec." BracketSim (24 Nov 2026, the author: "5 s after each gain"): it was +50% all fight (+4.4% at 60 Guardian);
+  // the author's solo dummy log showed 6 Mastery a stack (attack power 596 -> 599 -> 656 -> 660), the tooltip and the Shadowlands
+  // engine (soulbinds.cpp bonded_hearts, other-covenant chance 1.0) give it for 5 s after each gain. Modelled as in that
+  // engine: an ally of another covenant is assumed nearby, and the bonus is 3 Mastery per Redirected Anima stack while the
+  // window is open. The health half is not modelled; this port measures damage.
+  const double anima_mastery = 6.0;
 
   // BracketSim (27 Sep 2026): stacks last 30 s and overlap (each its own expiry). The old model held 20 stacks all
   // fight; Wowhead 322721: "Approximately 2 procs per minute", 30 sec, and the Night Fae class ability grants 8. At a
@@ -809,6 +811,33 @@ void effects_t::create_buffs( player_t* p )
                            ->set_max_stack( 20 )
                            ->set_duration( timespan_t::from_seconds( 30 ) )
                            ->set_stack_behavior( buff_stack_behavior::ASYNCHRONOUS );
+
+  if ( has( BONDED_HEARTS ) )
+  {
+    // One stack per Redirected Anima stack, so the bonus follows the anima count; a gain (re)opens the 5 s window, a stack
+    // running out inside it takes its bonus with it.
+    bonded_hearts = make_buff<stat_buff_t>( p, "bonded_hearts" )
+                        ->add_stat( STAT_MASTERY_RATING, anima_mastery * 0.5 )
+                        ->set_max_stack( 20 )
+                        ->set_duration( 5_s );
+    grove_invigoration->set_stack_change_callback( [ this ]( buff_t*, int old, int cur ) {
+      int open = bonded_hearts->check();
+      if ( cur > old )
+      {
+        if ( cur > open )
+          bonded_hearts->trigger( cur - open );
+        else
+          bonded_hearts->refresh();
+      }
+      else if ( open > cur )
+      {
+        if ( cur <= 0 )
+          bonded_hearts->expire();
+        else
+          bonded_hearts->decrement( open - cur );
+      }
+    } );
+  }
 
   // Stacks are gained on a chance from damage and last 30s, so they settle at a
   // ceiling rather than climbing forever. Ramped on a quiet driver to that

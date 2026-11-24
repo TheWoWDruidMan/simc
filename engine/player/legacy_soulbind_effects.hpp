@@ -251,6 +251,7 @@ struct effects_t
   buff_t* social_butterfly      = nullptr;
   buff_t* first_strike          = nullptr;
   buff_t* grove_invigoration    = nullptr;
+  buff_t* bonded_hearts         = nullptr;   // 5 s window after each Redirected Anima gain
   buff_t* gnashing_chompers     = nullptr;
   buff_t* better_together       = nullptr;
   buff_t* valiant_strikes       = nullptr;
