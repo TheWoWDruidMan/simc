@@ -55,6 +55,10 @@ struct pet_t : public player_t
   } current_pet_stats;
 
 public:
+  // BracketSim: The Black Book (spell 23720, 24 Nov 2026) - attack power on the owner's summoned pet, set up by
+  // item::blessing_of_the_black_book. The value is the buff's; null on every other pet.
+  buff_t* owner_item_attack_power = nullptr;
+
   pet_t( sim_t* sim, player_t* owner, util::string_view name, bool guardian = false, bool dynamic = false );
   pet_t( sim_t* sim, player_t* owner, util::string_view name, pet_e pet_type, bool guardian = false,
          bool dynamic = false );

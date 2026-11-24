@@ -115,6 +115,7 @@ namespace item
   void dislodged_foreign_object( special_effect_t& );
   void black_bruise( special_effect_t& );
   void stack_per_cast_use( special_effect_t& );
+  void blessing_of_the_black_book( special_effect_t& );
   void dragonspine_trophy( special_effect_t& );
   void houndmasters_weapons( special_effect_t& );
   void souldrinker( special_effect_t& );
@@ -7578,6 +7579,45 @@ void item::stack_per_cast_use( special_effect_t& effect )
   effect.custom_buff = window;
 }
 
+/* The Black Book 19337 (use 23720, 24 Nov 2026): effect #1 is Modify Attack Power with Target: Active Pet (5).
+ * The generic use code read it as the warlock's own attack power (worth nothing to a warlock). The attack power goes
+ * to the summoned pet (not guardians) for the use's 30 s; the player keeps a 0-attack-power marker buff for the window. */
+void item::blessing_of_the_black_book( special_effect_t& effect )
+{
+  player_t* p = effect.player;
+  const spell_data_t* use = effect.driver();
+  double amount = effect.item ? use->effectN( 1 ).average( effect.item ) : use->effectN( 1 ).average( p );
+
+  std::vector<buff_t*> pet_buffs;
+  for ( pet_t* pet : p->pet_list )
+  {
+    if ( pet->type != PLAYER_PET )
+      continue;
+    auto b = make_buff( pet, "blessing_of_the_black_book", use, effect.item );
+    b->set_cooldown( 0_ms )->set_default_value( amount )->add_invalidate( CACHE_ATTACK_POWER );
+    pet->owner_item_attack_power = b;
+    pet_buffs.push_back( b );
+  }
+
+  // The player keeps the 30 s buff the rotation lines trinkets up by (trinket.N.has_use_buff / proc.any_dps.duration
+  // read a stat buff), carrying 0 attack power: the same timing as before the fix, the value only on the pet.
+  auto window = make_buff<stat_buff_t>( p, "blessing_of_the_black_book", use, effect.item );
+  window->stats.clear();
+  window->add_stat( STAT_ATTACK_POWER, 0 );
+  window->set_cooldown( 0_ms );
+  window->set_stack_change_callback( [ pet_buffs ]( buff_t*, int, int n ) {
+    for ( buff_t* b : pet_buffs )
+    {
+      if ( n == 0 )
+        b->expire();
+      else if ( !b->player->is_sleeping() )
+        b->trigger();
+    }
+  } );
+
+  effect.custom_buff = window;
+}
+
 struct flurry_of_xuen_melee_t : public melee_attack_t
 {
   flurry_of_xuen_melee_t( player_t* player ) :
@@ -11234,6 +11274,7 @@ void unique_gear::register_special_effects()
   register_special_effect( 34774,  item::dragonspine_trophy              ); /* Dragonspine Trophy */
   register_special_effect( 29601,  item::stack_per_cast_use              ); /* Pendant of the Violet Eye */
   register_special_effect( 64999,  item::stack_per_cast_use              ); /* Meteorite Crystal */
+  register_special_effect( 23720,  item::blessing_of_the_black_book      ); /* The Black Book 19337 - pet attack power */
   register_special_effect( 21162,  item::sulfuras                        ); /* Sulfuras, Hand of Ragnaros */
   register_special_effect( 34584,  item::love_struck                     ); /* Masquerade Gown (no client data) */
   register_special_effect( 71406,  item::tiny_abomination_in_a_jar       );

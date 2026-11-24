@@ -441,6 +441,9 @@ double pet_t::composite_melee_attack_power() const
     ap += current_pet_stats.attack_power_from_sp;
   }
 
+  if ( owner_item_attack_power && owner_item_attack_power->check() )
+    ap += owner_item_attack_power->check_value();
+
   return ap;
 }
 
