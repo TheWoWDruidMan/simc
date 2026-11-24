@@ -893,6 +893,9 @@ public:
   // triggering hit dealt again as Holy damage.
   action_t* legacy_virtuous_command_damage = nullptr;
 
+  // BracketSim legacy (24 Nov 2026): Blessing of Summer's extra Holy damage (328123), dealt on a 40% roll per hit.
+  action_t* legacy_summer_proc = nullptr;
+
   // Divine Toll survived as a modern talent, so the covenant version reuses
   // that implementation with the covenant spell's own cooldown and target cap.
   const spell_data_t* legacy_divine_toll_spell() const

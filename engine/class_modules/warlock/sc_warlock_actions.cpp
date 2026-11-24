@@ -203,7 +203,9 @@ using namespace helpers;
       // whole rather than hooked onto a hand-picked spender.
       parse_effects( p()->buffs.legacy_decaying_soul_satchel );  // 356369
       parse_effects( p()->buffs.legacy_shard_of_annihilation );  // 356342
-      parse_effects( p()->buffs.legacy_decimating_bolt );        // 325299
+      // BracketSim legacy (24 Nov 2026): Decimating Bolt's bonus is the buff's CURRENT value, set at the cast from the
+      // target's health (legacy_decimating_bolt_t::execute) - the spell data's flat 100 is only the floor.
+      parse_effects( p()->buffs.legacy_decimating_bolt, USE_CURRENT );  // 325299
 
       // Affliction
       if ( affliction() )
@@ -1011,7 +1013,16 @@ using namespace helpers;
       // BracketSim legacy (27 Sep 2026): the empowerment (3 stacks) and Shard of Annihilation ride this cast.
       // Decaying Soul Satchel does NOT - it is Soul Rot's (Night Fae) legendary (Wowhead 356369: "Each target
       // affected by Soul Rot increases your haste and critical strike chance by 5% for 8 sec"); see legacy_soul_rot_t.
-      p()->buffs.legacy_decimating_bolt->trigger( p()->buffs.legacy_decimating_bolt->max_stack() );
+      // BracketSim legacy (24 Nov 2026): Shadowlands 9.2.7 (sc_warlock.cpp decimating_bolt_t::execute) set the
+      // empowerment from the target's health: 2.0 - health fraction, so +100% on a full-health target rising to
+      // +200% as it dies ("deals increased damage based on the target's missing health"). Our port took the spell
+      // data's flat 100% (+100% at any health), about a third short over a Patchwerk fight. Fire and Brimstone's
+      // modifier on the buff (196408 effect 3, -50% in current data) is applied here because a current-value buff
+      // bypasses the spell-data modifiers.
+      double value = 2.0 - 0.01 * target->health_percentage();
+      if ( p()->talents.fire_and_brimstone.ok() )
+        value *= 1.0 + p()->talents.fire_and_brimstone->effectN( 3 ).percent();
+      p()->buffs.legacy_decimating_bolt->trigger( p()->buffs.legacy_decimating_bolt->max_stack(), value );
       p()->buffs.legacy_shard_of_annihilation->trigger(
           p()->buffs.legacy_shard_of_annihilation->max_stack() );
     }

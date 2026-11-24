@@ -1414,6 +1414,31 @@ void unrelenting_edict_t::do_execute(action_state_t* s)
 }
 
 
+// BracketSim legacy (24 Nov 2026): Blessing of Summer's extra damage. Spell 328620 reads "attacks have a 40% chance
+// to deal 30% additional damage as Holy" (Proc Chance 40%, effect 1 = 30). Until today the engine applied +30% to ALL
+// damage for the whole 30 seconds, ignoring the 40% chance - 2.5 times the real value, enough to make Night Fae win
+// paladin covenant picks it should not. Shadowlands 9.2.7 (sc_paladin.cpp blessing_of_summer_proc_t + the assessor in
+// paladin_t::init_assessors below) dealt it as its own Holy hit, spell 328123: a fixed share of the triggering hit, no
+// crit, and no damage modifiers of the caster or the target ("Ignore Caster/Damage Taken Modifiers"). Same here.
+struct legacy_blessing_of_summer_proc_t : public spell_t
+{
+  legacy_blessing_of_summer_proc_t( paladin_t* p ) : spell_t( "blessing_of_summer_proc", p, p->find_spell( 328123 ) )
+  {
+    may_dodge = may_parry = may_block = may_crit = callbacks = may_miss = false;
+    background = true;
+    school = SCHOOL_HOLY;
+    base_dd_min = base_dd_max = 0.0;
+    attack_power_mod.direct = spell_power_mod.direct = 0.0;
+  }
+
+  void init() override
+  {
+    spell_t::init();
+    snapshot_flags &= STATE_NO_MULTIPLIER;
+    update_flags &= STATE_NO_MULTIPLIER;
+  }
+};
+
 // Legacy Azerite: Inner Light damage proc ==================================
 
 struct legacy_inner_light_damage_t : public paladin_spell_t
@@ -4133,6 +4158,39 @@ void paladin_t::init_assessors()
 {
   player_t::init_assessors();
 
+  // BracketSim legacy (24 Nov 2026): Blessing of Summer, ported from Shadowlands 9.2.7. While the blessing is up,
+  // each damaging hit whose proc type the spell lists (melee, ranged, spells, periodic) has a 40% chance (Equinox
+  // effect 4: +100%) to deal 30% of its damage again as Holy (Equinox effect 2: +100%). The assessor sees damage from
+  // actions that never fire callbacks, as Shadowlands intended.
+  if ( legacy_summer_proc )
+  {
+    const spell_data_t* summer = legacy_covenant.blessing_of_summer;
+    const spell_data_t* equinox = find_spell( 355567 );
+    assessor_out_damage.add( assessor::CALLBACKS, [ this, summer, equinox ]( result_amount_type, action_state_t* s ) {
+      if ( !buffs.legacy_blessing_of_summer->up() || s->action == legacy_summer_proc || s->result_total <= 0.0 )
+        return assessor::CONTINUE;
+      if ( !( summer->proc_flags() & ( UINT64_C( 1 ) << s->proc_type() ) ) )
+        return assessor::CONTINUE;
+      bool has_equinox = buffs.legacy_equinox->up();
+      double chance = summer->proc_chance();
+      if ( has_equinox )
+        chance *= 1.0 + equinox->effectN( 4 ).percent();
+      if ( !rng().roll( chance ) )
+        return assessor::CONTINUE;
+      double da = s->result_amount * summer->effectN( 1 ).percent();
+      if ( has_equinox )
+        da *= 1.0 + equinox->effectN( 2 ).percent();
+      action_t* proc = legacy_summer_proc;
+      player_t* t = s->target;
+      make_event( *sim, [ proc, t, da ] {
+        proc->set_target( t );
+        proc->base_dd_min = proc->base_dd_max = da;
+        proc->execute();
+      } );
+      return assessor::CONTINUE;
+    } );
+  }
+
   if ( talents.execution_sentence->ok() )
   {
     auto assessor_fn = [this]( result_amount_type /* rt */, action_state_t *s )
@@ -4239,6 +4297,9 @@ void paladin_t::create_buffs()
   if ( legacy_conduits.has( 182 ) )
     legacy_virtuous_command_damage = new legacy_virtuous_command_t( this );
 
+  if ( legacy_covenant.blessing_of_summer->ok() )
+    legacy_summer_proc = new legacy_blessing_of_summer_proc_t( this );
+
   buffs.legacy_virtuous_command =
       make_buff( this, "virtuous_command", find_spell( 339664 ) )
           ->set_duration( 5_s )
@@ -4248,7 +4309,6 @@ void paladin_t::create_buffs()
       make_buff( this, "blessing_of_summer", legacy_covenant.blessing_of_summer )
           ->set_cooldown( 0_ms ) // BracketSim 11 Nov 2026: the cooldown is the ability's, not the buff's
           ->set_default_value_from_effect( 1, 0.01 )
-          ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
           // BracketSim legacy compatibility: the conduit The Long Summer (210)
           // makes Blessing of Summer last longer. Shadowlands multiplied the
           // buff's own duration by ( 1 + percent ) at construction, which is
@@ -4266,7 +4326,6 @@ void paladin_t::create_buffs()
   buffs.legacy_equinox =
       make_buff( this, "equinox", find_spell( 355567 ) )
           ->set_default_value_from_effect( 2, 0.01 )
-          ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
           ->set_chance( shadowlands_legacy.seasons_of_plenty ? 1.0 : 0.0 );
 
   buffs.legacy_divine_resonance =
@@ -5270,17 +5329,8 @@ double paladin_t::composite_player_multiplier( school_e school ) const
   if ( buffs.legacy_vanguards_momentum->check() && dbc::is_school( school, SCHOOL_HOLY ) )
     m *= 1.0 + buffs.legacy_vanguards_momentum->check_stack_value();
 
-  // BracketSim legacy compatibility: Blessing of Summer. Equinox's effect 2 is
-  // a percentage modifier applied TO the blessing's own effect, so with the
-  // Seasons of Plenty legendary up Summer is worth double rather than Equinox
-  // adding a separate bonus.
-  if ( buffs.legacy_blessing_of_summer->check() )
-  {
-    double summer = buffs.legacy_blessing_of_summer->check_value();
-    if ( buffs.legacy_equinox->check() )
-      summer *= 1.0 + buffs.legacy_equinox->check_value();
-    m *= 1.0 + summer;
-  }
+  // BracketSim legacy (24 Nov 2026): Blessing of Summer is no longer a damage multiplier - it is a 40% proc dealt
+  // by legacy_summer_proc (see paladin_t::init_assessors).
 
   return m;
 }
