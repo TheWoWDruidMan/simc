@@ -186,6 +186,8 @@ void monk_action_t<Base>::apply_buff_effects()
   // BracketSim legacy compatibility: Xuen's Battlegear's Pressure Point (Rising Sun Kick crit chance).
   if ( p()->buff.legacy_xuens_pressure_point )
     parse_effects( p()->buff.legacy_xuens_pressure_point );
+  if ( p()->buff.legacy_weapons_of_order_ww )
+    parse_effects( p()->buff.legacy_weapons_of_order_ww );
 
   // Midnight S1 Set
   // Midnight S2 Set
@@ -474,6 +476,26 @@ void monk_action_t<Base>::execute()
       combo_strikes_trigger();
 
   base_t::execute();
+
+  // BracketSim legacy (25 Nov 2026 audit M3): an ability used while standing on the faeline has a 6% chance (doubled
+  // by Faeline Harmony) to reset Faeline Stomp - 9.2.7 sc_monk.cpp:674-686, the abilities that set
+  // trigger_faeline_stomp there (the uptime option is 1.0 by default, so it is not modelled).
+  if ( p()->buff.legacy_faeline_stomp && p()->buff.legacy_faeline_stomp->check() )
+  {
+    static const std::array<unsigned, 16> ids = { 100780, 107428, 185099, 100784, 116847, 101546, 113656, 158221,
+                                                   261947, 121253, 322109, 117952, 115181, 115098, 123986, 148135 };
+    if ( range::contains( ids, base_t::data().id() ) )
+    {
+      double chance = p()->buff.legacy_faeline_stomp->check_value();
+      if ( p()->shadowlands_legacy.faeline_harmony )
+        chance *= 1.0 + p()->find_spell( 356705 )->effectN( 2 ).percent();
+      if ( p()->rng().roll( chance ) )
+      {
+        p()->get_cooldown( "faeline_stomp" )->reset( true, 1 );
+        p()->get_proc( "legacy_faeline_stomp_reset" )->occur();
+      }
+    }
+  }
 }
 
 template <class Base>
@@ -1349,6 +1371,11 @@ struct rising_sun_kick_t : monk_melee_attack_t
     if ( p()->specialization() == MONK_WINDWALKER )
       p()->action.flurry_strikes->execute( flurry_strikes_t::WISDOM_OF_THE_WALL );
 
+    // BracketSim legacy (25 Nov 2026 audit M2): 9.2.7 sc_monk.cpp:1706-1707.
+    if ( p()->specialization() == MONK_WINDWALKER && p()->buff.legacy_weapons_of_order_ww &&
+         p()->buff.legacy_weapons_of_order->check() )
+      p()->buff.legacy_weapons_of_order_ww->trigger();
+
     p()->buff.whirling_dragon_punch->trigger();
     p()->action.chi_wave->execute();
   }
@@ -1641,6 +1668,11 @@ struct blackout_kick_t : overwhelming_force_t<charred_passions_t<teachings_of_th
       if ( reduction != 0_s )
         reduction -= p()->talent.windwalker.zenith->effectN( 3 ).time_value();
     }
+
+    // BracketSim legacy (25 Nov 2026 audit M2): Weapons of Order effect 8 - Blackout Kick cuts Rising Sun Kick and Fists
+    // of Fury by 1 s more while it is up (9.2.7 sc_monk.cpp:1912-1916).
+    if ( reduction != 0_s && p()->specialization() == MONK_WINDWALKER && p()->buff.legacy_weapons_of_order->check() )
+      reduction -= p()->legacy_covenant.weapons_of_order->effectN( 8 ).time_value();
 
     p()->cooldown.rising_sun_kick->adjust( reduction );
     p()->cooldown.fists_of_fury->adjust( reduction );
@@ -5856,6 +5888,10 @@ struct legacy_weapons_of_order_t : public monk_spell_t
                                             cooldown );
     p()->buff.legacy_weapons_of_order->trigger();
 
+    // BracketSim legacy (25 Nov 2026 audit M1): "Keg Smash cooldown is reset instantly" (9.2.7 sc_monk.cpp:4279).
+    if ( p()->specialization() == MONK_BREWMASTER )
+      p()->get_cooldown( "keg_smash" )->reset( true, 1 );
+
     // BracketSim legacy compatibility: Call to Arms (7718). Weapons of Order
     // also summons the spec's celestial briefly.
     //
@@ -6030,6 +6066,33 @@ struct legacy_fallen_order_t : public monk_spell_t
   }
 };
 
+// BracketSim legacy (25 Nov 2026 audit M3): the stomp's initial hit, 345727 effect 1 (0.40 AP, every spec, up to five
+// enemies) - 9.2.7 faeline_stomp_damage_t. Way of the Fae scales this one.
+struct legacy_faeline_stomp_initial_t : public monk_spell_t
+{
+  legacy_faeline_stomp_initial_t( monk_t *p )
+    : monk_spell_t( p, "faeline_stomp_initial", p->find_spell( 345727 ) )
+  {
+    background = true;
+    aoe = 5;
+    attack_power_mod.direct = p->find_spell( 345727 )->effectN( 1 ).ap_coeff();
+    spell_power_mod.direct  = 0;
+  }
+
+  double composite_aoe_multiplier( const action_state_t *state ) const override
+  {
+    double cam = monk_spell_t::composite_aoe_multiplier( state );
+    if ( p()->legacy_conduits.has( 63 ) )
+    {
+      const std::vector<player_t *> &targets = state->action->target_list();
+      if ( !targets.empty() )
+        cam *= 1.0 + p()->legacy_conduits.percent( 63 ) * std::min( static_cast<double>( targets.size() ), 5.0 );
+    }
+    return cam;
+  }
+};
+
+// The Windwalker's additional hit (327264) - 9.2.7 faeline_stomp_ww_damage_t; Way of the Fae does not scale it.
 struct legacy_faeline_stomp_damage_t : public monk_spell_t
 {
   legacy_faeline_stomp_damage_t( monk_t *p )
@@ -6051,16 +6114,7 @@ struct legacy_faeline_stomp_damage_t : public monk_spell_t
     // Midnight does not ship. Five is not a guess: the conduit's own
     // description gives both halves - "10.0% per target hit ... up to a maximum
     // of 50.0%" - and the ability itself already hits at most five.
-    if ( p()->legacy_conduits.has( 63 ) )
-    {
-      const std::vector<player_t *> &targets = state->action->target_list();
-      if ( !targets.empty() )
-      {
-        cam *= 1.0 + p()->legacy_conduits.percent( 63 ) *
-                         std::min( static_cast<double>( targets.size() ), 5.0 );
-      }
-    }
-
+    // 25 Nov 2026 audit M3: Way of the Fae moved to the initial hit (345727), as 9.2.7 had it.
     return cam;
   }
 };
@@ -6068,14 +6122,18 @@ struct legacy_faeline_stomp_damage_t : public monk_spell_t
 struct legacy_faeline_stomp_t : public monk_spell_t
 {
   action_t *damage;
+  action_t *initial;
 
   legacy_faeline_stomp_t( monk_t *p, std::string_view options_str )
     : monk_spell_t( p, "faeline_stomp", p->legacy_covenant.faeline_stomp ),
-      damage( new legacy_faeline_stomp_damage_t( p ) )
+      damage( p->specialization() == MONK_WINDWALKER ? new legacy_faeline_stomp_damage_t( p ) : nullptr ),
+      initial( new legacy_faeline_stomp_initial_t( p ) )
   {
     parse_options( options_str );
     may_miss = false;
-    add_child( damage );
+    add_child( initial );
+    if ( damage )
+      add_child( damage );
   }
 
   void execute() override
@@ -6087,9 +6145,13 @@ struct legacy_faeline_stomp_t : public monk_spell_t
     // they ride; only the host and its cooldown are class knowledge.
     player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_NIGHT_FAE,
                                             cooldown );
-    // The faeline itself - a patch of ground that re-triggered on later casts -
-    // is not modelled; only the stomp's own damage is.
-    damage->execute_on_target( target );
+    // 25 Nov 2026 audit M3: the initial hit for every spec, the Windwalker hit on top, and the faeline (reset chance,
+    // see monk_action_t::execute).
+    initial->execute_on_target( target );
+    if ( damage )
+      damage->execute_on_target( target );
+    if ( p()->buff.legacy_faeline_stomp )
+      p()->buff.legacy_faeline_stomp->trigger();
 
     // BracketSim legacy compatibility: Faeline Harmony. Shadowlands applied
     // Fae Exposure to every target the stomp reached, whether or not it was
@@ -7215,6 +7277,14 @@ void monk_t::create_buffs()
           ->set_duration( legacy_covenant.weapons_of_order->duration() + ( legacy_conduits.has( 59 ) ? 5_s : 0_s ) )
           ->set_pct_buff_type( STAT_PCT_BUFF_MASTERY )
           ->set_chance( legacy_covenant.weapons_of_order->ok() ? 1.0 : 0.0 );
+  // 25 Nov 2026 audit M2 / M3 (see the header).
+  if ( legacy_covenant.weapons_of_order->ok() && specialization() == MONK_WINDWALKER )
+    buff.legacy_weapons_of_order_ww = make_buff( this, "weapons_of_order_ww", find_spell( 311054 ) );
+  if ( legacy_covenant.faeline_stomp->ok() )
+    buff.legacy_faeline_stomp = make_buff( this, "faeline_stomp", find_spell( 327104 ) )
+                                    ->set_default_value( find_spell( 327104 )->effectN( 2 ).percent() )
+                                    ->set_cooldown( 0_ms )
+                                    ->set_quiet( false );
   // BracketSim legacy compatibility (12 Nov 2026): Xuen's Battlegear's second half - when Fists of Fury ends, Rising
   // Sun Kick's critical strike chance is raised for 5 s (Pressure Point 337482, 40% - the tooltip's value).
   if ( shadowlands_legacy.xuens_battlegear )

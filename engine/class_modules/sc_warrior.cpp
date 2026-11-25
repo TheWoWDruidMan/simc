@@ -1914,10 +1914,29 @@ struct warrior_attack_t : public warrior_action_t<melee_attack_t>
       p()->buff.crushing_assault->trigger();
   }
 
+  // BracketSim legacy (25 Nov 2026 audit W2): Deathmaker's Siegebreaker (280773, absent from Midnight) raises the
+  // damage the target takes from a listed set of warrior abilities (effect 1) and from auto attacks (effect 2) - 9.2.7
+  // data and sc_warrior.cpp:912, 983. The list is 280773 effect 1's affected spells in the 9.2.7 data.
+  bool legacy_siegebreaker_affected() const
+  {
+    if ( this->repeating )
+      return true;
+    static const std::array<unsigned, 61> ids = {
+      772, 845, 1464, 1715, 6343, 6572, 7384, 12294, 20243, 23881, 23922, 34428, 44949, 46968, 50622, 52174,
+      57755, 64382, 85384, 95738, 96103, 107570, 115767, 118000, 126664, 156287, 163558, 167105, 184707, 184709,
+      199658, 199667, 199850, 199851, 199852, 201363, 201364, 202168, 236282, 260643, 260798, 262115, 262161,
+      278497, 279142, 280772, 280849, 283810, 288091, 307871, 315720, 315961, 317483, 317488, 317489, 325886,
+      326062, 333860, 335096, 335098, 335100 };
+    return range::contains( ids, data().id() );
+  }
+
   double composite_target_multiplier( player_t* target ) const override
   {
     double m = base_t::composite_target_multiplier( target );
     auto target_data = td( target );
+    if ( p()->shadowlands_legacy.deathmaker && target_data && target_data->debuffs_legacy_siegebreaker->check() &&
+         legacy_siegebreaker_affected() )
+      m *= 1.0 + target_data->debuffs_legacy_siegebreaker->check_value();
     if ( target_data && target_data->debuffs_colossus_smash->up() )
     {
       auto multi = 1.0 + p()->spell.colossus_smash_debuff->effectN( 1 ).percent();
@@ -3175,7 +3194,8 @@ struct bloodbath_t : public warrior_attack_t
     }
 
     // BracketSim legacy compatibility: the Vicious Contempt conduit, on the same
-    // execute window as the talent it later became.
+    // execute window as the talent it later became. Kept on Bloodbath (25 Nov 2026 audit W3 refuted: 9.2.7's code
+    // leaves it out, but 9.2.7's own Fury APL casts Bloodbath "if=...conduit.vicious_contempt.rank>5&target.health.pct<35").
     if ( target->health_percentage() < 35 )
       am *= 1.0 + p()->legacy_conduits.percent( 64 );
 
@@ -6204,6 +6224,8 @@ struct dreadnaught_t : warrior_attack_t
     aoe = -1;
     reduced_aoe_targets = 5.0;
     background  = true;
+    // 25 Nov 2026 audit W4: Crash the Ramparts (conduit 12, 335242) affects Dreadnaught as well as Overpower.
+    base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 12 );
     if ( sim->dbc->wowv() >= wowv_t( 12, 1, 0 ) )
       target_filter_callback = secondary_targets_only();
   }
@@ -10958,13 +10980,8 @@ double warrior_t::composite_player_target_multiplier( player_t* target, school_e
 {
   double m = parse_player_effects_t::composite_player_target_multiplier( target, school );
 
-  // BracketSim legacy compatibility: Deathmaker's Siegebreaker effect - all of the warrior's damage to that target.
-  if ( shadowlands_legacy.deathmaker )
-  {
-    auto td = find_target_data( target );
-    if ( td && td->debuffs_legacy_siegebreaker->check() )
-      m *= 1.0 + td->debuffs_legacy_siegebreaker->check_value();
-  }
+  // BracketSim legacy compatibility: Deathmaker's Siegebreaker effect - 25 Nov 2026 audit W2: no longer all of the
+  // warrior's damage; see warrior_attack_t::composite_target_multiplier.
 
   // BracketSim legacy (27 Sep 2026): Exploiter no longer lives here - it made EVERY attack +50% for 30 s after each
   // Execute (60 Arms: the legendary read +46%). It is Mortal Strike's alone; see mortal_strike_t.

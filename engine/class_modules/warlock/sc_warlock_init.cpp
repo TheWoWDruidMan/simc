@@ -819,11 +819,19 @@ namespace warlock
             ->set_default_value_from_effect( 1 )
             ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
             ->set_chance( shadowlands_legacy.decaying_soul_satchel ? 1.0 : 0.0 );
+    // 25 Nov 2026 audit #25: the crit half, 356369 effect 2 (+5% per stack; 9.2.7 sc_warlock.cpp:1198-1205, 412-413).
+    buffs.legacy_decaying_soul_satchel_crit =
+        make_buff( this, "decaying_soul_satchel_crit", find_spell( 356369 ) )
+            ->set_default_value_from_effect( 2 )
+            ->set_pct_buff_type( STAT_PCT_BUFF_CRIT )
+            ->set_chance( shadowlands_legacy.decaying_soul_satchel ? 1.0 : 0.0 );
 
     // BracketSim legacy (27 Sep 2026): Decimating Bolt's own empowerment (325299) - the next 3 Shadow Bolts /
     // Incinerates / Demonbolts +100% (Drain Soul periodic +100%), 45 s. The old port left it out.
     buffs.legacy_decimating_bolt =
         make_buff( this, "decimating_bolt", find_spell( 325299 ) )
+            // 25 Nov 2026 audit #26: one stack with Drain Soul - it empowers a whole channel (9.2.7 sc_warlock.cpp:1176-1179).
+            ->set_max_stack( talents.drain_soul.ok() ? 1 : std::max( 1, as<int>( find_spell( 325299 )->max_stacks() ) ) )
             ->set_chance( legacy_covenant.decimating_bolt->ok() ? 1.0 : 0.0 );
 
     // Languishing Soul Detritus (bonus 7710, Kyrian): critical strike chance after Scouring Tithe. 356255 is the
@@ -913,14 +921,18 @@ namespace warlock
      * the demon wears is held here and read by every pet. See
      * warlock_t::init_special_effects for the two drivers.
      */
+    // 25 Nov 2026 audit #24: 337057's tooltip `$?c2[${$s1*1.5}%][$s1%]` - 10% for Affliction / Destruction, 15% for
+    // Demonology (9.2.7 sc_warlock.cpp:1189); 337060 effect 1 carries the Demonology figure.
+    const double synergy = find_spell( 337060 )->effectN( 1 ).percent() *
+                           ( specialization() == WARLOCK_DEMONOLOGY ? 1.0 : 1.0 / 1.5 );
     buffs.legacy_demonic_synergy =
         make_buff( this, "legacy_demonic_synergy", find_spell( 337060 ) )
-            ->set_default_value_from_effect( 1 )
+            ->set_default_value( synergy )
             ->add_invalidate( CACHE_PLAYER_DAMAGE_MULTIPLIER )
             ->set_chance( shadowlands_legacy.relic_of_demonic_synergy ? 1.0 : 0.0 );
     buffs.legacy_demonic_synergy_pet =
         make_buff( this, "legacy_demonic_synergy_pet", find_spell( 337060 ) )
-            ->set_default_value_from_effect( 1 )
+            ->set_default_value( synergy )
             ->set_stack_change_callback( [ this ]( buff_t*, int, int ) {
               for ( auto* pet : pet_list )
                 pet->invalidate_cache( CACHE_PLAYER_DAMAGE_MULTIPLIER );

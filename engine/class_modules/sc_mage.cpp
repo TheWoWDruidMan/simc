@@ -2087,7 +2087,9 @@ public:
 
     if ( affected_by.clearcasting )
     {
+      int cc_before = p()->buffs.clearcasting->check();
       p()->buffs.clearcasting->decrement();
+      bool cc_spent = p()->buffs.clearcasting->check() < cc_before;
 
       // BracketSim legacy compatibility: Sinful Delight. Effect 1 is the time
       // taken off Mirrors of Torment each time Clearcasting is spent.
@@ -2101,7 +2103,10 @@ public:
 
       // BracketSim legacy compatibility: the conduit Nether Precision (36).
       // Spending Clearcasting is what grants it, which is why it lives here.
-      p()->buffs.legacy_nether_precision->trigger();
+      // 25 Nov 2026 audit #20: only when a stack was actually used - not when
+      // Expanded Potential ate the spend (9.2.7 sc_mage.cpp:1792-1800).
+      if ( cc_spent )
+        p()->buffs.legacy_nether_precision->trigger();
     }
 
     if ( p()->spec.clearcasting->ok() && triggers.clearcasting )
@@ -2160,23 +2165,19 @@ public:
     // value as seconds are both what Shadowlands SimulationCraft did; the value
     // comes from the socketed rank. Icy Veins is Frost-only, so the buff check
     // is also the spec check.
+    // 25 Nov 2026 audit #21: not from Blizzard shards, Glacial Fragments or Ray
+    // of Frost (9.2.7 triggers.icy_propulsion = false on those three).
     if ( s->result == RESULT_CRIT && p()->legacy_conduits.has( 20 ) &&
-         p()->buffs.icy_veins->check() )
+         p()->buffs.icy_veins->check() && name_str != "blizzard_shard" && name_str != "ray_of_frost" &&
+         this != p()->action.legacy_glacial_fragments )
     {
       p()->get_cooldown( "icy_veins" )->adjust(
           -0.1 * timespan_t::from_seconds( p()->legacy_conduits.value( 20 ) ) );
     }
 
-    // BracketSim legacy compatibility: Harmonic Echo repeats a share of every
-    // hit the spark's vulnerability window takes. Effect 1 of the runeforge is
-    // that share.
-    if ( p()->shadowlands_legacy.harmonic_echo && p()->action.legacy_harmonic_echo &&
-         this != p()->action.legacy_harmonic_echo &&
-         p()->get_target_data( s->target )->debuffs.legacy_radiant_spark_vulnerability->check() )
-    {
-      p()->action.legacy_harmonic_echo->execute_on_target(
-          s->target, s->result_total * p()->find_spell( 354186 )->effectN( 1 ).percent() );
-    }
+    // BracketSim legacy compatibility: Harmonic Echo - 25 Nov 2026 audit #23:
+    // moved to assess_damage below, where Shadowlands had it (only spark-
+    // triggering spells, only while the spark ticks).
 
     // BracketSim legacy compatibility: the Shadowlands legendary of the same
     // name keeps its own crit chain, and stacks with the modern talent.
@@ -2204,6 +2205,11 @@ public:
       if ( spark && spark->is_ticking() )
       {
         buff_t* vuln = get_td( s->target )->debuffs.legacy_radiant_spark_vulnerability;
+        // Harmonic Echo repeats 354186 effect 1 (25%) of the hit, before the stack changes (9.2.7
+        // sc_mage.cpp:1675-1681).
+        if ( p()->shadowlands_legacy.harmonic_echo && p()->action.legacy_harmonic_echo && vuln->check() )
+          p()->action.legacy_harmonic_echo->execute_on_target(
+              s->target, s->result_total * p()->find_spell( 354186 )->effectN( 1 ).percent() );
         if ( vuln->at_max_stacks() )
         {
           vuln->expire();
@@ -3345,7 +3351,8 @@ struct arcane_barrage_t final : public arcane_mage_spell_t
     if ( p()->legacy_conduits.has( 55 ) &&
          rng().roll( 0.1 * p()->legacy_conduits.percent( 55 ) ) )
     {
-      p()->trigger_arcane_charge( 4 );
+      // 25 Nov 2026 audit #19: 337244 effect 1 = 2 charges (9.2.7 sc_mage.cpp:2422), not 4.
+      p()->trigger_arcane_charge( 2 );
     }
 
     int salvo = p()->buffs.arcane_salvo->check();
@@ -5189,8 +5196,10 @@ struct frozen_orb_t final : public frost_mage_spell_t
 
     p()->buffs.permafrost_lances->trigger();
     p()->buffs.freezing_rain->trigger();
-    // BracketSim legacy compatibility: Freezing Winds.
-    p()->buffs.legacy_freezing_winds->trigger();
+    // BracketSim legacy compatibility: Freezing Winds. 25 Nov 2026 audit #22: not
+    // from Cold Front's free orb (9.2.7 sc_mage.cpp:3864 returns first when background).
+    if ( !background )
+      p()->buffs.legacy_freezing_winds->trigger();
     p()->trigger_brain_freeze( p()->talents.wintertide->effectN( 1 ).percent(), proc_brain_freeze );
     if ( p()->talents.everlasting_frost.ok() )
       p()->trigger_fof( 1.0, proc_fof, as<int>( p()->talents.everlasting_frost->effectN( 1 ).base_value() ) );
@@ -6083,6 +6092,21 @@ struct pyroblast_t final : public hot_streak_spell_t
   void impact( action_state_t* s ) override
   {
     hot_streak_spell_t::impact( s );
+
+    // BracketSim legacy (25 Nov 2026 audit #18): Molten Skyfall - "Damaging an enemy with 18 Fireballs or Pyroblasts"
+    // (9.2.7 sc_mage.cpp:3409 and 4735), so Pyroblast counts and spends it as Fireball does.
+    if ( p()->shadowlands_legacy.molten_skyfall && result_is_hit( s->result ) && s->chain_target == 0 )
+    {
+      if ( p()->buffs.legacy_molten_skyfall_ready->check() )
+      {
+        p()->buffs.legacy_molten_skyfall_ready->expire();
+        p()->action.legacy_meteor->execute_on_target( s->target );
+      }
+      else
+      {
+        p()->trigger_legacy_counter_buff( p()->buffs.legacy_molten_skyfall, p()->buffs.legacy_molten_skyfall_ready, 2 );
+      }
+    }
 
     // Trailing Embers lands on every target in range, not just the one hit.
     if ( trailing_embers )

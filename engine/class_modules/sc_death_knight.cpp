@@ -707,6 +707,7 @@ struct death_knight_td_t : public actor_target_data_t
     // Legacy Shadowlands runeforge legendaries
     buff_t* legacy_abominations_frenzy;
     buff_t* legacy_abominations_frenzy_icd;
+    buff_t* legacy_debilitating_malady;  // 338523, 25 Nov 2026
     // Legacy Shadowlands conduit: Everfrost. Stacks on the target and raises
     // the damage Remorseless Winter deals to it.
     buff_t* legacy_everfrost;
@@ -7514,7 +7515,9 @@ struct dark_transformation_buff_t final : public death_knight_buff_t
     : death_knight_buff_t( p, n, s )
   {
     set_default_value_from_effect( 1 );
-    set_duration( p->talent.unholy.dark_transformation->duration() );
+    set_duration( p->talent.unholy.dark_transformation->duration() +
+                  // BracketSim legacy (25 Nov 2026 audit #2): Eternal Hunger 337381 effect 2, +3000 ms (9.2.7 data).
+                  ( p->legacy_conduits.has( 65 ) ? 3_s : 0_s ) );
     cooldown->duration = 0_ms;  // Handled by the player ability
   }
 
@@ -8186,6 +8189,15 @@ struct blood_plague_t final : public death_knight_disease_t
     }
   }
 
+  // BracketSim legacy (25 Nov 2026 audit #1): Debilitating Malady's stacks raise Blood Plague on that target.
+  double composite_target_multiplier( player_t* t ) const override
+  {
+    double m = death_knight_disease_t::composite_target_multiplier( t );
+    if ( p()->legacy_conduits.has( 123 ) )
+      m *= 1.0 + get_td( t )->debuff.legacy_debilitating_malady->check_stack_value();
+    return m;
+  }
+
   // Legacy Azerite: Deep Cuts
   double bonus_ta( const action_state_t* state ) const override
   {
@@ -8397,8 +8409,11 @@ struct virulent_plague_t final : public death_knight_disease_t
   virulent_plague_t( std::string_view name, death_knight_t* p, bool legacy_superstrain = false )
     : death_knight_disease_t( name, p, p->spell.virulent_plague )
   {
-    // BracketSim legacy compatibility: Lingering Plague.
+    // BracketSim legacy compatibility: Lingering Plague. 25 Nov 2026 audit #3: also its effect 2, +3000 ms to the
+    // dot (9.2.7 data, flat; 9.2.7 sc_death_knight.cpp:3252).
     base_multiplier *= 1.0 + p->legacy_conduits.percent( 125 );
+    if ( p->legacy_conduits.has( 125 ) )
+      dot_duration += 3_s;
 
     // Legacy Shadowlands: Superstrain.
     if ( legacy_superstrain )
@@ -8967,13 +8982,13 @@ struct abomination_limb_t : public death_knight_spell_t
     harmful = false;
     parse_options( options_str );
 
-    // Legacy Shadowlands: Abomination's Frenzy lengthens the channel and cuts
-    // its cooldown.
+    // Legacy Shadowlands: Abomination's Frenzy lengthens the channel. 25 Nov 2026 audit #6: its effect 2 shortens the
+    // Bone Shield / Rime / Runic Corruption PROC timer (9.2.7 sc_death_knight.cpp:9201-9204 + 1062), not the
+    // ability's cooldown; the talent version has no such timer, so only the duration applies here.
     if ( p->shadowlands_legacy.abominations_frenzy )
     {
       const spell_data_t* af = p->find_spell( 353447 );
       dot_duration += af->effectN( 1 ).time_value();
-      cooldown->duration -= timespan_t::from_seconds( af->effectN( 2 ).base_value() );
     }
   }
 
@@ -9475,8 +9490,8 @@ struct blood_boil_t final : public death_knight_spell_t
   {
     parse_options( options_str );
 
-    // BracketSim legacy compatibility: Debilitating Malady.
-    base_multiplier *= 1.0 + p->legacy_conduits.percent( 123 );
+    // BracketSim legacy (25 Nov 2026 audit #1): Debilitating Malady is NOT a Blood Boil damage bonus - Blood Boil
+    // leaves debuff 338523 (6 s, 3 stacks) that raises the target's damage taken from Blood Plague (impact below).
 
     aoe              = -1;
     cooldown->hasted = true;
@@ -9517,6 +9532,9 @@ struct blood_boil_t final : public death_knight_spell_t
     death_knight_spell_t::impact( state );
 
     p()->buffs.hemostasis->trigger();
+
+    if ( p()->legacy_conduits.has( 123 ) && result_is_hit( state->result ) )
+      get_td( state->target )->debuff.legacy_debilitating_malady->trigger();
   }
 };
 
@@ -13716,9 +13734,11 @@ struct legacy_shackle_the_unworthy_t final : public death_knight_spell_t
     //
     // Its other half lengthened the dot by 3 seconds, which SimulationCraft
     // read from effect 2 of conduit spell 338664. Midnight does not ship that
-    // spell, and the duration does not scale with rank, so there is nowhere to
-    // read it from - it is left out rather than typed in from a tooltip.
+    // spell; 25 Nov 2026 audit #4: the 9.2.7 data on this PC has it as a flat
+    // +3000 ms, so it is applied (as Spiked Burrs / Bron already use 9.2.7 data).
     base_multiplier *= 1.0 + p->legacy_conduits.percent( 128 );
+    if ( p->legacy_conduits.has( 128 ) )
+      dot_duration += 3_s;
   }
 
   void execute() override
@@ -13799,7 +13819,8 @@ struct legacy_insatiable_hunger_damage_t final : public death_knight_spell_t
       rp_multiplier( p->find_spell( 353729 )->effectN( 1 ).percent() )
   {
     background = true;
-    aoe = -1;
+    // 25 Nov 2026 audit #7: 353720 Max Targets 5 (9.2.7 set no aoe override, so the spell's own cap).
+    aoe = data().max_targets() > 0 ? data().max_targets() : 5;
   }
 
   double composite_da_multiplier( const action_state_t* state ) const override
@@ -14125,6 +14146,11 @@ struct vampiric_blood_t final : public death_knight_spell_t
     death_knight_spell_t::execute();
 
     p()->buffs.vampiric_blood->trigger();
+
+    // BracketSim legacy (25 Nov 2026 audit #0): Gorefiend's Domination - "Vampiric Blood generates 45 Runic Power"
+    // (350914 effect 1 = 450 / 10, 9.2.7 data; 9.2.7 sc_death_knight.cpp:7534-7545).
+    if ( p()->shadowlands_legacy.gorefiends_domination )
+      p()->resource_gain( RESOURCE_RUNIC_POWER, 45.0, p()->get_gain( "legacy_gorefiends_domination" ), this );
   }
 };
 
@@ -14437,6 +14463,35 @@ double death_knight_t::resource_loss( resource_e resource_type, double amount, g
   }
 
   // Procs from runes spent
+  // BracketSim legacy (25 Nov 2026 audit #5): Shackle the Unworthy spreads. Spending a rune on a shackled target copies
+  // the dot to one other enemy without it (312202 effect 5 = 100%, 1 s internal cooldown), and each spread fires Final
+  // Sentence (9.2.7 sc_death_knight.cpp:2995-3020). Needs a second enemy, so a single-target fight is unchanged.
+  if ( resource_type == RESOURCE_RUNE && action && amount > 0 && legacy_covenant.shackle_the_unworthy->ok() &&
+       action->target && sim->target_non_sleeping_list.size() > 1 )
+  {
+    cooldown_t* icd = get_cooldown( "legacy_shackle_spread_icd" );
+    dot_t* src = action->target->find_dot( "shackle_the_unworthy", this );
+    if ( src && src->is_ticking() && icd->is_ready() )
+    {
+      for ( player_t* dest : sim->target_non_sleeping_list )
+      {
+        dot_t* d = dest->find_dot( "shackle_the_unworthy", this );
+        if ( dest == action->target || ( d && d->is_ticking() ) )
+          continue;
+        src->copy( dest, DOT_COPY_CLONE );
+        if ( shadowlands_legacy.final_sentence )
+        {
+          buffs.legacy_final_sentence->trigger();
+          replenish_rune( as<unsigned int>( find_spell( 353823 )->effectN( 1 ).resource( RESOURCE_RUNE ) ),
+                          gains.legacy_final_sentence );
+        }
+        icd->start( legacy_covenant.shackle_the_unworthy->internal_cooldown() > 0_ms
+                        ? legacy_covenant.shackle_the_unworthy->internal_cooldown() : 1_s );
+        break;
+      }
+    }
+  }
+
   if ( resource_type == RESOURCE_RUNE && action )
   {
     int base_cost = as<int>( action->base_costs[ RESOURCE_RUNE ].base );
@@ -17379,6 +17434,12 @@ inline death_knight_td_t::death_knight_td_t( player_t& target, death_knight_t& p
       make_debuff( p.shadowlands_legacy.abominations_frenzy, *this, "legacy_abominations_frenzy_icd",
                    p.find_spell( 353447 ) )
           ->set_duration( p.find_spell( 353447 )->internal_cooldown() );
+  // 338523 (9.2.7 data: 6 s, 3 stacks; absent from Midnight), value = the conduit rank per stack.
+  debuff.legacy_debilitating_malady =
+      make_debuff( p.legacy_conduits.has( 123 ), *this, "debilitating_malady" )
+          ->set_duration( 6_s )
+          ->set_max_stack( 3 )
+          ->set_default_value( p.legacy_conduits.percent( 123 ) );
 
   debuff.frostreaper = make_debuff( p.talent.frost.frostreaper.ok(), *this, "frostreaper", p.spell.frostreaper_debuff )
                            ->set_refresh_duration_callback( [ & ]( const buff_t* b, timespan_t time ) {

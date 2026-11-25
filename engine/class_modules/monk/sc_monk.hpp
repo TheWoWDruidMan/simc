@@ -656,6 +656,12 @@ public:
     buff_t *legacy_bone_marrow_hops = nullptr;
     // BracketSim legacy compatibility (12 Nov 2026): Xuen's Battlegear's Pressure Point (337482).
     buff_t *legacy_xuens_pressure_point = nullptr;
+    // BracketSim legacy (25 Nov 2026 audit M2): Weapons of Order's Windwalker half - Rising Sun Kick makes Chi spenders
+    // cost 1 less Chi for 5 s (311054).
+    buff_t *legacy_weapons_of_order_ww = nullptr;
+    // BracketSim legacy (25 Nov 2026 audit M3): the faeline (327104, 30 s) - abilities used on it may reset Faeline
+    // Stomp (effect 2, 6%).
+    buff_t *legacy_faeline_stomp = nullptr;
   } buff;
 
   // BracketSim legacy compatibility: Battle for Azeroth Azerite traits. Named

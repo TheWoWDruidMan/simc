@@ -858,6 +858,7 @@ public:
     // BracketSim legacy compatibility: Shadowlands runeforge legendaries that
     // ride a covenant ability.
     buff_t* legacy_decaying_soul_satchel;
+    buff_t* legacy_decaying_soul_satchel_crit;  // 356369 effect 2, 25 Nov 2026
     buff_t* legacy_shard_of_annihilation;
     buff_t* legacy_languishing_soul_detritus;
     buff_t* legacy_decimating_bolt;  // 325299: +100% to the next 3 bolts (BracketSim legacy)

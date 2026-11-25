@@ -1142,6 +1142,8 @@ struct legacy_ascended_eruption_t final : public priest_spell_t
   {
     background = true;
     aoe = -1;
+    // 25 Nov 2026 audit #15: 9.2.7 sc_priest.cpp:902.
+    affected_by_shadow_weaving = true;
   }
 };
 
@@ -1154,11 +1156,14 @@ struct legacy_ascended_blast_t final : public priest_spell_t
     // The healing it splashed onto an ally is not modelled.
 
     // BracketSim legacy compatibility: Courageous Ascension (conduit 87).
-    // Its other half raised the Ascended Eruption by the conduit spell's own
-    // effect 2, and 337966 is not in Midnight's spell data at all - so that
-    // half is left out rather than guessed, and this ability is understated by
-    // whatever it was worth.
+    // Its other half raises Ascended Eruption by the conduit spell's effect 2
+    // per Boon stack; 337966 is not in Midnight's data, so 25 Nov 2026 (audit
+    // #13) that half reads the 9.2.7 data: a flat +1% per stack (see the Boon
+    // buff's stack callback).
     base_dd_multiplier *= 1.0 + p.legacy_conduits.percent( 87 );
+    // 25 Nov 2026 audit #15: 9.2.7 sc_priest.cpp:821-823.
+    cooldown->hasted = true;
+    affected_by_shadow_weaving = true;
   }
 
   bool ready() override
@@ -1182,6 +1187,9 @@ struct legacy_ascended_nova_t final : public priest_spell_t
   {
     parse_options( options_str );
     aoe = -1;
+    // 25 Nov 2026 audits #15 / #16: 9.2.7 sc_priest.cpp:752-768 - damage split past one target, Shadow Weaving.
+    reduced_aoe_targets = 1.0;
+    affected_by_shadow_weaving = true;
   }
 
   bool ready() override
@@ -1189,11 +1197,13 @@ struct legacy_ascended_nova_t final : public priest_spell_t
     return priest().buffs.legacy_boon_of_the_ascended->check() && priest_spell_t::ready();
   }
 
-  void execute() override
+  // 25 Nov 2026 audit #16: one Boon stack for each enemy hit, not one per cast (9.2.7 "gain 1 stack for each target
+  // damaged").
+  void impact( action_state_t* s ) override
   {
-    priest_spell_t::execute();
-    priest().buffs.legacy_boon_of_the_ascended->bump(
-        as<int>( data().effectN( 3 ).base_value() ) );
+    priest_spell_t::impact( s );
+    if ( priest().buffs.legacy_boon_of_the_ascended->check() )
+      priest().buffs.legacy_boon_of_the_ascended->bump( as<int>( data().effectN( 3 ).base_value() ) );
   }
 };
 
@@ -1231,6 +1241,7 @@ struct legacy_unholy_transfusion_t final : public priest_spell_t
   {
     background = true;
     aoe = -1;
+    affected_by_shadow_weaving = true;  // 25 Nov 2026 audit #15: 9.2.7 sc_priest.cpp:444
 
     // BracketSim legacy compatibility: Festering Transfusion (conduit 90)
     // lengthens this dot and raises its tick damage. The duration is only
@@ -1243,6 +1254,14 @@ struct legacy_unholy_transfusion_t final : public priest_spell_t
         dot_duration += conduit->effectN( 2 ).time_value();
       base_td_multiplier *= 1.0 + p.legacy_conduits.percent( 90 );
     }
+  }
+
+  // 25 Nov 2026 audit #16: each transfusion is divided by the square root of the enemies the nova hit (9.2.7
+  // sc_priest.cpp:453-462, parent_targets).
+  double parent_targets = 1.0;
+  double action_multiplier() const override
+  {
+    return priest_spell_t::action_multiplier() / std::sqrt( std::max( 1.0, parent_targets ) );
   }
 };
 
@@ -1265,6 +1284,7 @@ struct legacy_unholy_nova_t final : public priest_spell_t
     priest_spell_t::impact( s );
     // The healing half of the nova, and the ally heal its dot granted, are not
     // modelled; the Unholy Transfusion damage is.
+    debug_cast<legacy_unholy_transfusion_t*>( transfusion.get() )->parent_targets = s->n_targets;
     transfusion->execute_on_target( s->target );
 
     // BracketSim legacy compatibility: the Necrolord soulbind trait that rides
@@ -4188,7 +4208,10 @@ void priest_t::create_buffs()
             if ( background_actions.legacy_ascended_eruption )
             {
               auto e = background_actions.legacy_ascended_eruption;
-              e->base_multiplier = 1.0 + old_ * b->default_value; // 11 Nov 2026: check() is already 0 here
+              // 11 Nov 2026: check() is already 0 here. 25 Nov 2026 audit #13: Courageous Ascension adds a flat +1% per
+              // stack (337966 effect 2 in the 9.2.7 data; absent from Midnight).
+              e->base_multiplier =
+                  1.0 + old_ * ( b->default_value + ( legacy_conduits.has( 87 ) ? 0.01 : 0.0 ) );
               e->execute_on_target( target );
             }
 

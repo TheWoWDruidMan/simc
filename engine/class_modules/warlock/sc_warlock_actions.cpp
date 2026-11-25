@@ -439,7 +439,8 @@ using namespace helpers;
       {
         switch ( data().id() )
         {
-          case 686: case 29722: case 244670: case 434506: case 264178: case 198590: case 1261153:
+          // 25 Nov 2026 audit #26: Drain Soul (198590) spends at the channel's end instead (drain_soul_t::last_tick).
+          case 686: case 29722: case 244670: case 434506: case 264178: case 1261153:
             p()->buffs.legacy_decimating_bolt->decrement();
             p()->buffs.legacy_shard_of_annihilation->decrement();
             break;
@@ -968,7 +969,8 @@ using namespace helpers;
       {
         const spell_data_t* cpe = p()->find_spell( 356259 );
         const int extra = std::min( std::max( num_targets_hit - 1, 0 ), as<int>( cpe->effectN( 3 ).base_value() ) );
-        dot_damage->base_multiplier = 1.0 + cpe->effectN( 1 ).percent() + extra * cpe->effectN( 2 ).percent();
+        // 25 Nov 2026 audit #29: the game multiplies the two parts (9.2.7 sc_warlock.cpp:271-276, bugs on by default).
+        dot_damage->base_multiplier = ( 1.0 + cpe->effectN( 1 ).percent() ) * ( 1.0 + extra * cpe->effectN( 2 ).percent() );
       }
 
       // The curse the anima inflicted on landing is not modelled.
@@ -1020,8 +1022,10 @@ using namespace helpers;
       // modifier on the buff (196408 effect 3, -50% in current data) is applied here because a current-value buff
       // bypasses the spell-data modifiers.
       double value = 2.0 - 0.01 * target->health_percentage();
+      // 25 Nov 2026 audit #27: Shadowlands' Fire and Brimstone cut it to 40% (9.2.7 sc_warlock.cpp:512-514), not
+      // Midnight's -50%.
       if ( p()->talents.fire_and_brimstone.ok() )
-        value *= 1.0 + p()->talents.fire_and_brimstone->effectN( 3 ).percent();
+        value *= 0.4;
       p()->buffs.legacy_decimating_bolt->trigger( p()->buffs.legacy_decimating_bolt->max_stack(), value );
       p()->buffs.legacy_shard_of_annihilation->trigger(
           p()->buffs.legacy_shard_of_annihilation->max_stack() );
@@ -1073,6 +1077,7 @@ using namespace helpers;
       // BracketSim legacy (27 Sep 2026): Decaying Soul Satchel, one stack per target Soul Rot hit.
       if ( num_targets_hit > 0 )
         p()->buffs.legacy_decaying_soul_satchel->trigger( as<int>( num_targets_hit ) );
+        p()->buffs.legacy_decaying_soul_satchel_crit->trigger( as<int>( num_targets_hit ) );
     }
 };
 
@@ -2060,6 +2065,15 @@ using namespace helpers;
       }
     }
 
+    // BracketSim legacy (25 Nov 2026 audit #28): Corrupting Leer - "Agony and Unstable Affliction damage" (9.2.7
+    // sc_warlock_affliction.cpp:395 rolls on UA ticks too), as on Agony.
+    void tick( dot_t* d ) override
+    {
+      warlock_spell_t::tick( d );
+      if ( p()->legacy_conduits.has( 174 ) && rng().roll( p()->legacy_conduits.percent( 174 ) ) )
+        p()->get_cooldown( "summon_darkglare" )->adjust( -5.0_s );
+    }
+
     void last_tick( dot_t* d ) override
     {
       int stacks = d->current_stack();
@@ -2839,6 +2853,15 @@ using namespace helpers;
           p()->feast_of_souls_gain();
       }
       p()->buffs.nightfall->decrement();
+    }
+
+    // BracketSim legacy (25 Nov 2026 audit #26): Decimating Bolt's single stack and all 3 Shard of Annihilation stacks
+    // cover the whole Drain Soul channel and go when it ends (9.2.7 sc_warlock_affliction.cpp:715-725, 789-796).
+    void last_tick( dot_t* d ) override
+    {
+      warlock_spell_t::last_tick( d );
+      p()->buffs.legacy_decimating_bolt->decrement();
+      p()->buffs.legacy_shard_of_annihilation->decrement( 3 );
     }
 
     void tick( dot_t* d ) override
@@ -3700,8 +3723,8 @@ using namespace helpers;
       // explosion reaches 3 or more targets, else 1%.
       if ( p()->shadowlands_legacy.implosive_potential && selected_imps > 0 )
       {
-        p()->buffs.legacy_implosive_potential->expire();
-        p()->buffs.legacy_implosive_potential_small->expire();
+        // 25 Nov 2026 audit #30: new stacks add to the old ones, capped at 15, nothing expires (9.2.7
+        // sc_warlock_demonology.cpp:564-571).
         const spell_data_t* ip = p()->find_spell( 337135 );
         size_t need = ip->effectN( 1 ).base_value() > 0 ? as<size_t>( ip->effectN( 1 ).base_value() ) : 3;
         int n = as<int>( std::min( selected_imps, 15u ) );

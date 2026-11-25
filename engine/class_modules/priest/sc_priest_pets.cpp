@@ -1002,7 +1002,13 @@ struct void_tendril_mind_flay_t final : public priest_pet_spell_t
   {
     priest_pet_spell_t::tick( d );
 
-    p().o().generate_insanity( void_tendril_insanity_gain, p().o().gains.insanity_idol_of_cthun_mind_flay,
+    // BracketSim legacy (25 Nov 2026 audit #14): Eternal Call to the Void's tendril gives 3 Insanity a tick (336214
+    // effect 1; 9.2.7 sc_priest_pets.cpp:776), not Idol of C'Thun's 1. Without the talent every tendril is the
+    // legendary's.
+    double gain = void_tendril_insanity_gain;
+    if ( p().o().shadowlands_legacy.eternal_call_to_the_void && !p().o().talents.shadow.idol_of_cthun.enabled() )
+      gain = 3.0;
+    p().o().generate_insanity( gain, p().o().gains.insanity_idol_of_cthun_mind_flay,
                                d->state->action );
   }
 };

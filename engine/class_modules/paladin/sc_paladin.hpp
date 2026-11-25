@@ -201,6 +201,7 @@ public:
     buff_t* legacy_bulwark_of_righteous_fury;
     buff_t* legacy_blessing_of_summer;
     buff_t* legacy_blessing_of_autumn;
+    buff_t* legacy_blessing_of_winter;  // 328281, 25 Nov 2026
     buff_t* legacy_equinox;
 
     buff_t* divine_purpose;
@@ -895,6 +896,7 @@ public:
 
   // BracketSim legacy (24 Nov 2026): Blessing of Summer's extra Holy damage (328123), dealt on a 40% roll per hit.
   action_t* legacy_summer_proc = nullptr;
+  action_t* legacy_winter_proc = nullptr;  // 328506, 25 Nov 2026
 
   // Divine Toll survived as a modern talent, so the covenant version reuses
   // that implementation with the covenant spell's own cooldown and target cap.

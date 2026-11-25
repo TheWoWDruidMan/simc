@@ -2096,7 +2096,11 @@ public:
     // BracketSim legacy compatibility: Ravenous Frenzy gains a stack on every
     // successful cast, matching the covenant aura's Cast Successful proc flags.
     // bump(), not increment(): the stacks never refreshed the 20s window.
-    if ( !ab::background && !ab::proc && p()->buff.legacy_ravenous_frenzy->check() )
+    // 25 Nov 2026 audit D3: not from off-GCD or free casts, nor within 50 ms of Frenzy itself (9.2.7
+    // sc_druid.cpp:2020-2032).
+    if ( !ab::background && !ab::proc && p()->buff.legacy_ravenous_frenzy->check() && ab::trigger_gcd > 0_ms &&
+         !ab::use_off_gcd && !is_free() &&
+         p()->buff.legacy_ravenous_frenzy->elapsed( p()->sim->current_time() ) >= 50_ms )
       p()->buff.legacy_ravenous_frenzy->bump();
 
     if ( !has_flag( flag_e::ALLOWSTEALTH ) )
@@ -2256,6 +2260,25 @@ public:
       pers *= 1.0 + ab::get_effect_value( i );
 
     return pers;
+  }
+
+  // BracketSim legacy (25 Nov 2026 audit D4): Conflux of Elements (conduit 279) while Convoke channels - druid
+  // abilities only, not auto attacks.
+  double legacy_conflux_multiplier() const
+  {
+    if ( !p()->legacy_conduits.has( 279 ) || !p()->legacy_conflux_active || has_flag( flag_e::AUTOATTACK ) )
+      return 1.0;
+    return 1.0 + p()->legacy_conduits.percent( 279 );
+  }
+
+  double composite_da_multiplier( const action_state_t* s ) const override
+  {
+    return ab::composite_da_multiplier( s ) * legacy_conflux_multiplier();
+  }
+
+  double composite_ta_multiplier( const action_state_t* s ) const override
+  {
+    return ab::composite_ta_multiplier( s ) * legacy_conflux_multiplier();
   }
 
   size_t total_effects_count() const override
@@ -4955,6 +4978,23 @@ struct lunar_inspiration_t final : public trigger_panthers_guile_t<cp_generator_
     dot_name = "lunar_inspiration";
   }
 
+  // BracketSim legacy (25 Nov 2026 audit D1): Draught of Deep Focus +40% while at most one Lunar Inspiration is up
+  // (9.2.7 sc_druid.cpp:3730-3735).
+  double action_multiplier() const override
+  {
+    double am = base_t::action_multiplier();
+    if ( p()->shadowlands_legacy.draught_of_deep_focus )
+    {
+      int ticking = 0;
+      for ( player_t* t : sim->target_non_sleeping_list )
+        if ( dot_t* d = find_dot( t ); d && d->is_ticking() )
+          ticking++;
+      if ( ticking <= 1 )
+        am *= 1.0 + p()->find_spell( 338658 )->effectN( 1 ).percent();
+    }
+    return am;
+  }
+
   void trigger_dot( action_state_t* s ) override
   {
     // If existing moonfire duration is longer, lunar inspiration dot is not applied
@@ -5088,6 +5128,16 @@ struct rake_t final : public use_fluid_form_t<CAT_FORM, trigger_call_of_the_elde
     }
 
     dot_name = "rake";
+  }
+
+  // BracketSim legacy (25 Nov 2026 audit D1): Draught of Deep Focus also raises Rake's opening hit while at most one
+  // Rake is up (9.2.7 sc_druid.cpp:3835-3843).
+  double action_multiplier() const override
+  {
+    double am = base_t::action_multiplier();
+    if ( p()->shadowlands_legacy.draught_of_deep_focus && p()->dot_lists.rake.size() <= 1 )
+      am *= 1.0 + p()->find_spell( 338658 )->effectN( 1 ).percent();
+    return am;
   }
 
   bool has_amount_result() const override { return bleed->has_amount_result(); }
@@ -10377,7 +10427,8 @@ struct convoke_the_spirits_t final : public trigger_control_of_the_dream_t<druid
     CAST_MANGLE,
     CAST_FERAL_FRENZY,
     CAST_FEROCIOUS_BITE,
-    CAST_SHRED
+    CAST_SHRED,
+    CAST_TIGERS_FURY  // BracketSim 25 Nov 2026 (audit D2): Shadowlands' Feral table
   };
 
   struct
@@ -10398,6 +10449,7 @@ struct convoke_the_spirits_t final : public trigger_control_of_the_dream_t<druid
     // Cat Form
     action_t* conv_feral_frenzy;
     action_t* conv_ferocious_bite;
+    action_t* conv_tigers_fury = nullptr;
     action_t* conv_shred;
     action_t* conv_lunar_inspiration;
     // Heals
@@ -10501,6 +10553,7 @@ struct convoke_the_spirits_t final : public trigger_control_of_the_dream_t<druid
       case CAST_FERAL_FRENZY:   return actions.conv_feral_frenzy;
       case CAST_FEROCIOUS_BITE: return actions.conv_ferocious_bite;
       case CAST_SHRED:          return actions.conv_shred;
+      case CAST_TIGERS_FURY:    return actions.conv_tigers_fury;
       case CAST_HEAL:           return rng().roll( 0.5 ) ? actions.conv_regrowth : actions.conv_rejuvenation;
       default: return nullptr;
     }
@@ -10532,6 +10585,8 @@ struct convoke_the_spirits_t final : public trigger_control_of_the_dream_t<druid
 
     actions.conv_ferocious_bite    = get_convoke_action<ferocious_bite_t>( "ferocious_bite" );
     actions.conv_shred             = get_convoke_action<shred_t>( "shred" );
+    if ( p()->legacy_covenant.convoke_the_spirits->ok() )
+      actions.conv_tigers_fury     = get_convoke_action<tigers_fury_t>( "tigers_fury", p()->find_spell( 5217 ) );
     actions.conv_lunar_inspiration = get_convoke_action<lunar_inspiration_t>( "lunar_inspiration", p()->find_spell( 155625 ) );
     // find by id since talent is not required
     actions.conv_lunar_inspiration->s_data_reporting = p()->find_spell( 155580 );
@@ -10636,6 +10691,19 @@ struct convoke_the_spirits_t final : public trigger_control_of_the_dream_t<druid
                 { CAST_MOONFIRE, 0.5 },
                 { CAST_WRATH, 0.15 } };
 
+    // BracketSim legacy (25 Nov 2026 audit D2): the Night Fae ability keeps Shadowlands' Feral table - off-spec 50% heal
+    // / 25% Wrath / 25% Moonfire; spec Shred 0.10, Thrash 0.0588, Rake 0.22, plus Tiger's Fury 0.25 while it is down
+    // (9.2.7 sc_druid.cpp _execute_cat / _tick_cat). Midnight's talent keeps its own.
+    if ( p()->legacy_covenant.convoke_the_spirits->ok() )
+    {
+      chances = { { CAST_SHRED, 0.10 },
+                  { CAST_THRASH, 0.0588 },
+                  { CAST_RAKE,  0.22 } };
+      offspec = { { CAST_HEAL, 0.5 },
+                  { CAST_WRATH, 0.25 },
+                  { CAST_MOONFIRE, 0.25 } };
+    }
+
     cast_list.insert( cast_list.end(),
                       static_cast<size_t>( rng().range( guidance ? 2.5 : 4, guidance ? 7.5 : 9 ) ),
                       CAST_OFFSPEC );
@@ -10663,7 +10731,10 @@ struct convoke_the_spirits_t final : public trigger_control_of_the_dream_t<druid
     }
     else if ( type_ == CAST_SPEC )
     {
-      type_ = get_cast_from_dist( chances );
+      auto dist = chances;
+      if ( actions.conv_tigers_fury && !p()->buff.tigers_fury->check() )
+        dist.emplace_back( CAST_TIGERS_FURY, 0.25 );
+      type_ = get_cast_from_dist( dist );
     }
     else if ( type_ == CAST_FERAL_FRENZY )
     {
@@ -15081,12 +15152,8 @@ double druid_t::composite_spell_crit_chance() const
 double druid_t::composite_player_multiplier( school_e s ) const
 {
   double m = parse_player_effects_t::composite_player_multiplier( s );
-  // Set by Convoke's execute and cleared by its last tick (a cancelled channel included), which also invalidate the cache.
-  if ( legacy_conduits.has( 279 ) )
-  {
-    if ( legacy_conflux_active )
-      m *= 1.0 + legacy_conduits.percent( 279 );
-  }
+  // 25 Nov 2026 audit D4: no longer here - Conflux raises druid abilities only (9.2.7 parses it into Convoke's
+  // effects 3/4, which list druid spells; autos and trinkets excluded). See druid_action_t::legacy_conflux_multiplier.
   return m;
 }
 

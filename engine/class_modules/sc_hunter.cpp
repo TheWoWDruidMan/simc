@@ -7294,14 +7294,15 @@ struct tar_trap_t : public trap_base_t
 
 // Flare + Soulforge Embers (BracketSim legacy compatibility) =================================================
 // Soulforge Embers (bonus 7005): "Launching a Flare into your Tar Trap causes up to 5 enemies inside of the Tar Trap
-// to burn for (240% of Attack Power) Fire damage over 12 sec" - the burn is 331269 (Fire every 2 sec for 12 sec; 336746,
-// which Shadowlands used, has no damage effect in Midnight's data), beyond 5 targets reduced by sqrt(5/n), as
+// to burn for (240% of Attack Power) Fire damage over 12 sec" - the burn is 336746 (Fire every 2 sec for 12 sec, 0.4 AP a
+// tick = the tooltip's 240%), as Shadowlands used (9.2.7 sc_hunter.cpp:4859); 25 Nov 2026 audit #32: it was 331269
+// (0.35 AP, 210%) on a wrong note that 336746 had no damage here. Beyond 5 targets reduced by sqrt(5/n), as
 // Shadowlands SimulationCraft did. Midnight has no Flare action, so it is added here.
 struct legacy_flare_t : hunter_spell_t
 {
   struct soulforge_embers_t final : hunter_spell_t
   {
-    soulforge_embers_t( util::string_view n, hunter_t* p ) : hunter_spell_t( n, p, p->find_spell( 331269 ) )
+    soulforge_embers_t( util::string_view n, hunter_t* p ) : hunter_spell_t( n, p, p->find_spell( 336746 ) )
     {
       background = true;
       aoe = -1;
@@ -7845,6 +7846,13 @@ struct legacy_death_chakram_t : public hunter_ranged_attack_t
     energize_type           = action_energize::PER_HIT;
     energize_resource       = RESOURCE_FOCUS;
     energize_amount         = data().effectN( 4 ).base_value();
+    // 25 Nov 2026 audit #33: Necrotic Barrage sits on the shared base of the throw and its follow-ups (9.2.7
+    // sc_hunter.cpp:2934-2946), so the first throw gets it too.
+    if ( p->legacy_conduits.has( 143 ) )
+    {
+      energize_amount += 2;
+      base_multiplier *= 1.0 + p->legacy_conduits.percent( 143 );
+    }
 
     st_hit = p->get_background_action<st_hit_t>( "death_chakram_st" );
     add_child( st_hit );
@@ -8301,8 +8309,11 @@ struct wildfire_bomb_base_t : public hunter_ranged_attack_t
     if ( legacy_wildfire_cluster )
       legacy_wildfire_cluster->execute_on_target( target );
 
+    // 25 Nov 2026 audit #31: "a cluster of bombs, each exploding" - 3 executions per Wildfire Bomb (9.2.7
+    // sc_hunter.cpp:5608-5613).
     if ( legacy_sl_wildfire_cluster )
-      legacy_sl_wildfire_cluster->execute_on_target( target );
+      for ( int i = 0; i < 3; i++ )
+        legacy_sl_wildfire_cluster->execute_on_target( target );
   }
 };
 
@@ -9337,6 +9348,17 @@ void hunter_t::create_actions()
     actions.cobra_cleave = new attacks::cobra_cleave_t( this );
 }
 
+struct legacy_trick_shots_buff_t : public buff_t
+{
+  using buff_t::buff_t;
+
+  void execute( int stacks, double value, timespan_t duration ) override
+  {
+    buff_t::execute( stacks, value, duration );
+    debug_cast<hunter_t*>( player )->trigger_legacy_unblinking_vigil();
+  }
+};
+
 void hunter_t::create_buffs()
 {
   player_t::create_buffs();
@@ -9507,14 +9529,11 @@ void hunter_t::create_buffs()
     make_buff( this, "precise_shots", talents.precise_shots_buff )
       ->set_default_value( talents.precise_shots_buff->effectN( 1 ).percent() + legacy_conduits.percent( 199 ) );
 
+  // BracketSim legacy compatibility: Secrets of the Unblinking Vigil rolls on every Trick Shots trigger, refreshes
+  // included - 25 Nov 2026 audit #34 (9.2.7 sc_hunter.cpp:2337-2352 trick_shots_t::execute); a stack-change callback
+  // missed every refresh.
   buffs.trick_shots =
-    make_buff( this, "trick_shots", talents.trick_shots_buff )
-      ->set_stack_change_callback(
-        [ this ]( buff_t*, int _old, int _new ) {
-          // BracketSim legacy compatibility: Secrets of the Unblinking Vigil.
-          if ( _new > _old )
-            trigger_legacy_unblinking_vigil();
-        } );
+    make_buff<legacy_trick_shots_buff_t>( this, "trick_shots", talents.trick_shots_buff );
   
   buffs.lock_and_load =
     make_buff( this, "lock_and_load", talents.lock_and_load_buff )

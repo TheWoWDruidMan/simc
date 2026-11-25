@@ -1993,6 +1993,13 @@ struct soul_fragment_t
     }
     assert( consume_action != nullptr );
 
+    if ( is_type( soul_fragment::LESSER ) && dh->buff.legacy_blind_faith->check() )
+    {
+      dh->buff.legacy_blind_faith->trigger();
+      double fury = dh->find_spell( 356070 )->effectN( 1 ).resource( RESOURCE_FURY );
+      dh->resource_gain( RESOURCE_FURY, fury > 0 ? fury : 10.0, dh->get_gain( "legacy_blind_faith" ) );
+    }
+
     if ( instant || delay == 0_s )
     {
       consume_action->execute();
@@ -7933,6 +7940,15 @@ struct chaos_strike_base_t
       return base_t::bonus_da( s ) + legacy_thirsting_blades_da;
     }
 
+    // BracketSim legacy (25 Nov 2026 audit #37): the Chaos Theory legendary's buff 337567 effect 1, +50% Chaos Strike
+    // damage for its 8 s (9.2.7 sc_demon_hunter.cpp:3780-3786); only its refund chance (effect 2) was read before.
+    double composite_da_multiplier( const action_state_t* s ) const override
+    {
+      double m = base_t::composite_da_multiplier( s );
+      m *= 1.0 + dh()->buff.legacy_chaos_theory->check_value();
+      return m;
+    }
+
     chaos_strike_damage_t( util::string_view name, demon_hunter_t* p, const spelleffect_data_t& eff,
                            chaos_strike_base_t* a )
       : base_t( name, p, eff.trigger() ),
@@ -8806,6 +8822,12 @@ struct soul_cleave_t
           sigils_down.push_back( cd );
       }
 
+      // 25 Nov 2026 audit #41: "a random Sigil by 8 sec or Elysian Decree by 2 sec" (9.2.7
+      // sc_demon_hunter.cpp:4396-4406) - Kyrian's Decree is one of the picks, at effect 2.
+      cooldown_t* decree = dh()->legacy_covenant.elysian_decree->ok() ? dh()->get_cooldown( "elysian_decree" ) : nullptr;
+      if ( decree && decree->ongoing() )
+        sigils_down.push_back( decree );
+
       if ( !sigils_down.empty() )
       {
       // Spell 337544 carries Max Aura Level 60, and player_t::find_spell REJECTS a
@@ -8815,9 +8837,9 @@ struct soul_cleave_t
       // cooldown were all correct. dbc::find_spell is the same lookup without
       // the level gate. Only two sites in the whole engine hit this; both are
       // fixed, and both were fine at level 60 and below.
-        sigils_down[ rng().range( sigils_down.size() ) ]->adjust(
-            -timespan_t::from_seconds(
-                dbc::find_spell( dh(), 337544U )->effectN( 1 ).base_value() ), false );
+        cooldown_t* pick = sigils_down[ rng().range( sigils_down.size() ) ];
+        pick->adjust( -timespan_t::from_seconds(
+                          dbc::find_spell( dh(), 337544U )->effectN( pick == decree ? 2 : 1 ).base_value() ), false );
       }
     }
 
@@ -8879,13 +8901,25 @@ struct throw_glaive_t : public demon_hunter_attack_t
       }
     }
 
+    // BracketSim legacy compatibility: Fel Bombardment, +50% per stack to the thrown glaive's primary target (337849
+    // effect 1). 25 Nov 2026: it sat on throw_glaive_t, the cast, which deals no damage - so it had never applied.
+    double composite_da_multiplier( const action_state_t* s ) const override
+    {
+      double m = base_t::composite_da_multiplier( s );
+      if ( source == glaive_source::THROWN && s->chain_target == 0 )
+        m *= 1.0 + dh()->buff.legacy_fel_bombardment->check_stack_value();
+      return m;
+    }
+
     void impact( action_state_t* state ) override
     {
       base_t::impact( state );
 
       if ( result_is_hit( state->result ) )
       {
-        if ( dh()->spec.burning_wound_debuff->ok() )
+        // 25 Nov 2026 audit #42: the Shadowlands legendary (no talent) applies it from Demon's Bite / Demon Blades
+        // only (9.2.7 sc_demon_hunter.cpp:3985, 4042), not Throw Glaive.
+        if ( dh()->spec.burning_wound_debuff->ok() && dh()->talent.havoc.burning_wound->ok() )
         {
           dh()->active.burning_wound->execute_on_target( state->target );
         }
@@ -8994,16 +9028,6 @@ struct throw_glaive_t : public demon_hunter_attack_t
         "throw_glaive", dh()->cd_waste_cumulative );
     cd_wasted_iter =
         dh()->template get_data_entry<simple_sample_data_t, simple_data_t>( "throw_glaive", dh()->cd_waste_iter );
-  }
-
-  double composite_da_multiplier( const action_state_t* s ) const override
-  {
-    double m = demon_hunter_attack_t::composite_da_multiplier( s );
-
-    // BracketSim legacy compatibility: Fel Bombardment.
-    m *= 1.0 + dh()->buff.legacy_fel_bombardment->check_stack_value();
-
-    return m;
   }
 
   void execute() override
@@ -10510,8 +10534,7 @@ struct legacy_demonic_oath_brand_t final : public demon_hunter_spell_t
     : demon_hunter_spell_t( "fiery_brand_demonic_oath", p, p->find_spell( 207771 ) )
   {
     background = true;
-    // Effect 1 of the runeforge is the extra duration it gave the brand.
-    dot_duration += timespan_t::from_millis( p->find_spell( 355996 )->effectN( 1 ).base_value() );
+    // 25 Nov 2026 audit #40: effect 1 (+8 s) lengthens the Demon Soul buffs, not the brand (see create_buffs).
   }
 };
 
@@ -10544,11 +10567,30 @@ struct legacy_fodder_to_the_flame_t final : public demon_hunter_spell_t
     // spare body, so the explosion it died in is fired straight away.
     damage->execute_on_target( target );
 
+    // 25 Nov 2026 audit #40: killing the demon leaves an Empowered Demon soul fragment (+20% damage for 15 s when
+    // consumed; Brooding Pool lengthens it) - 9.2.7 sc_demon_hunter.cpp:3230-3234.
+    dh()->spawn_soul_fragment( dh()->get_proc( "soul_fragment_from_fodder_to_the_flame" ), soul_fragment::EMPOWERED_DEMON );
+
     // BracketSim legacy compatibility: Demonic Oath brands what the explosion
-    // catches. Only the brand's own damage over time is applied - the damage
-    // reduction on the rest of the aura is defensive.
+    // catches, up to 355996 effect 2 = 5 enemies (9.2.7 sc_demon_hunter.cpp:3236-3244). Only the brand's own damage
+    // over time is applied - the damage reduction on the rest of the aura is defensive.
     if ( brand )
+    {
+      int cap = as<int>( dh()->find_spell( 355996 )->effectN( 2 ).base_value() );
+      if ( cap <= 0 )
+        cap = 5;
       brand->execute_on_target( target );
+      int n = 1;
+      for ( player_t* t : sim->target_non_sleeping_list )
+      {
+        if ( n >= cap )
+          break;
+        if ( t == target )
+          continue;
+        brand->execute_on_target( t );
+        n++;
+      }
+    }
   }
 };
 
@@ -10780,6 +10822,9 @@ void demon_hunter_t::create_buffs()
     // Shadowlands SimC settled on is kept here rather than invented anew.
     buff.legacy_fel_bombardment =
         make_buff( this, "legacy_fel_bombardment", find_spell( 337849 ) )
+            // 25 Nov 2026 audit #38: 337849 effect 1 = +50% Throw Glaive damage per stack (read by throw_glaive_t);
+            // without a value each stack was worth nothing.
+            ->set_default_value( find_spell( 337849 )->effectN( 1 ).percent() )
             ->set_chance( shadowlands_legacy.fel_bombardment ? 0.2 : 0.0 );
     buff.legacy_spirit_of_the_darkness_flame =
         make_buff( this, "legacy_spirit_of_the_darkness_flame", find_spell( 337542 ) )
@@ -10801,6 +10846,10 @@ void demon_hunter_t::create_buffs()
         make_buff( this, "legacy_blind_faith", find_spell( 355894 ) )
             ->set_default_value( find_spell( 355893 )->effectN( 2 ).percent() )
             ->set_pct_buff_type( STAT_PCT_BUFF_VERSATILITY )
+            // 25 Nov 2026 audit #39: one stack (and 10 Fury, 356070) per Lesser Soul Fragment consumed while it lasts,
+            // up to 99; refreshes do not reset it (9.2.7 sc_demon_hunter.cpp:1040-1044, 5087-5091).
+            ->set_max_stack( 99 )
+            ->set_refresh_behavior( buff_refresh_behavior::DISABLED )
             ->set_chance( shadowlands_legacy.blind_faith ? 1.0 : 0.0 );
 
     const spell_data_t* seething_power_trigger =
@@ -10837,7 +10886,11 @@ void demon_hunter_t::create_buffs()
   // not a percent. legacy_conduits.value() is the raw table entry.
   buff.empowered_demon_soul = make_buff( this, "empowered_demon_soul", spell.demon_soul_empowered )
       ->set_duration( spell.demon_soul_empowered->duration() +
-                      timespan_t::from_millis( legacy_conduits.value( 200 ) ) );
+                      timespan_t::from_millis( legacy_conduits.value( 200 ) ) +
+                      // 25 Nov 2026 audit #40: Demonic Oath effect 1, +8 s to Demon Soul (9.2.7 apply_affecting_aura).
+                      ( shadowlands_legacy.demonic_oath ? 8_s : 0_s ) );
+  if ( shadowlands_legacy.demonic_oath )
+    buff.demon_soul->set_duration( buff.demon_soul->buff_duration() + 8_s );
   buff.immolation_aura      = make_buff<buffs::immolation_aura_buff_t>( this );
   buff.metamorphosis        = make_buff<buffs::metamorphosis_buff_t>( this );
   buff.soul_fragments       = make_buff( this, "soul_fragments", spec.soul_fragments_buff )

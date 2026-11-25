@@ -1439,6 +1439,44 @@ struct legacy_blessing_of_summer_proc_t : public spell_t
   }
 };
 
+// BracketSim legacy (25 Nov 2026): Blessing of Winter's damage. 328281 reads "Their spells and abilities deal [7% of
+// max(AP, SP)] Frost damage" (328506 effect 2 = 7). Until today Winter was cast and did nothing. Shadowlands 9.2.7
+// (sc_paladin.cpp blessing_of_winter_proc_t + the dbc callback at 3569-3595): a Frost hit of 7% of the higher of
+// attack and spell power, normal crit and modifiers, Equinox x(1 + effect 2), on any damage of the listed proc types
+// with a 0.5 s internal cooldown. Same here (the trigger is in paladin_t::init_assessors).
+struct legacy_blessing_of_winter_proc_t : public paladin_spell_t
+{
+  legacy_blessing_of_winter_proc_t( paladin_t* p ) : paladin_spell_t( "blessing_of_winter_proc", p, p->find_spell( 328506 ) )
+  {
+    background = true;
+    callbacks = false;
+    may_miss = false;
+    spell_power_mod.direct = attack_power_mod.direct = data().effectN( 2 ).percent();
+  }
+
+  double attack_direct_power_coefficient( const action_state_t* s ) const override
+  {
+    if ( s->attack_power < s->spell_power )
+      return 0;
+    return paladin_spell_t::attack_direct_power_coefficient( s );
+  }
+
+  double spell_direct_power_coefficient( const action_state_t* s ) const override
+  {
+    if ( s->spell_power <= s->attack_power )
+      return 0;
+    return paladin_spell_t::spell_direct_power_coefficient( s );
+  }
+
+  double action_multiplier() const override
+  {
+    double am = paladin_spell_t::action_multiplier();
+    if ( p()->buffs.legacy_equinox->up() )
+      am *= 1.0 + p()->find_spell( 355567 )->effectN( 2 ).percent();
+    return am;
+  }
+};
+
 // Legacy Azerite: Inner Light damage proc ==================================
 
 struct legacy_inner_light_damage_t : public paladin_spell_t
@@ -1627,10 +1665,21 @@ void judgment_t::execute()
   judgment_base_t::execute();
 
   // BracketSim legacy compatibility: The Magistrate's Judgment cheapens the
-  // next Holy Power spender.
-  if ( p()->shadowlands_legacy.the_magistrates_judgment &&
-       rng().roll( p()->find_spell( 337681 )->effectN( 1 ).percent() ) )
-    p()->buffs.legacy_the_magistrates_judgment->trigger();
+  // next Holy Power spender. 25 Nov 2026 audit #55: the chance is per spec -
+  // tooltip `$?s137029[60%]?s137028[45%][75%]`: Holy 60%, Protection 45%,
+  // Retribution 75% - with a 0.7 s internal cooldown (9.2.7 sc_paladin.cpp:1025-1043).
+  if ( p()->shadowlands_legacy.the_magistrates_judgment )
+  {
+    cooldown_t* icd = p()->get_cooldown( "legacy_magistrates_judgment_icd" );
+    double chance = p()->specialization() == PALADIN_HOLY         ? 0.60
+                    : p()->specialization() == PALADIN_PROTECTION ? 0.45
+                                                                  : 0.75;
+    if ( icd->is_ready() && rng().roll( chance ) )
+    {
+      icd->start( 700_ms );
+      p()->buffs.legacy_the_magistrates_judgment->trigger();
+    }
+  }
 
   if ( result_is_hit( execute_state->result ) )
   {
@@ -2093,6 +2142,8 @@ struct legacy_ashen_hallow_t : public paladin_spell_t
             .target( target )
             .duration( duration )
             .pulse_time( data().effectN( 1 ).period() )
+            // 25 Nov 2026 audit #56: the pulse is spell-hasted (9.2.7 sc_paladin.cpp:1316-1317).
+            .hasted( ground_aoe_params_t::hasted_with::SPELL_HASTE )
             .action( damage_tick ) );
   }
 };
@@ -2102,10 +2153,10 @@ struct legacy_ashen_hallow_t : public paladin_spell_t
 // so the damage blessing comes up once every four casts rather than on demand -
 // that cycling is the whole character of the ability and is modelled directly.
 //
-// Winter and Spring are cast and do nothing: Winter restores mana and Spring
-// increases healing received, neither of which is damage. They are still cycled
-// through, because skipping them would let Summer come up four times as often
-// and quietly turn a mediocre covenant into a strong one.
+// Spring is cast and does nothing for damage (it increases healing received).
+// Winter (25 Nov 2026) adds a Frost hit to the paladin's damage for 30 s - see
+// legacy_blessing_of_winter_proc_t. All four are cycled through, because skipping
+// any would let Summer come up more often than the game allows.
 // BracketSim legacy compatibility: Virtuous Command's extra Holy damage. Its
 // amount is a share of whatever hit triggered it, so it carries no coefficient
 // of its own - base_dd is set at the trigger site.
@@ -2165,8 +2216,11 @@ struct legacy_blessing_of_the_seasons_t : public paladin_spell_t
       case 1:
         p()->buffs.legacy_blessing_of_autumn->trigger();
         break;
+      case 2:
+        p()->buffs.legacy_blessing_of_winter->trigger();
+        break;
       default:
-        // Winter and Spring: cast, cycled past, no damage effect.
+        // Spring: cast, cycled past, no damage effect.
         break;
     }
     p()->legacy_next_season = ( p()->legacy_next_season + 1 ) % 4;
@@ -4191,6 +4245,31 @@ void paladin_t::init_assessors()
     } );
   }
 
+  // BracketSim legacy (25 Nov 2026): Blessing of Winter, ported from Shadowlands 9.2.7, where it was a proc callback
+  // on 328281 (100% chance, its proc flags, 0.5 s internal cooldown) - so only actions that fire callbacks trigger it.
+  if ( legacy_winter_proc )
+  {
+    const spell_data_t* winter = legacy_covenant.blessing_of_winter;
+    cooldown_t* icd = get_cooldown( "legacy_blessing_of_winter_icd" );
+    timespan_t icd_len = winter->internal_cooldown() > 0_ms ? winter->internal_cooldown() : 500_ms;
+    assessor_out_damage.add( assessor::CALLBACKS, [ this, winter, icd, icd_len ]( result_amount_type, action_state_t* s ) {
+      if ( !buffs.legacy_blessing_of_winter->up() || s->action == legacy_winter_proc || s->result_total <= 0.0 )
+        return assessor::CONTINUE;
+      if ( !s->action->callbacks || !icd->is_ready() )
+        return assessor::CONTINUE;
+      if ( !( winter->proc_flags() & ( UINT64_C( 1 ) << s->proc_type() ) ) )
+        return assessor::CONTINUE;
+      icd->start( icd_len );
+      action_t* proc = legacy_winter_proc;
+      player_t* t = s->target;
+      make_event( *sim, [ proc, t ] {
+        proc->set_target( t );
+        proc->execute();
+      } );
+      return assessor::CONTINUE;
+    } );
+  }
+
   if ( talents.execution_sentence->ok() )
   {
     auto assessor_fn = [this]( result_amount_type /* rt */, action_state_t *s )
@@ -4299,6 +4378,13 @@ void paladin_t::create_buffs()
 
   if ( legacy_covenant.blessing_of_summer->ok() )
     legacy_summer_proc = new legacy_blessing_of_summer_proc_t( this );
+  if ( legacy_covenant.blessing_of_winter->ok() )
+    legacy_winter_proc = new legacy_blessing_of_winter_proc_t( this );
+
+  buffs.legacy_blessing_of_winter =
+      make_buff( this, "blessing_of_winter", legacy_covenant.blessing_of_winter )
+          ->set_cooldown( 0_ms )  // the cooldown is the ability's, not the buff's
+          ->set_chance( legacy_covenant.blessing_of_winter->ok() ? 1.0 : 0.0 );
 
   buffs.legacy_virtuous_command =
       make_buff( this, "virtuous_command", find_spell( 339664 ) )

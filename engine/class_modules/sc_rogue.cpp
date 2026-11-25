@@ -150,6 +150,8 @@ class rogue_td_t : public actor_target_data_t
   std::vector<buff_t*> poison_debuffs;
 
 public:
+  unsigned legacy_akaari_gen = 0;  // BracketSim 25 Nov 2026 (audit #51): latest Akaari's Soul Fragment refresh
+
   struct dots_t
   {
     dot_t* deadly_poison;
@@ -499,6 +501,7 @@ public:
 
     // BracketSim legacy compatibility: second wave of Shadowlands runeforges.
     buff_t* legacy_deathly_shadows;
+    std::vector<buff_t*> legacy_echoing_reprimand;  // 2/3/4/5 CP, 25 Nov 2026 (audit #48)
     buff_t* legacy_finality_eviscerate;
     buff_t* legacy_finality_rupture;
     buff_t* legacy_finality_black_powder;
@@ -1448,10 +1451,25 @@ public:
     return resources.current[ RESOURCE_COMBO_POINT ];
   }
 
+  // 25 Nov 2026: independent of Midnight's Supercharger talent (its own slots come from its own triggers); gating on
+  // the talent left every Shadowlands charge unspent on a rogue who takes it (60 Outlaw).
+  buff_t* legacy_echoing_reprimand_matches( double cp ) const
+  {
+    for ( buff_t* b : buffs.legacy_echoing_reprimand )
+      if ( b->check() && b->check_value() == cp )
+        return b;
+    return nullptr;
+  }
+
   // Current number of effective combo points, considering Supercharger and Escalating Blade
   double current_effective_cp( bool use_supercharger = true, bool react = false ) const
   {
     double current_cp = std::min( this->current_cp( react ), consume_cp_max() );
+
+    // BracketSim legacy (25 Nov 2026 audit #48): an Echoing Reprimand buff for exactly these points makes them 7.
+    if ( use_supercharger && current_cp > 0 && legacy_echoing_reprimand_matches( current_cp ) )
+      return legacy_covenant.echoing_reprimand->effectN( 2 ).base_value() > 0
+                 ? legacy_covenant.echoing_reprimand->effectN( 2 ).base_value() : 7.0;
 
     if ( use_supercharger && current_cp > 0 )
     {
@@ -2268,6 +2286,13 @@ public:
       }
     }
 
+    // BracketSim legacy (25 Nov 2026 audit #48): Shadowlands' Echoing Reprimand.
+    if ( consumes_supercharger() && consume_cp > 0 && p()->legacy_echoing_reprimand_matches( consume_cp ) )
+    {
+      double er = p()->legacy_covenant.echoing_reprimand->effectN( 2 ).base_value();
+      effective_cp = as<int>( er > 0 ? er : 7.0 );
+    }
+
     auto rs = cast_state( state );
     rs->set_combo_points( consume_cp, effective_cp );
     rs->clear_exsanguinated();
@@ -2594,11 +2619,29 @@ public:
     return 1.0;
   }
 
+  // BracketSim legacy (25 Nov 2026 audit #53, the author "fix everything"): Deeper Daggers' buff 341550 affects Shadow
+  // Blades (121471 / 121474), Gloomblade (200758) and Flagellation (323654 / 345316) only - 9.2.7 sc_rogue.cpp:1305.
+  // It was every Shadow-school hit, which Midnight made nearly all of Subtlety's damage.
+  double legacy_deeper_daggers_multiplier() const
+  {
+    if ( !p()->buffs.legacy_deeper_daggers->check() )
+      return 1.0;
+    switch ( ab::data().id() )
+    {
+      case 121471: case 121474: case 200758: case 323654: case 345316:
+        return 1.0 + p()->buffs.legacy_deeper_daggers->check_value();
+      default:
+        return ab::data().id() == p()->talent.subtlety.gloomblade->id() && ab::data().id() != 0
+                   ? 1.0 + p()->buffs.legacy_deeper_daggers->check_value() : 1.0;
+    }
+  }
+
   double composite_da_multiplier( const action_state_t* state ) const override
   {
     double m = ab::composite_da_multiplier( state );
 
     m *= combo_point_da_multiplier( state );
+    m *= legacy_deeper_daggers_multiplier();
 
     // Registered Damage Buffs
     for ( auto damage_buff : direct_damage_buffs )
@@ -2742,6 +2785,7 @@ public:
   double composite_ta_multiplier( const action_state_t* state ) const override
   {
     double m = ab::composite_ta_multiplier( state );
+    m *= legacy_deeper_daggers_multiplier();
 
     // Registered Damage Buffs
     for ( auto damage_buff : periodic_damage_buffs )
@@ -3126,6 +3170,20 @@ struct rogue_spell_t : public rogue_action_t<spell_t>
   {}
 };
 
+// BracketSim legacy (25 Nov 2026 audit #45): Dashing Scoundrel works on Envenom effect 3's spell list in the 9.2.7
+// data - Deadly (2818 / 2823 / 113780), Wound (8679 / 8680), Envenom (32645), Poison Bomb (255546), Slaughter (323660);
+// not Instant Poison.
+static bool legacy_dashing_scoundrel_spell( unsigned id )
+{
+  switch ( id )
+  {
+    case 2818: case 2823: case 113780: case 8679: case 8680: case 32645: case 255546: case 323660:
+      return true;
+    default:
+      return false;
+  }
+}
+
 struct rogue_attack_t : public rogue_action_t<melee_attack_t>
 {
   rogue_attack_t( util::string_view n, rogue_t* p,
@@ -3152,6 +3210,7 @@ struct rogue_attack_t : public rogue_action_t<melee_attack_t>
     trigger_deathstalkers_mark( state );
     trigger_cold_blood( state );
     trigger_goremaws_bite( state );
+    trigger_legacy_dashing_scoundrel( state );
   }
 
   void tick( dot_t* d ) override
@@ -3161,6 +3220,26 @@ struct rogue_attack_t : public rogue_action_t<melee_attack_t>
     trigger_shadow_blades_attack( d->state );
     trigger_caustic_spatter( d->state );
     trigger_cloud_cover( d->state );
+    trigger_legacy_dashing_scoundrel( d->state );
+  }
+
+  // BracketSim legacy (25 Nov 2026 audit #45): Dashing Scoundrel - while Envenom is up, critical impacts AND ticks of
+  // the listed spells give 1 Energy (340426; 9.2.7 sc_rogue.cpp:1984-1993), and those spells get +15% crit chance
+  // (340081 effect 1). It was poison impacts only, Instant Poison included.
+  void trigger_legacy_dashing_scoundrel( const action_state_t* state )
+  {
+    if ( p()->legendary.dashing_scoundrel && state->result == RESULT_CRIT && p()->buffs.envenom->check() &&
+         legacy_dashing_scoundrel_spell( data().id() ) )
+      p()->resource_gain( RESOURCE_ENERGY, p()->find_spell( 340426 )->effectN( 1 ).resource( RESOURCE_ENERGY ),
+                          p()->gains.dashing_scoundrel, this );
+  }
+
+  double composite_crit_chance() const override
+  {
+    double c = base_t::composite_crit_chance();
+    if ( p()->legendary.dashing_scoundrel && p()->buffs.envenom->check() && legacy_dashing_scoundrel_spell( data().id() ) )
+      c += p()->find_spell( 340081 )->effectN( 1 ).percent();
+    return c;
   }
 };
 
@@ -3252,8 +3331,16 @@ struct rogue_poison_t : public rogue_attack_t
     // is the direct-damage half only, which is exactly the half the conduit
     // names. Shadowlands did it with apply_affecting_conduit and a spell family
     // mask; spell 341539 is not in Midnight, so the rank value is applied here.
-    if ( is_lethal )
-      base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 240 );
+    // 25 Nov 2026 audit #52: 341539's affected spells (9.2.7 data) - Deadly (2818 / 2823 / 113780), Wound (8679 /
+    // 8680) and Slaughter (323660); Instant Poison is not on it.
+    switch ( data().id() )
+    {
+      case 2818: case 2823: case 113780: case 8679: case 8680: case 323660:
+        base_dd_multiplier *= 1.0 + p->legacy_conduits.percent( 240 );
+        break;
+      default:
+        break;
+    }
   }
 
   timespan_t execute_time() const override
@@ -3338,20 +3425,7 @@ struct rogue_poison_t : public rogue_attack_t
         p()->buffs.kingsbane->trigger();
     }
 
-    // BracketSim legacy (11 Nov 2026): Dashing Scoundrel - "...and their critical strikes generate 1 Energy" (340426).
-    if ( p()->legendary.dashing_scoundrel && state->result == RESULT_CRIT && p()->buffs.envenom->check() )
-      p()->resource_gain( RESOURCE_ENERGY, p()->find_spell( 340426 )->effectN( 1 ).resource( RESOURCE_ENERGY ),
-                          p()->gains.dashing_scoundrel, this );
-  }
-
-  // BracketSim legacy (11 Nov 2026): Dashing Scoundrel - "Envenom also increases the critical strike chance of your
-  // poisons by 15%" (340081 effect 1). The buff it triggered was never read, so the legendary did nothing.
-  double composite_crit_chance() const override
-  {
-    double c = rogue_attack_t::composite_crit_chance();
-    if ( p()->legendary.dashing_scoundrel && p()->buffs.envenom->check() )
-      c += p()->find_spell( 340081 )->effectN( 1 ).percent();
-    return c;
+    // BracketSim legacy: Dashing Scoundrel's Energy and crit now live in rogue_attack_t (25 Nov 2026 audit #45).
   }
 };
 
@@ -4774,6 +4848,26 @@ struct envenom_t : public rogue_attack_t
 
     add_child( p->active.poison_bomb );
   }
+
+  // BracketSim legacy (25 Nov 2026 audit #44): Doomblade effect 2 - Envenom +5% for each bleed on the target (9.2.7
+  // sc_rogue.cpp:2862-2876: Garrote, Rupture, Crimson Tempest, Internal Bleeding, Mutilated Flesh, Serrated Bone Spike).
+  double composite_target_multiplier( player_t* t ) const override
+  {
+    double m = rogue_attack_t::composite_target_multiplier( t );
+    if ( p()->legendary.doomblade )
+    {
+      rogue_td_t* tdata = td( t );
+      int n = tdata->dots.garrote->is_ticking() + tdata->dots.rupture->is_ticking() +
+              tdata->dots.internal_bleeding->is_ticking() + tdata->dots.mutilated_flesh->is_ticking();
+      if ( dot_t* d = t->find_dot( "crimson_tempest", player ) )
+        n += d->is_ticking();
+      if ( dot_t* d = t->find_dot( "serrated_bone_spike_dot", player ) )
+        n += d->is_ticking();
+      double per = p()->find_spell( 340082 )->effectN( 2 ).percent();
+      m *= 1.0 + ( per > 0 ? per : 0.05 ) * n;
+    }
+    return m;
+  }
   
   double composite_da_multiplier( const action_state_t* state ) const override
   {
@@ -6143,8 +6237,12 @@ static void legacy_trigger_akaari( rogue_t* p, const action_state_t* state )
   timespan_t delay = p->find_spell( 341111 )->duration();
   if ( delay <= 0_ms )
     delay = 2_s;
-  make_event( *p->sim, delay, [ p, target ] {
-    if ( !target->is_sleeping() )
+  // 25 Nov 2026 audit #51: 341111 is one debuff that refreshes, so strikes inside its 2 s merge into one echo, 2 s
+  // after the last (9.2.7 sc_rogue.cpp:6767-6775). Only the latest scheduled echo fires.
+  rogue_td_t* tdata = p->get_target_data( target );
+  const unsigned gen = ++tdata->legacy_akaari_gen;
+  make_event( *p->sim, delay, [ p, target, tdata, gen ] {
+    if ( tdata->legacy_akaari_gen == gen && !target->is_sleeping() )
       p->active.legacy_akaaris_shadowstrike->execute_on_target( target );
   } );
 }
@@ -6847,6 +6945,30 @@ struct shuriken_toss_t : public rogue_attack_t
 
 struct sinister_strike_t : public rogue_attack_t
 {
+  // BracketSim legacy (25 Nov 2026 audit #47): Triple Threat's off-hand strike (341541), which then fires the main-hand
+  // extra attack (9.2.7 triple_threat_t).
+  struct legacy_triple_threat_oh_t : public rogue_attack_t
+  {
+    rogue_attack_t* mh = nullptr;
+
+    legacy_triple_threat_oh_t( util::string_view name, rogue_t* p ) : rogue_attack_t( name, p, p->find_spell( 341541 ) )
+    {
+    }
+
+    void execute() override
+    {
+      rogue_attack_t::execute();
+      if ( mh )
+        mh->trigger_secondary_action( execute_state->target );
+    }
+
+    bool procs_main_gauche() const override
+    { return true; }
+
+    bool procs_blade_flurry() const override
+    { return true; }
+  };
+
   struct sinister_strike_extra_attack_t : public rogue_attack_t
   {
     // BracketSim legacy compatibility: the conduit Triple Threat (241). The
@@ -6857,6 +6979,7 @@ struct sinister_strike_t : public rogue_attack_t
     // the follow-up is scheduled 300ms later.
     bool legacy_is_triple_threat = false;
     sinister_strike_extra_attack_t* legacy_triple_threat = nullptr;
+    rogue_attack_t* legacy_triple_threat_oh = nullptr;  // 25 Nov 2026 audit #47
 
     sinister_strike_extra_attack_t( util::string_view name, rogue_t* p ) :
       rogue_attack_t( name, p, p->spec.sinister_strike_extra_attack )
@@ -6891,11 +7014,13 @@ struct sinister_strike_t : public rogue_attack_t
 
       p()->buffs.snake_eyes->decrement();
 
-      if ( !legacy_is_triple_threat && legacy_triple_threat &&
+      // 25 Nov 2026 audit #47: the roll fires an off-hand strike (341541) 300 ms later, which fires a main-hand
+      // extra attack that gives no combo point (9.2.7 sc_rogue.cpp:4179-4226).
+      if ( !legacy_is_triple_threat && legacy_triple_threat_oh &&
            secondary_trigger_type == secondary_trigger::SINISTER_STRIKE &&
            p()->rng().roll( p()->legacy_conduits.percent( 241 ) ) )
       {
-        legacy_triple_threat->trigger_secondary_action( execute_state->target, 300_ms );
+        legacy_triple_threat_oh->trigger_secondary_action( execute_state->target, 300_ms );
       }
     }
 
@@ -6911,7 +7036,8 @@ struct sinister_strike_t : public rogue_attack_t
     double composite_energize_amount( const action_state_t* ) const override
     {
       // CP generation is not in the spell data and the extra SS procs seem script-driven
-      return ( secondary_trigger_type == secondary_trigger::SINISTER_STRIKE ) ? 1 : 0;
+      // Triple Threat's main-hand strike gives none (9.2.7).
+      return ( secondary_trigger_type == secondary_trigger::SINISTER_STRIKE && !legacy_is_triple_threat ) ? 1 : 0;
     }
 
     void impact( action_state_t* state ) override
@@ -6942,6 +7068,10 @@ struct sinister_strike_t : public rogue_attack_t
         secondary_trigger::SINISTER_STRIKE, "legacy_triple_threat" );
       tt->legacy_is_triple_threat = true;
       extra_attack->legacy_triple_threat = tt;
+      auto oh = p->get_secondary_trigger_action<legacy_triple_threat_oh_t>(
+        secondary_trigger::SINISTER_STRIKE, "legacy_triple_threat_oh" );
+      oh->mh = tt;
+      extra_attack->legacy_triple_threat_oh = oh;
     }
   }
 
@@ -6969,6 +7099,8 @@ struct sinister_strike_t : public rogue_attack_t
       add_child( extra_attack );
       if ( extra_attack->legacy_triple_threat )
         add_child( extra_attack->legacy_triple_threat );
+      if ( extra_attack->legacy_triple_threat_oh )
+        add_child( extra_attack->legacy_triple_threat_oh );
       add_child( p()->active.echoing_reprimand );
     }
   }
@@ -7268,10 +7400,21 @@ struct legacy_echoing_reprimand_t : public rogue_attack_t
     player->legacy_soulbinds.covenant_ability_cast( player, legacy_soulbind::COVENANT_KYRIAN,
                                             cooldown );
 
-    // BracketSim legacy compatibility: the Animacharged combo point. Midnight
-    // ships this mechanism as Supercharger, so the legacy ability charges those
-    // buffs rather than a parallel set of its own.
-    p()->trigger_legacy_animacharge( charges );
+    // BracketSim legacy (25 Nov 2026 audit #48): the Animacharged combo point, as Shadowlands - every buff goes, then
+    // one random 2 / 3 / 4 CP buff (all four with Resounding Clarity) for 45 s (9.2.7 sc_rogue.cpp:4678-4691). It used
+    // to charge Midnight's Supercharger slots (+2 CP on any finisher, never cleared, no time limit).
+    for ( buff_t* b : p()->buffs.legacy_echoing_reprimand )
+      b->expire();
+    if ( p()->legendary.resounding_clarity )
+    {
+      for ( buff_t* b : p()->buffs.legacy_echoing_reprimand )
+        b->trigger();
+    }
+    else
+    {
+      p()->buffs.legacy_echoing_reprimand[ static_cast<unsigned>( rng().range( 0, 3 ) ) ]->trigger();
+    }
+    (void) charges;
   }
 };
 
@@ -7416,9 +7559,10 @@ struct legacy_serrated_bone_spike_t : public rogue_attack_t
   {
     add_child( bleed );
     // The spell carries no cooldown of its own any more, so effect 4 - the
-    // recharge time - is used instead. The three charges it had in Shadowlands
-    // are not in current data, so it is modelled with one.
+    // recharge time - is used instead. 25 Nov 2026 audit #49: 3 charges, as in
+    // both the 9.2.7 and the Midnight data for 328547.
     cooldown->duration = timespan_t::from_seconds( data().effectN( 4 ).base_value() );
+    cooldown->charges = 3;
 
     // BracketSim legacy compatibility: Deathspike's own effects add the charges
     // and the extra target.
@@ -7428,15 +7572,26 @@ struct legacy_serrated_bone_spike_t : public rogue_attack_t
       cooldown->charges += as<int>( rune->effectN( 1 ).base_value() );
       aoe = 1 + as<int>( rune->effectN( 2 ).base_value() );
     }
-    energize_type = action_energize::ON_HIT;
-    energize_resource = RESOURCE_COMBO_POINT;
-    energize_amount = p->find_spell( 328548 )->effectN( 1 ).base_value();
+    // 25 Nov 2026 audit #49: "1 combo point plus 1 additional per active bone spike" - granted in impact below.
+    energize_type = action_energize::NONE;
   }
 
   void impact( action_state_t* state ) override
   {
     rogue_attack_t::impact( state );
     bleed->execute_on_target( state->target );
+
+    // 9.2.7 sc_rogue.cpp:4944-4969 (bugs off): the primary target's hit gives 1 + every spike now ticking, this one
+    // included.
+    if ( state->chain_target == 0 && result_is_hit( state->result ) )
+    {
+      int spikes = 0;
+      for ( player_t* t : sim->target_non_sleeping_list )
+        if ( dot_t* d = t->find_dot( "serrated_bone_spike_dot", p() ) )
+          spikes += d->is_ticking();
+      int base = as<int>( p()->find_spell( 328548 )->effectN( 1 ).base_value() );
+      trigger_combo_point_gain( ( base > 0 ? base : 1 ) + spikes, p()->get_gain( "serrated_bone_spike" ) );
+    }
   }
 
   void execute() override
@@ -9178,6 +9333,17 @@ struct roll_the_bones_t : public buff_t
 
   void execute( int stacks, double value, timespan_t duration ) override
   {
+    // BracketSim legacy (25 Nov 2026 audit #54): Count the Odds - a buff with more time left than the current roll is
+    // kept through the new roll (9.2.7 sc_rogue.cpp:5770-5805 count_the_odds_states).
+    std::vector<std::pair<buff_t*, timespan_t>> keep;
+    if ( rogue->legacy_conduits.has( 244 ) )
+    {
+      const timespan_t old_remains = remains();
+      for ( buff_t* b : buffs )
+        if ( b->check() && b->remains() > old_remains )
+          keep.emplace_back( b, b->remains() );
+    }
+
     buff_t::execute( stacks, value, duration );
 
     const timespan_t roll_duration = remains();
@@ -9185,6 +9351,10 @@ struct roll_the_bones_t : public buff_t
     expire_secondary_buffs();
 
     const unsigned buffs_rolled = roll_the_bones( roll_duration );
+
+    for ( auto& k : keep )
+      if ( !k.first->check() )
+        k.first->trigger( k.second );
 
     procs[ buffs_rolled - 1 ]->occur();
     rogue->buffs.loaded_dice->expire();
@@ -10580,6 +10750,17 @@ void actions::rogue_action_t<Base>::consume_supercharger( const action_state_t* 
 
   const auto rs = cast_state( state );
 
+  // BracketSim legacy (25 Nov 2026 audit #48): spend the matching Shadowlands Echoing Reprimand buff.
+  if ( buff_t* er = p()->legacy_echoing_reprimand_matches( rs->get_combo_points( true ) ) )
+  {
+    if ( rs->get_combo_points() > rs->get_combo_points( true ) )
+    {
+      er->expire();
+      supercharged_cp_proc->occur();
+      return;
+    }
+  }
+
   if ( rs->get_combo_points() > rs->get_combo_points( true ) )
   {
     // Consume from the end of the list
@@ -10732,6 +10913,32 @@ rogue_td_t::rogue_td_t( player_t* target, rogue_t* source ) :
                      debuffs.wound_poison, debuffs.amplifying_poison };
 
   // Callbacks ================================================================
+
+  // BracketSim legacy (25 Nov 2026 audit #50): a target that dies with Sepsis on it refunds 30 s of the cooldown
+  // (328305 effect 3) and grants Toxic Onslaught (9.2.7 sc_rogue.cpp:6819-6827).
+  if ( source->legacy_covenant.sepsis->ok() )
+  {
+    target->register_on_demise_callback( source, [ source ]( player_t* t ) {
+      if ( source->sim->event_mgr.canceled )
+        return;
+      dot_t* d = t->find_dot( "sepsis", source );
+      if ( !d || !d->is_ticking() )
+        return;
+      double sec = source->legacy_covenant.sepsis->effectN( 3 ).base_value();
+      source->get_cooldown( "sepsis" )->adjust( -timespan_t::from_seconds( sec > 0 ? sec : 30.0 ) );
+      if ( source->legendary.toxic_onslaught )
+      {
+        timespan_t dur = timespan_t::from_millis( source->find_spell( 354473 )->effectN( 1 ).base_value() );
+        if ( dur <= 0_ms )
+          dur = 10_s;
+        auto spec = source->specialization();
+        if ( spec == ROGUE_ASSASSINATION || spec == ROGUE_SUBTLETY )
+          source->buffs.adrenaline_rush->extend_duration_or_trigger( dur );
+        if ( spec == ROGUE_ASSASSINATION || spec == ROGUE_OUTLAW )
+          source->buffs.shadow_blades->extend_duration_or_trigger( dur );
+      }
+    } );
+  }
 
   // Venomous Wounds Energy Refund
   if ( source->talent.assassination.venomous_wounds->ok() )
@@ -10913,11 +11120,8 @@ double rogue_t::composite_player_multiplier( school_e school ) const
     m *= 1.0 + find_spell( 340087 )->effectN( 1 ).percent();
   }
 
-  // BracketSim legacy compatibility: Deeper Daggers conduit (audit 3 C1).
-  if ( dbc::is_school( school, SCHOOL_SHADOW ) && buffs.legacy_deeper_daggers->check() )
-  {
-    m *= 1.0 + buffs.legacy_deeper_daggers->check_value();
-  }
+  // BracketSim legacy compatibility: Deeper Daggers conduit - 25 Nov 2026 audit #53: no longer all Shadow damage; see
+  // rogue_action_t::legacy_deeper_daggers_multiplier.
 
   return m;
 }
@@ -12770,9 +12974,25 @@ void rogue_t::create_buffs()
   buffs.vanish = new buffs::vanish_t( this );
 
   // BracketSim legacy compatibility: second wave of Shadowlands runeforges.
+  // 25 Nov 2026 audit #46: 350964 (20%, 15 s) is Subtlety's; Assassination and Outlaw get 341202 (15%, 12 s) -
+  // 9.2.7 sc_rogue.cpp:8802-8807.
   buffs.legacy_deathly_shadows =
-      make_buff<damage_buff_t>( this, "legacy_deathly_shadows", find_spell( 350964 ) );
+      make_buff<damage_buff_t>( this, "legacy_deathly_shadows",
+                                find_spell( specialization() == ROGUE_SUBTLETY ? 350964 : 341202 ) );
   buffs.legacy_deathly_shadows->set_chance( legendary.deathly_shadows ? 1.0 : 0.0 );
+
+  // 25 Nov 2026 audit #48: Shadowlands' Echoing Reprimand - one 45 s buff per combo point count (2, 3, 4, 5); a
+  // finisher spending exactly that many counts as 7 (9.2.7 sc_rogue.cpp:838-850, 8740-8757).
+  buffs.legacy_echoing_reprimand.clear();
+  {
+    const std::array<std::pair<unsigned, int>, 4> er = { { { 323558, 2 }, { 323559, 3 }, { 323560, 4 }, { 354838, 5 } } };
+    for ( const auto& e : er )
+      buffs.legacy_echoing_reprimand.push_back(
+          make_buff( this, fmt::format( "echoing_reprimand_{}", e.second ),
+                     legacy_covenant.echoing_reprimand->ok() ? find_spell( e.first ) : spell_data_t::not_found() )
+              ->set_max_stack( 1 )
+              ->set_default_value( e.second ) );
+  }
   buffs.legacy_finality_eviscerate =
       make_buff<damage_buff_t>( this, "legacy_finality_eviscerate", find_spell( 340600 ) );
   buffs.legacy_finality_eviscerate->set_chance( legendary.finality ? 1.0 : 0.0 );

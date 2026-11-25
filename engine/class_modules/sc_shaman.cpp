@@ -839,6 +839,7 @@ enum class spell_variant : unsigned
   RIDE_THE_LIGHTNING,
   PURGING_FLAMES,
   VOLTAIC_BLAZE,
+  LEGACY_PRIMORDIAL_WAVE,  // BracketSim 25 Nov 2026: the Necrolord wave's Lava Burst / Lightning Bolt echo
   MAX
 };
 
@@ -855,7 +856,8 @@ _variant_suffix {
   "_ps",
   "_rtl",
   "_pf",
-  ""
+  "",
+  "_pw"
 };
 
 static constexpr std::array<util::string_view, static_cast<unsigned>( spell_variant::MAX )>
@@ -871,7 +873,8 @@ _variant_str {
   "primordial_storm",
   "ride_the_lightning",
   "purging_flames",
-  "voltaic_blaze"
+  "voltaic_blaze",
+  "primordial_wave"
 };
 
 enum class strike_variant : unsigned
@@ -1291,6 +1294,8 @@ public:
     action_t* legacy_raging_vesper_vortex = nullptr;
     action_t* elemental_blast;
     action_t* lava_burst_pf;
+    action_t* legacy_lava_burst_pw = nullptr;     // 25 Nov 2026, audit #8
+    action_t* legacy_lightning_bolt_pw = nullptr; // 25 Nov 2026, audit #8
 
     action_t* lightning_rod;
 
@@ -1412,6 +1417,7 @@ public:
     buff_t* legacy_vesper_totem;
     // BracketSim legacy compatibility: Splintered Elements.
     buff_t* legacy_splintered_elements;
+    buff_t* legacy_primordial_wave;  // 327164, 25 Nov 2026
     // BracketSim legacy: Seeds of Rampant Growth's crit buff (358945, 15 s, 10 stacks).
     buff_t* legacy_seeds_of_rampant_growth = nullptr;
 
@@ -7066,9 +7072,9 @@ struct legacy_chain_harvest_damage_t : public shaman_spell_t
     if ( s->result == RESULT_CRIT )
       crits++;
 
-    // BracketSim legacy compatibility: Elemental Conduit. A critical harvest
-    // leaves Flame Shock on what it hit.
-    if ( p()->shadowlands_legacy.elemental_conduit && s->result == RESULT_CRIT &&
+    // BracketSim legacy compatibility: Elemental Conduit. 25 Nov 2026 audit #9: every enemy Chain Harvest damages
+    // (up to 5, the harvest's own cap) gets Flame Shock - not only crits (356250 text; 9.2.7 sc_shaman.cpp:7455).
+    if ( p()->shadowlands_legacy.elemental_conduit && result_is_hit( s->result ) &&
          p()->action.flame_shock )
       p()->action.flame_shock->execute_on_target( s->target );
   }
@@ -7148,14 +7154,11 @@ struct legacy_primordial_wave_t : public shaman_spell_t
                                             cooldown );
     damage->execute_on_target( target );
 
-    // The wave applies Flame Shock to the struck enemy. The Lava Burst and
-    // Lightning Bolt echoes it granted are not modelled.
+    // The wave applies Flame Shock to the struck enemy and grants the echo buff (327164); the echo itself and
+    // Splintered Elements fire on the next Lava Burst / Lightning Bolt (legacy_trigger_primordial_wave_echo).
     if ( p()->action.flame_shock )
       p()->action.flame_shock->execute_on_target( target );
-
-    // BracketSim legacy compatibility: Splintered Elements. One stack per Flame
-    // Shock the wave spreads, which on a single target is one.
-    p()->buff.legacy_splintered_elements->trigger();
+    p()->buff.legacy_primordial_wave->trigger();
 
     // BracketSim legacy compatibility: the conduit Tumbling Waves (147) can
     // reset Primordial Wave outright. Note the divide by a THOUSAND, not a
@@ -7939,6 +7942,8 @@ struct fire_nova_t : public shaman_spell_t
 /**
  * As of 8.1 Lava Burst checks its state on impact. Lava Burst -> Flame Shock now forces the critical strike
  */
+void legacy_trigger_primordial_wave_echo( shaman_t* p, action_t* echo );
+
 struct lava_burst_t : public shaman_spell_t
 {
   unsigned impact_flags;
@@ -8163,6 +8168,9 @@ struct lava_burst_t : public shaman_spell_t
       p()->summon_ancestor();
     }
 
+    if ( is_variant( spell_variant::NORMAL ) && !background && p()->specialization() == SHAMAN_ELEMENTAL )
+      legacy_trigger_primordial_wave_echo( p(), p()->action.legacy_lava_burst_pw );
+
     if ( p()->buff.purging_flames->check() && !background )
     {
       assert( p()->action.lava_burst_pf );
@@ -8276,6 +8284,13 @@ struct lightning_bolt_t : public shaman_spell_t
       //add_child( overload );
     }
 
+    if ( is_variant( spell_variant::LEGACY_PRIMORDIAL_WAVE ) )
+    {
+      background = true;
+      base_execute_time = 0_s;
+      base_costs[ RESOURCE_MANA ] = 0;
+    }
+
     ancestor_trigger = ancestor_cast::LAVA_BURST;
 
     if ( is_variant( spell_variant::THORIMS_INVOCATION ) )
@@ -8339,6 +8354,10 @@ struct lightning_bolt_t : public shaman_spell_t
 
   void execute() override
   {
+    // The echo runs before the bolt itself so it shares the same Maelstrom Weapon stacks (9.2.7 sc_shaman.cpp:5446).
+    if ( is_variant( spell_variant::NORMAL ) && !background && p()->specialization() == SHAMAN_ENHANCEMENT )
+      legacy_trigger_primordial_wave_echo( p(), p()->action.legacy_lightning_bolt_pw );
+
     shaman_spell_t::execute();
     p()->buff.mid2_ele_4pc_builder->decrement();
     if ( is_variant( spell_variant::NORMAL ) && p()->specialization() == SHAMAN_ELEMENTAL )
@@ -8638,6 +8657,16 @@ struct elemental_blast_t : public shaman_spell_t
         // 23 Nov 2026: a full Lava Surge as Shadowlands (resets Lava Burst unless one is being cast), not only the buff:
         // the buff alone made the next Lava Burst instant but never gave an extra one (64.7 -> 64.8 casts a fight).
         p()->trigger_lava_surge();
+      }
+
+      // 25 Nov 2026 audit #11: Pyroclastic Shock rolls on the Maelstrom spender too (9.2.7 sc_shaman.cpp:5955-5964),
+      // as in Earth Shock above.
+      if ( p()->specialization() == SHAMAN_ELEMENTAL && p()->legacy_conduits.has( 100 ) &&
+           rng().roll( p()->legacy_conduits.percent( 100 ) ) )
+      {
+        dot_t* fs = p()->get_target_data( execute_state->target )->dot.flame_shock;
+        if ( fs->is_ticking() )
+          fs->adjust_duration( timespan_t::from_millis( 12000 ) );
       }
     }
 
@@ -9503,6 +9532,14 @@ public:
       p()->cooldown.storm_elemental->adjust( -timespan_t::from_millis( sfd->effectN( 2 ).base_value() ), false );
     }
 
+    // BracketSim legacy (25 Nov 2026 audit #9): Elemental Conduit - Flame Shock crits cut Chain Harvest's cooldown by
+    // 356250 effect 3 = 1000 ms (9.2.7 sc_shaman.cpp:6158).
+    if ( p()->shadowlands_legacy.elemental_conduit && d->state->result == RESULT_CRIT )
+    {
+      double ms = p()->find_spell( 356250 )->effectN( 3 ).base_value();
+      p()->get_cooldown( "chain_harvest" )->adjust( -timespan_t::from_millis( ms > 0 ? ms : 1000 ), false );
+    }
+
     // BracketSim legacy compatibility: Primal Lava Actuators. Every Flame Shock
     // tick sharpens the next Lava Lash and pulls its cooldown forward.
     if ( p()->shadowlands_legacy.primal_lava_actuators )
@@ -9610,15 +9647,15 @@ struct frost_shock_t : public shaman_spell_t
 
   // BracketSim legacy compatibility: Chilled to the Core. The rank value is the
   // CHANCE for Frost Shock to grant Maelstrom Weapon, not a damage figure. The
-  // number of stacks lives in effect 2 of the conduit spell, which is absent
-  // from current data, so Shadowlands' own value of 4 is used and marked here
-  // rather than being silently invented.
+  // number of stacks is effect 2 of conduit spell 338325, absent from current
+  // data: 25 Nov 2026 audit #10 - the 9.2.7 data says 2 ("grant 2 stacks"; 9.2.7
+  // sc_shaman.cpp:6277 reads it), not the 4 used before.
   void impact( action_state_t* s ) override
   {
     shaman_spell_t::impact( s );
 
     if ( p()->legacy_conduits.has( 112 ) && rng().roll( p()->legacy_conduits.percent( 112 ) ) )
-      p()->buff.maelstrom_weapon->trigger( 4 );
+      p()->buff.maelstrom_weapon->trigger( 2 );
   }
 };
 
@@ -12057,6 +12094,12 @@ void shaman_t::create_actions()
   if ( talent.purging_flames.ok() )
     action.lava_burst_pf = new lava_burst_t( this, variant_flag( spell_variant::PURGING_FLAMES ) );
 
+  // BracketSim legacy (25 Nov 2026 audit #8): Primordial Wave's echo, 9.2.7 lava_burst_pw / lightning_bolt_pw.
+  if ( legacy_covenant.primordial_wave->ok() && specialization() == SHAMAN_ELEMENTAL )
+    action.legacy_lava_burst_pw = new lava_burst_t( this, variant_flag( spell_variant::LEGACY_PRIMORDIAL_WAVE ) );
+  if ( legacy_covenant.primordial_wave->ok() && specialization() == SHAMAN_ENHANCEMENT )
+    action.legacy_lightning_bolt_pw = new lightning_bolt_t( this, variant_flag( spell_variant::LEGACY_PRIMORDIAL_WAVE ) );
+
   // Generic Actions
   action.flame_shock = new flame_shock_t( this, variant_flag( spell_variant::NORMAL ) );
 
@@ -13161,6 +13204,26 @@ void shaman_t::trigger_secondary_flame_shock( const action_state_t* state, spell
   trigger_secondary_flame_shock( state->target, variant );
 }
 
+// BracketSim legacy (25 Nov 2026 audit #8): Primordial Wave's echo. The next Lava Burst (Elemental) or Lightning Bolt
+// (Enhancement) after the wave also hits every enemy with Flame Shock, the cast's own target included (9.2.7
+// sc_shaman.cpp:5270-5285, 5446-5462); Splintered Elements gains one stack per echo hit.
+void legacy_trigger_primordial_wave_echo( shaman_t* p, action_t* echo )
+{
+  if ( !echo || !p->buff.legacy_primordial_wave->check() )
+    return;
+  p->buff.legacy_primordial_wave->expire();
+  std::vector<player_t*> fs;
+  for ( player_t* t : p->sim->target_non_sleeping_list )
+    if ( p->get_target_data( t )->dot.flame_shock->is_ticking() )
+      fs.push_back( t );
+  if ( fs.empty() )
+    return;
+  if ( p->shadowlands_legacy.splintered_elements )
+    p->buff.legacy_splintered_elements->trigger( as<int>( fs.size() ) );
+  for ( player_t* t : fs )
+    echo->execute_on_target( t );
+}
+
 void shaman_t::regenerate_flame_shock_dependent_target_list( const action_t* action ) const
 {
   auto& tl = action->target_cache.list;
@@ -14216,6 +14279,10 @@ void shaman_t::create_buffs()
   // three damage charges in its own effect 2; each charge is spent by a cast.
   // BracketSim legacy compatibility: Splintered Elements. The haste is in the
   // runeforge's own effect 1 and the window is the 12s on spell 354648.
+  buff.legacy_primordial_wave =
+      make_buff( this, "primordial_wave", find_spell( 327164 ) )
+          ->set_chance( legacy_covenant.primordial_wave->ok() ? 1.0 : 0.0 );
+
   buff.legacy_splintered_elements =
       make_buff( this, "splintered_elements", find_spell( 354648 ) )
           ->set_default_value( find_spell( 354647 )->effectN( 1 ).percent() )
