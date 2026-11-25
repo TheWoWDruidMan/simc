@@ -6750,6 +6750,11 @@ struct thrash_t final : public trigger_claw_rampage_t<DRUID_GUARDIAN,
         extra->execute_on_target( t );
         extra->dual = false;
         extra->proc = false;
+        // 25 Nov 2026: Ravenous Frenzy gains a stack from this free Thrash too - 9.2.7 trigger_ravenous_frenzy lets
+        // free_cast URSOCS (with APEX / ONETHS) through; the copy runs as a proc, which the D3 rule skips.
+        auto rf = extra->p()->buff.legacy_ravenous_frenzy;
+        if ( rf && rf->check() && rf->elapsed( extra->sim->current_time() ) >= 50_ms )
+          rf->bump();
       } );
     }
 
