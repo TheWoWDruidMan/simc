@@ -255,6 +255,7 @@ struct effects_t
   buff_t* gnashing_chompers     = nullptr;
   buff_t* better_together       = nullptr;
   buff_t* valiant_strikes       = nullptr;
+  action_t* effusive_anima      = nullptr;   // S3: the damage half of Effusive Anima Accelerator
 
   // Quiet repeat drivers. A buff's own period is bounded by its duration, so
   // anything that has to re-fire on a longer cadence than it lasts needs one.

@@ -295,6 +295,43 @@ struct spiked_burrs_t : public spell_t
 };
 
 /*
+ * EFFUSIVE ANIMA ACCELERATOR, the damage half (24 Nov 2026, S3; it was "left out" 12 Nov and never coded). "Activating
+ * your Kyrian class ability ... releases a blast of overcharged anima ... Arcane damage split evenly between all targets
+ * over 8 sec." Spell 353248 is gone from Midnight's export; the numbers are the Shadowlands DBC on this machine and
+ * Shadowlands SimulationCraft's model (soulbinds.cpp effusive_anima_accelerator), ported as it was: periodic Arcane every
+ * 2 sec for 8 sec (Haste Affects Periodic), 12 yd around the target, each tick 353248 effect 2 (45) x the class mod / 100
+ * x the higher of spell and attack power, divided by the number of targets hit. Class mod (352188 $mod): Mage 0.5, Monk 2,
+ * Priest 3, Rogue 0.75, Warlock 0.4, everyone else 1.
+ */
+struct effusive_anima_accelerator_t : public spell_t
+{
+  effusive_anima_accelerator_t( player_t* p, double mod ) : spell_t( "effusive_anima_accelerator", p )
+  {
+    id = 353248;
+    school = SCHOOL_ARCANE;
+    background = true;
+    may_crit = tick_may_crit = true;
+    aoe = -1;
+    radius = 12.0;
+    dot_duration = 8_s;
+    base_tick_time = 2_s;
+    hasted_ticks = true;
+    spell_power_mod.direct = 0.0;
+    spell_power_mod.tick = 45.0 * mod / 100.0;
+  }
+
+  double composite_total_spell_power() const override
+  {
+    return std::max( spell_t::composite_total_spell_power(), spell_t::composite_total_attack_power() );
+  }
+
+  double composite_persistent_multiplier( const action_state_t* s ) const override
+  {
+    return spell_t::composite_persistent_multiplier( s ) / std::max( 1u, s->n_targets );
+  }
+};
+
+/*
  * BRON'S CALL TO ACTION (22 Oct 2026; until now an uncoded damage trait). "After using 75 damaging or healing spells and
  * abilities, your next spell or ability summons Bron, who knocks enemies back on arrival and then attacks and heals your
  * targets for 30 sec." Every spell is gone from Midnight's export; the numbers are the Shadowlands DBC on this machine and
@@ -614,11 +651,34 @@ void effects_t::create_buffs( player_t* p )
                         ->set_pct_buff_type( STAT_PCT_BUFF_CRIT );
 
   // "Gain 3% critical strike chance for 10 sec after damaging an enemy above
-  // 90% health." On a patchwerk pull that is the opener and nothing after it.
+  // 90% health."
+  // 24 Nov 2026 (S4, 9.2.7 spear_of_the_archon + DBC 351488/352720): EVERY damaging hit or tick on an enemy above 90%
+  // (driver effect 1) starts or refreshes the 10 sec buff. It was triggered once at the pull (3% uptime on a 300 s
+  // Patchwerk instead of the whole time the boss is above 90%).
   spear_of_the_archon = make_buff( p, "spear_of_the_archon" )
                             ->set_duration( 10_s )
                             ->set_default_value( 0.03 )
                             ->set_pct_buff_type( STAT_PCT_BUFF_CRIT );
+  if ( has( SPEAR_OF_THE_ARCHON ) )
+  {
+    struct spear_cb_t : public dbc_proc_callback_t
+    {
+      spear_cb_t( player_t* pl, const special_effect_t& e ) : dbc_proc_callback_t( pl, e ) {}
+      void trigger( const proc_data_t& data, player_t* tgt, action_state_t* s, proc_trigger_type_e type ) override
+      {
+        if ( tgt && tgt != listener && tgt->health_percentage() > 90.0 )
+          dbc_proc_callback_t::trigger( data, tgt, s, type );
+      }
+    };
+    auto spear = new special_effect_t( p );
+    spear->name_str     = "spear_of_the_archon";
+    spear->type         = SPECIAL_EFFECT_EQUIP;
+    spear->proc_flags_  = PF_ALL_DAMAGE | PF_PERIODIC;
+    spear->proc_flags2_ = PF2_ALL_HIT | PF2_PERIODIC_DAMAGE;
+    spear->proc_chance_ = 1.0;
+    spear->custom_buff  = spear_of_the_archon;
+    new spear_cb_t( p, *spear );
+  }
 
   // "Damaging a new enemy grants you 3% Haste for 10 sec, up to 5 stacks."
   // Every enemy in a fixed target set is new at the pull.
@@ -675,6 +735,42 @@ void effects_t::create_buffs( player_t* p )
                     ->add_stat( STAT_MASTERY_RATING, 34.0 )
                     ->set_max_stack( 5 )
                     ->set_duration( 5_s );
+  // 24 Nov 2026 (S5, 9.2.7 carvers_eye + DBC 350899: effect 3 = 90%, effect 2 = 10 sec): ONE stack per hit on an enemy
+  // above 90%, and then "You cannot gain this benefit from the same target for 10 sec". It was 5 stacks at the pull. On
+  // one target that is a stack every 10 sec while the boss is above 90% (each stack lasts 5 sec).
+  if ( has( CARVERS_EYE ) )
+  {
+    struct carvers_cb_t : public dbc_proc_callback_t
+    {
+      buff_t* eye;
+      int iteration = -1;
+      std::unordered_map<size_t, timespan_t> locked_until;  // target actor_index -> end of its 10 sec lockout
+      carvers_cb_t( player_t* pl, const special_effect_t& e, buff_t* b ) : dbc_proc_callback_t( pl, e ), eye( b ) {}
+      void trigger( const proc_data_t&, player_t* t, action_state_t*, proc_trigger_type_e ) override
+      {
+        if ( !t || t == listener || t->health_percentage() <= 90.0 )
+          return;
+        if ( iteration != listener->sim->current_iteration )
+        {
+          iteration = listener->sim->current_iteration;
+          locked_until.clear();
+        }
+        timespan_t now = listener->sim->current_time();
+        auto it = locked_until.find( t->actor_index );
+        if ( it != locked_until.end() && now < it->second )
+          return;
+        locked_until[ t->actor_index ] = now + 10_s;
+        eye->trigger();
+      }
+    };
+    auto carve = new special_effect_t( p );
+    carve->name_str     = "carvers_eye";
+    carve->type         = SPECIAL_EFFECT_EQUIP;
+    carve->proc_flags_  = PF_ALL_DAMAGE | PF_PERIODIC;
+    carve->proc_flags2_ = PF2_ALL_HIT | PF2_PERIODIC_DAMAGE;
+    carve->proc_chance_ = 1.0;
+    new carvers_cb_t( p, *carve, carvers_eye );
+  }
 
   // "Your critical strikes grant you stacks of Valiant Strikes, up to 20", and
   // Light the Path: "Your Valiant Strikes grant 0.25% critical strike chance
@@ -685,11 +781,12 @@ void effects_t::create_buffs( player_t* p )
   // Valiant Strikes ALONE is pure healing and does nothing here; the crit only
   // exists when Light the Path is taken too, so this is gated on both.
   //
-  // It sits at the cap rather than ramping. The stacks are spent when a nearby
-  // party member drops below 50% health, and a solo sim has no party - so
-  // nothing ever consumes them. That is a fact about the sim rather than a
-  // number anyone chose. SimulationCraft made the same thing an OPTION,
-  // shadowlands.valiant_strikes_heal_rate, because it cannot be derived.
+  // 24 Nov 2026 (S6, the author: "fix S1-S7", the Shadowlands SimulationCraft default): it used to sit at 20 stacks all fight,
+  // never spent. Now as 9.2.7 valiant_strikes / light_the_path with its default shadowlands.valiant_strikes_heal_rate = 1:
+  // a critical hit or heal (driver 329791: 1.5 sec internal cooldown) adds a stack, up to 20 (330943); a party member
+  // drops below 50% once a minute on average (a Poisson process, as 9.2.7); that heal spends every stack and starts
+  // Dormant Valor (348236, 60 sec: no stacks are gained while it is up) and Light the Path (352981: 5% critical strike
+  // for 15 sec). A heal with no stacks does nothing.
   if ( has( VALIANT_STRIKES ) && has( LIGHT_THE_PATH ) )
   {
     valiant_strikes = make_buff( p, "legacy_valiant_strikes" )
@@ -697,6 +794,57 @@ void effects_t::create_buffs( player_t* p )
                           ->set_duration( timespan_t::zero() )
                           ->set_default_value( 0.0025 )
                           ->set_pct_buff_type( STAT_PCT_BUFF_CRIT );
+    buff_t* dormant_valor = make_buff( p, "dormant_valor" )->set_duration( 60_s )->set_quiet( true );
+    buff_t* light_path    = make_buff( p, "light_the_path" )
+                             ->set_duration( 15_s )
+                             ->set_default_value( 0.05 )
+                             ->set_pct_buff_type( STAT_PCT_BUFF_CRIT );
+
+    struct valiant_cb_t : public dbc_proc_callback_t
+    {
+      buff_t* dormant;
+      valiant_cb_t( player_t* pl, const special_effect_t& e, buff_t* d ) : dbc_proc_callback_t( pl, e ), dormant( d ) {}
+      void trigger( const proc_data_t& data, player_t* tgt, action_state_t* s, proc_trigger_type_e type ) override
+      {
+        if ( dormant->check() )
+          return;
+        dbc_proc_callback_t::trigger( data, tgt, s, type );
+      }
+    };
+    auto valiant = new special_effect_t( p );
+    valiant->name_str     = "valiant_strikes";
+    valiant->type         = SPECIAL_EFFECT_EQUIP;
+    valiant->proc_flags_  = PF_MELEE | PF_MELEE_ABILITY | PF_RANGED | PF_RANGED_ABILITY | PF_NONE_HELPFUL |
+                            PF_NONE_HARMFUL | PF_MAGIC_HEAL | PF_MAGIC_SPELL | PF_PERIODIC;
+    valiant->proc_flags2_ = PF2_CRIT;
+    valiant->proc_chance_ = 1.0;
+    valiant->cooldown_    = 1.5_s;
+    valiant->custom_buff  = valiant_strikes;
+    new valiant_cb_t( p, *valiant, dormant_valor );
+
+    struct valiant_heal_event_t final : public event_t
+    {
+      buff_t* stacks; buff_t* dormant; buff_t* light; bool heal;
+      valiant_heal_event_t( sim_t& s, buff_t* v, buff_t* d, buff_t* l, timespan_t t, bool h )
+        : event_t( s, t ), stacks( v ), dormant( d ), light( l ), heal( h ) {}
+      const char* name() const override { return "valiant_strikes_heal"; }
+      void execute() override
+      {
+        if ( heal && stacks->check() )
+        {
+          dormant->trigger();
+          light->trigger();
+          stacks->expire();
+        }
+        // One heal a minute on average (9.2.7 default rate 1.0), exponential gaps.
+        timespan_t gap = timespan_t::from_minutes( rng().exponential( 1.0 ) );
+        make_event<valiant_heal_event_t>( sim(), sim(), stacks, dormant, light, gap, true );
+      }
+    };
+    buff_t* vs = valiant_strikes;
+    p->register_combat_begin( [ vs, dormant_valor, light_path ]( player_t* pl ) {
+      make_event<valiant_heal_event_t>( *pl->sim, *pl->sim, vs, dormant_valor, light_path, 0_ms, false );
+    } );
   }
 
   // --------------------------------------------------------------- Venthyr --
@@ -757,7 +905,9 @@ void effects_t::create_buffs( player_t* p )
     euphoria->set_stack_change_callback( [ this, p ]( buff_t*, int, int cur ) {
       if ( cur != 0 )
         return;
-      if ( p->cache.attack_crit_chance() >= p->cache.damage_versatility() )
+      // 24 Nov 2026 (S7): RATINGS, as 9.2.7 (util::stat_value crit rating >= versatility rating). It compared crit
+      // CHANCE with the versatility damage percent, so crit (with its base 5%) nearly always won.
+      if ( util::stat_value( p, STAT_CRIT_RATING ) >= util::stat_value( p, STAT_VERSATILITY_RATING ) )
         fatal_flaw_crit->trigger();
       else
         fatal_flaw_vers->trigger();
@@ -777,10 +927,20 @@ void effects_t::create_buffs( player_t* p )
 
   // ------------------------------------------------------------- Night Fae --
   // "When at least 2 allies are within 8 yd, your Versatility increases by 3%."
+  // 24 Nov 2026 (S1, tooltip + 9.2.7 social_butterfly, DBC 320130 / 320212 both 5 sec): "increases by 3% for 5 sec. When
+  // this expires, 2 nearby allies gain ... for 5 sec before passing it back to you" - 5 sec on, 5 sec off. It was up all
+  // fight. No re-gain is scheduled at time 0 (buffs are reset between iterations, which would leak an event).
   social_butterfly = make_buff( p, "social_butterfly" )
-                         ->set_duration( timespan_t::zero() )
+                         ->set_duration( 5_s )
                          ->set_default_value( 0.03 )
                          ->set_pct_buff_type( STAT_PCT_BUFF_VERSATILITY );
+  if ( has( SOCIAL_BUTTERFLY ) && nearby_allies >= 2 )
+  {
+    social_butterfly->set_stack_change_callback( []( buff_t* b, int, int cur ) {
+      if ( cur == 0 && b->sim->current_time() > 0_ms && !b->sim->event_mgr.canceled )
+        make_event( *b->sim, 5_s, [ b ] { b->trigger(); } );
+    } );
+  }
 
   // "Damaging an enemy before they damage you increases your chance to critical
   // strike by 25% for 5 sec." That is the pull, once.
@@ -942,9 +1102,25 @@ void effects_t::create_buffs( player_t* p )
   // level 60 - and 53.2 on a level 40, which is what showed this SCALES. See
   // combat_meditation_mastery(). The DURATION is per class and measured, and
   // the author's monk reading of 20.0 sec matches the table exactly.
-  combat_meditation = make_buff<stat_buff_t>( p, "combat_meditation" )
-                          ->add_stat( STAT_MASTERY_RATING, combat_meditation_mastery( p ) )
-                          ->set_duration( timespan_t::from_seconds( cv.combat_meditation ) );
+  // 24 Nov 2026 (S2, tooltip 328266 + 9.2.7 combat_meditation): "Walking through Sorrowful Memories extends this effect
+  // by 3 x modb sec" - the buff (328908) ticks every 3 sec and each of its first 3 ticks expels a memory that extends it
+  // (9.2.7 default chance 1.0, extension 328913 effect 2 = 3 sec x modb; modb = mod = this class's duration / 10). A
+  // recast while up EXTENDS (9.2.7 refresh behaviour). And "Combat Meditation may only occur once every 1 min" for Mage
+  // (Radiant Spark) and Warlock (Scouring Tithe) only (345861, 60 sec). It was 10 s x mod, no extension, no lockout.
+  {
+    timespan_t ext = timespan_t::from_seconds( 3.0 * cv.combat_meditation / 10.0 );
+    combat_meditation = make_buff<stat_buff_t>( p, "combat_meditation" )
+                            ->add_stat( STAT_MASTERY_RATING, combat_meditation_mastery( p ) )
+                            ->set_duration( timespan_t::from_seconds( cv.combat_meditation ) )
+                            ->set_refresh_behavior( buff_refresh_behavior::EXTEND )
+                            ->set_period( 3_s )
+                            ->set_tick_callback( [ ext ]( buff_t* b, int, timespan_t ) {
+                              if ( b->current_tick <= 3 )
+                                b->extend_duration( ext );
+                            } );
+    if ( p->type == MAGE || p->type == WARLOCK )
+      combat_meditation->set_cooldown( 60_s );
+  }
 
   // "Unholy Nova increases your Intellect by 5% ... You gain 2% additional
   // Intellect for each ally affected", up to four. Percentages, so this one
@@ -1001,6 +1177,21 @@ void effects_t::create_buffs( player_t* p )
           ->add_stat( STAT_MASTERY_RATING, volatile_solvent_humanoid_rating( p ) )
           ->set_duration( timespan_t::from_seconds( VOLATILE_SOLVENT_DURATION ) );
 
+  // S3 (24 Nov 2026): the damage half of Effusive Anima Accelerator, fired from covenant_ability_cast().
+  if ( has( EFFUSIVE_ANIMA ) )
+  {
+    double mod = 1.0;
+    switch ( p->type )
+    {
+      case MAGE: mod = 0.5; break;
+      case MONK: mod = 2.0; break;
+      case PRIEST: mod = 3.0; break;
+      case ROGUE: mod = 0.75; break;
+      case WARLOCK: mod = 0.4; break;
+      default: break;
+    }
+    effusive_anima = new effusive_anima_accelerator_t( p, mod );
+  }
 }
 
 void effects_t::covenant_ability_cast( player_t* p, covenant_e cov, cooldown_t* host_cd )
@@ -1018,6 +1209,12 @@ void effects_t::covenant_ability_cast( player_t* p, covenant_e cov, cooldown_t* 
       // enemy, to a maximum of 60 sec." That is CD/15 per enemy capped at CD/3,
       // a rule confirmed against all twelve classes, so it is derived from the
       // host's own cooldown rather than carried per class.
+      if ( effusive_anima && p->target && !p->target->is_sleeping() )
+      {
+        effusive_anima->set_target( p->target );
+        effusive_anima->execute();
+      }
+
       if ( has( EFFUSIVE_ANIMA ) && host_cd && host_cd->duration > timespan_t::zero() )
       {
         double host  = host_cd->duration.total_seconds();
@@ -1099,17 +1296,13 @@ void effects_t::combat_begin( player_t* p )
   if ( has( POINTED_COURAGE ) )
     pointed_courage->trigger( std::min( 3, active_enemies( p ) + nearby_allies ) );
 
-  if ( has( SPEAR_OF_THE_ARCHON ) )
-    spear_of_the_archon->trigger();
+  // Spear of the Archon (S4) and Carver's Eye (S5) come from their hit callbacks (create_buffs).
 
   // Party Favors: the tea drunk before the pull (one, drawn per fight when the option is "random").
   if ( party_favor_count )
     party_favors[ party_favor_count == 1 ? 0 : static_cast<unsigned>( p->rng().range( 0, party_favor_count ) ) ]->trigger();
 
-  // Valiant Strikes goes straight to its cap - see create_buffs for why
-  // nothing ever consumes the stacks in a solo sim.
-  if ( valiant_strikes )
-    valiant_strikes->trigger( 20 );
+  // Valiant Strikes (S6) is built from crits and spent by the heal events registered in create_buffs.
 
   if ( has( HAMMER_OF_GENESIS ) )
     hammer_of_genesis->trigger( std::min( 5, active_enemies( p ) ) );
@@ -1126,9 +1319,6 @@ void effects_t::combat_begin( player_t* p )
     marrowed_gemstone->trigger();
     marrowed_gemstone_driver->trigger();
   }
-
-  if ( has( CARVERS_EYE ) )
-    carvers_eye->trigger( 5 );
 
   if ( has( BUILT_FOR_WAR ) )
     built_for_war->trigger( 5 );
