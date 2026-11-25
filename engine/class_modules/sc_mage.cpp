@@ -4933,9 +4933,11 @@ struct flurry_t final : public custom_state_spell_t<frost_mage_spell_t, flurry_d
   }
 };
 
-// Icy Veins was removed from the current Mage kit, but it is the activation
-// condition for the Shadowlands Slick Ice legendary. Recreate the original
-// 20-second / 3-minute window only when that exact Runecarving bonus is worn.
+// Icy Veins was removed from the current Mage kit and nothing at Level 60 grants it
+// (25 Nov 2026, the author: "frost mage doesn't have icy veins anymore so how does it have it
+// through slick ice?"). The button is kept only so a pasted icy_veins line still parses;
+// it is never ready, so Slick Ice and Icy Propulsion work only off an Icy Veins that a
+// proc grants (Vision of Perfection), as in game.
 struct legacy_icy_veins_t final : public frost_mage_spell_t
 {
   legacy_icy_veins_t( std::string_view n, mage_t* p, std::string_view options_str ) :
@@ -4956,7 +4958,7 @@ struct legacy_icy_veins_t final : public frost_mage_spell_t
 
   bool ready() override
   {
-    return p()->shadowlands_legacy.slick_ice && frost_mage_spell_t::ready();
+    return false;
   }
 };
 
@@ -8214,8 +8216,6 @@ void mage_t::init_action_list()
         break;
       case MAGE_FROST:
         mage_apl::frost( this );
-        if ( shadowlands_legacy.slick_ice )
-          get_action_priority_list( "cds" )->add_action( "icy_veins" );
         break;
       default:
         break;

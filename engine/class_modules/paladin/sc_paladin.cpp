@@ -18,6 +18,17 @@
 // ==========================================================================
 namespace paladin
 {
+// BracketSim (25 Nov 2026): The Long Summer (conduit 210) of the paladin whose Blessing of Summer this player gets
+// (external_buffs.the_long_summer_rank), as a fraction: Summer lasts 30 s x (1 + this). 0 when unset.
+static double external_blessing_long_summer_pct( const player_t* p )
+{
+  unsigned rank = p->external_buffs.the_long_summer_rank;
+  const legacy_conduit::entry_t* e = legacy_conduit::find( 210 );
+  if ( !rank || !e )
+    return 0.0;
+  return e->rank[ std::min( rank, static_cast<unsigned>( legacy_conduit::MAX_RANK ) ) - 1u ] / 100.0;
+}
+
 paladin_t::paladin_t( sim_t* sim, util::string_view name, race_e r )
   : player_t( sim, PALADIN, name, r ),
     active( active_spells_t() ),
@@ -3667,9 +3678,14 @@ struct blessing_of_autumn_t : public buff_t
 {
   bool affected_actions_initialized;
   std::vector<action_t*> affected_actions;
+  // BracketSim legacy (25 Nov 2026): Equinox (Seasons of Plenty) doubles Autumn while it is up, as Shadowlands 9.2.7
+  // (its equinox stack-change callback re-applied Autumn at 1 + 30% x (1 + Equinox effect 2)). Before today Autumn
+  // ignored Equinox. `applied` is the recharge multiplier now on the affected actions, so a change swaps it exactly.
+  buff_t* equinox = nullptr;
+  double applied = 1.0;
 
   blessing_of_autumn_t( player_t* p )
-    : buff_t( p, "blessing_of_autumn", p->find_spell( 328622 ) ), affected_actions_initialized( false )
+    : buff_t( p, "blessing_of_autumn", dbc::find_spell( p, 328622 ) ), affected_actions_initialized( false )
   {
     set_cooldown( 0_ms );
     set_default_value_from_effect( 1 );
@@ -3691,6 +3707,14 @@ struct blessing_of_autumn_t : public buff_t
         }
 
         affected_actions_initialized = true;
+        if ( sim->debug )
+        {
+          std::vector<std::string> names;
+          for ( auto a : affected_actions )
+            names.push_back( a->name_str );
+          sim->print_debug( "{} blessing_of_autumn label {} speeds {} actions: {}", *player, label, names.size(),
+                            util::string_join( names, " " ) );
+        }
       }
 
       update_cooldowns( new_ );
@@ -3701,22 +3725,29 @@ struct blessing_of_autumn_t : public buff_t
   {
     assert( affected_actions_initialized );
 
-    double recharge_rate_multiplier = 1.0 / ( 1 + default_value );
+    double strength = default_value;
+    if ( equinox && equinox->check() )
+      strength *= 1.0 + equinox->data().effectN( 2 ).percent();
+    double want = new_ > 0 ? 1.0 / ( 1 + strength ) : 1.0;
+    if ( want == applied )
+      return;
     for ( auto a : affected_actions )
     {
-      if ( new_ > 0 )
-      {
-        a->dynamic_recharge_rate_multiplier *= recharge_rate_multiplier;
-      }
-      else
-      {
-        a->dynamic_recharge_rate_multiplier /= recharge_rate_multiplier;
-      }
+      a->dynamic_recharge_rate_multiplier *= want / applied;
       if ( a->cooldown->action == a )
         a->cooldown->adjust_recharge_multiplier();
       if ( a->internal_cooldown->action == a )
         a->internal_cooldown->adjust_recharge_multiplier();
     }
+    applied = want;
+  }
+
+  // action_t::reset puts every action back to 1.0 on its own, so forget what was applied FIRST: the expire inside
+  // buff_t::reset then changes nothing, whichever of the two resets runs first.
+  void reset() override
+  {
+    applied = 1.0;
+    buff_t::reset();
   }
 
   void expire( timespan_t delay ) override
@@ -4400,7 +4431,9 @@ void paladin_t::create_buffs()
           // buff's own duration by ( 1 + percent ) at construction, which is
           // what this is.
           ->set_duration( legacy_covenant.blessing_of_summer->duration() *
-                          ( 1.0 + legacy_conduits.percent( 210 ) ) )
+                          ( 1.0 + ( legacy_covenant.blessing_of_the_seasons->ok()
+                                        ? legacy_conduits.percent( 210 )
+                                        : external_blessing_long_summer_pct( this ) ) ) )
           ->set_chance( legacy_covenant.blessing_of_summer->ok() ? 1.0 : 0.0 );
 
   // BracketSim legacy (12 Nov 2026): Blessing of Autumn - "causing their cooldowns to recover 30% faster" (328622
@@ -4412,7 +4445,12 @@ void paladin_t::create_buffs()
   buffs.legacy_equinox =
       make_buff( this, "equinox", find_spell( 355567 ) )
           ->set_default_value_from_effect( 2, 0.01 )
-          ->set_chance( shadowlands_legacy.seasons_of_plenty ? 1.0 : 0.0 );
+          ->set_chance( shadowlands_legacy.seasons_of_plenty || external_buffs.seasons_of_plenty ? 1.0 : 0.0 )
+          ->set_stack_change_callback( [ this ]( buff_t*, int, int ) {
+            if ( buffs.legacy_blessing_of_autumn->check() )
+              debug_cast<buffs::blessing_of_autumn_t*>( buffs.legacy_blessing_of_autumn )->update_cooldowns( 1 );
+          } );
+  debug_cast<buffs::blessing_of_autumn_t*>( buffs.legacy_blessing_of_autumn )->equinox = buffs.legacy_equinox;
 
   buffs.legacy_divine_resonance =
       make_buff( this, "legacy_divine_resonance", find_spell( 355455 ) )
@@ -5047,14 +5085,16 @@ void paladin_t::init_spells()
 
   // The four blessings only resolve when the covenant does, so they follow the
   // driver rather than being looked up unconditionally.
-  auto season = [ this ]( unsigned id ) {
-    return legacy_covenant.blessing_of_the_seasons->ok() ? find_spell( id )
-                                                         : spell_data_t::not_found();
+  // BracketSim (25 Nov 2026): or when another paladin's blessing is set (external_buffs.blessing_of_*), so a paladin
+  // receives it through the same buffs and procs as its own.
+  auto season = [ this ]( unsigned id, bool external ) {
+    return legacy_covenant.blessing_of_the_seasons->ok() || external ? dbc::find_spell( this, id )
+                                                                     : spell_data_t::not_found();
   };
-  legacy_covenant.blessing_of_summer = season( 328620 );
-  legacy_covenant.blessing_of_autumn = season( 328622 );
-  legacy_covenant.blessing_of_winter = season( 328281 );
-  legacy_covenant.blessing_of_spring = season( 328282 );
+  legacy_covenant.blessing_of_summer = season( 328620, !external_buffs.blessing_of_summer.empty() );
+  legacy_covenant.blessing_of_autumn = season( 328622, !external_buffs.blessing_of_autumn.empty() );
+  legacy_covenant.blessing_of_winter = season( 328281, !external_buffs.blessing_of_winter.empty() );
+  legacy_covenant.blessing_of_spring = season( 328282, false );
 
   if ( legacy_covenant.blessing_of_the_seasons->ok() )
     legacy_apl_actions.emplace_back( "blessing_of_the_seasons" );
@@ -6325,6 +6365,76 @@ private:
 
 // PALADIN MODULE INTERFACE =================================================
 
+// BracketSim (25 Nov 2026, the author: Night Fae paladin blessings "as selectable external buff like PI"; option A): another
+// paladin's Blessing of Summer / Autumn / Winter on any player, ported from Shadowlands 9.2.7 (player.cpp
+// add_timed_blessing_triggers, paladin module init + create_actions). Same effects as a Night Fae paladin's own:
+//   Summer 328620 - while up, each hit of a listed proc type has a 40% chance to deal 30% of it again as Holy (328123,
+//                   no crit, no modifiers); Equinox: chance and amount x2. Lasts 30 s x (1 + The Long Summer).
+//   Autumn 328622 - every action with label 16 ("Class Spells") recharges 30% faster; Equinox: 60%.
+//   Winter 328281 - each hit from an action that fires callbacks deals 7% of max(attack power, spell power) as Frost
+//                   (328506), 0.5 s internal cooldown; Equinox: x2.
+//   Seasons of Plenty - Equinox (355567, 10 s) 10 s after each blessing.
+// A paladin gets the same through its own legacy buffs (season() in init_spells), so nothing is built twice.
+struct external_summer_proc_t : public spell_t
+{
+  external_summer_proc_t( player_t* p ) : spell_t( "blessing_of_summer_proc", p, dbc::find_spell( p, 328123 ) )
+  {
+    may_dodge = may_parry = may_block = may_crit = callbacks = may_miss = false;
+    background = true;
+    school = SCHOOL_HOLY;
+    base_dd_min = base_dd_max = 0.0;
+    attack_power_mod.direct = spell_power_mod.direct = 0.0;
+  }
+
+  void init() override
+  {
+    spell_t::init();
+    snapshot_flags &= STATE_NO_MULTIPLIER;
+    update_flags &= STATE_NO_MULTIPLIER;
+  }
+};
+
+struct external_winter_proc_t : public spell_t
+{
+  buff_t* equinox;
+  external_winter_proc_t( player_t* p, buff_t* eq )
+    : spell_t( "blessing_of_winter_proc", p, dbc::find_spell( p, 328506 ) ), equinox( eq )
+  {
+    background = true;
+    callbacks = may_miss = false;
+    spell_power_mod.direct = attack_power_mod.direct = data().effectN( 2 ).percent();
+  }
+
+  double attack_direct_power_coefficient( const action_state_t* s ) const override
+  {
+    if ( s->attack_power < s->spell_power )
+      return 0;
+    return spell_t::attack_direct_power_coefficient( s );
+  }
+
+  double spell_direct_power_coefficient( const action_state_t* s ) const override
+  {
+    if ( s->spell_power <= s->attack_power )
+      return 0;
+    return spell_t::spell_direct_power_coefficient( s );
+  }
+
+  double action_multiplier() const override
+  {
+    double am = spell_t::action_multiplier();
+    if ( equinox && equinox->up() )
+      am *= 1.0 + equinox->data().effectN( 2 ).percent();
+    return am;
+  }
+};
+
+static bool wants_external_blessings( const player_t* p )
+{
+  const auto& e = p->external_buffs;
+  return p->is_player() && !p->is_pet() && !p->is_enemy() &&
+         !( e.blessing_of_summer.empty() && e.blessing_of_autumn.empty() && e.blessing_of_winter.empty() );
+}
+
 struct paladin_module_t : public module_t
 {
   paladin_module_t() : module_t( PALADIN )
@@ -6356,6 +6466,124 @@ struct paladin_module_t : public module_t
       p->buffs.blessing_of_sacrifice = new buffs::blessing_of_sacrifice_t( p );
       p->debuffs.forbearance         = new buffs::forbearance_t( p, "forbearance" );
     }, "create_buffs_paladin" );
+
+    // BracketSim (25 Nov 2026): another paladin's blessings (see external_summer_proc_t). Buffs: a paladin already has
+    // them (its legacy buffs, resolved because the options are set); everyone else gets them here.
+    sim->register_actor_initializer( INIT_ACTOR_CREATE_BUFFS + offset() + 1, []( player_t* p ) {
+      if ( !wants_external_blessings( p ) )
+        return;
+      const auto& e = p->external_buffs;
+      if ( p->type != PALADIN )
+      {
+        auto equinox = make_buff( p, "equinox", dbc::find_spell( p, 355567 ) )
+                           ->set_default_value_from_effect( 2, 0.01 )
+                           ->set_chance( e.seasons_of_plenty ? 1.0 : 0.0 );
+        const spell_data_t* summer = dbc::find_spell( p, 328620 );
+        if ( !e.blessing_of_summer.empty() )
+          make_buff( p, "blessing_of_summer", summer )
+              ->set_chance( 1.0 )  // 328620's 40% is the PROC chance, not the buff's (9.2.7 set it the same)
+              ->set_cooldown( 0_ms )
+              ->set_duration( summer->duration() * ( 1.0 + external_blessing_long_summer_pct( p ) ) );
+        if ( !e.blessing_of_autumn.empty() )
+        {
+          auto autumn = new buffs::blessing_of_autumn_t( p );
+          autumn->equinox = equinox;
+          equinox->set_stack_change_callback( [ autumn ]( buff_t*, int, int ) {
+            if ( autumn->check() )
+              autumn->update_cooldowns( 1 );
+          } );
+        }
+        if ( !e.blessing_of_winter.empty() )
+          make_buff( p, "blessing_of_winter", dbc::find_spell( p, 328281 ) )->set_cooldown( 0_ms );
+      }
+
+      // The schedule, as 9.2.7's add_timed_blessing_triggers (Equinox 10 s after each blessing with Seasons of Plenty).
+      // The time vectors live in p->external_buffs for the whole run, so holding them by reference is safe.
+      buff_t* equinox = buff_t::find( p, "equinox" );
+      auto add = [ p, equinox ]( const std::vector<timespan_t>& times, const char* name ) {
+        buff_t* b = buff_t::find( p, name );
+        if ( !b || times.empty() )
+          return;
+        p->register_timed_buff_triggers( b, times );
+        if ( p->external_buffs.seasons_of_plenty && equinox )
+          p->register_combat_begin( [ equinox, &times ]( player_t* pl ) {
+            for ( auto t : times )
+              make_event( *pl->sim, t + 10_s, [ equinox ] { equinox->trigger(); } );
+          } );
+      };
+      add( e.blessing_of_summer, "blessing_of_summer" );
+      add( e.blessing_of_autumn, "blessing_of_autumn" );
+      add( e.blessing_of_winter, "blessing_of_winter" );
+    }, "external_blessings_buffs" );
+
+    // The damage procs (a paladin has its own - legacy_summer_proc / legacy_winter_proc and paladin_t::init_assessors).
+    // Built with the background actions, so init_actions initialises them like any other.
+    sim->register_actor_initializer( INIT_ACTOR_CREATE_ACTIONS - 5, []( player_t* p ) {
+      if ( !wants_external_blessings( p ) || p->type == PALADIN )
+        return;
+      if ( !p->external_buffs.blessing_of_summer.empty() )
+        new external_summer_proc_t( p );
+      if ( !p->external_buffs.blessing_of_winter.empty() )
+        new external_winter_proc_t( p, buff_t::find( p, "equinox" ) );
+    }, "external_blessings_actions" );
+
+    sim->register_actor_initializer( INIT_ACTOR_ASSESSORS + offset() + 1, []( player_t* p ) {
+      if ( !wants_external_blessings( p ) || p->type == PALADIN )
+        return;
+      const auto& e = p->external_buffs;
+      buff_t* equinox = buff_t::find( p, "equinox" );
+      if ( !e.blessing_of_summer.empty() )
+      {
+        buff_t* summer = buff_t::find( p, "blessing_of_summer" );
+        const spell_data_t* sd = &summer->data();
+        action_t* proc = p->find_action( "blessing_of_summer_proc" );
+        p->assessor_out_damage.add( assessor::CALLBACKS, [ p, summer, sd, equinox, proc ]( result_amount_type, action_state_t* s ) {
+          if ( !summer->up() || s->action == proc || s->result_total <= 0.0 )
+            return assessor::CONTINUE;
+          if ( !( sd->proc_flags() & ( UINT64_C( 1 ) << s->proc_type() ) ) )
+            return assessor::CONTINUE;
+          bool eq = equinox && equinox->up();
+          double chance = sd->proc_chance();
+          if ( eq )
+            chance *= 1.0 + equinox->data().effectN( 4 ).percent();
+          if ( !p->rng().roll( chance ) )
+            return assessor::CONTINUE;
+          double da = s->result_amount * sd->effectN( 1 ).percent();
+          if ( eq )
+            da *= 1.0 + equinox->data().effectN( 2 ).percent();
+          player_t* t = s->target;
+          make_event( *p->sim, [ proc, t, da ] {
+            proc->set_target( t );
+            proc->base_dd_min = proc->base_dd_max = da;
+            proc->execute();
+          } );
+          return assessor::CONTINUE;
+        } );
+      }
+      if ( !e.blessing_of_winter.empty() )
+      {
+        buff_t* winter = buff_t::find( p, "blessing_of_winter" );
+        const spell_data_t* wd = &winter->data();
+        action_t* proc = p->find_action( "blessing_of_winter_proc" );
+        cooldown_t* icd = p->get_cooldown( "external_blessing_of_winter_icd" );
+        timespan_t icd_len = wd->internal_cooldown() > 0_ms ? wd->internal_cooldown() : 500_ms;
+        p->assessor_out_damage.add( assessor::CALLBACKS, [ p, winter, wd, proc, icd, icd_len ]( result_amount_type, action_state_t* s ) {
+          if ( !winter->up() || s->action == proc || s->result_total <= 0.0 )
+            return assessor::CONTINUE;
+          if ( !s->action->callbacks || !icd->is_ready() )
+            return assessor::CONTINUE;
+          if ( !( wd->proc_flags() & ( UINT64_C( 1 ) << s->proc_type() ) ) )
+            return assessor::CONTINUE;
+          icd->start( icd_len );
+          player_t* t = s->target;
+          make_event( *p->sim, [ proc, t ] {
+            proc->set_target( t );
+            proc->execute();
+          } );
+          return assessor::CONTINUE;
+        } );
+      }
+    }, "external_blessings_procs" );
   }
 
   void register_hotfixes() const override

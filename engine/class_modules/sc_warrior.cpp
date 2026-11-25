@@ -1610,12 +1610,15 @@ public:
 
     double rage = ab::last_resource_cost;
 
-    // BracketSim legacy compatibility: Glory. Effect 1 of the runeforge is how
-    // much rage buys an extension and effect 3 is how long that extension is.
+    // BracketSim legacy compatibility: Glory. Effect 3 is how long an extension is; the Rage that buys one is per spec
+    // (25 Nov 2026 audit W5, tooltip "every $?c1[$s1]?c2[$s5][$s2] Rage"): Arms effect 1 (20), Fury effect 5 (25),
+    // Protection effect 2 (10). It used effect 1 for all three.
     if ( p()->shadowlands_legacy.glory && rage > 0 && p()->buff.legacy_conquerors_banner->check() )
     {
       auto rune = p()->find_spell( 353577 );
-      const double per = rune->effectN( 1 ).base_value();
+      const double per = rune->effectN( p()->specialization() == WARRIOR_FURY         ? 5
+                                       : p()->specialization() == WARRIOR_PROTECTION ? 2
+                                                                                     : 1 ).base_value();
       if ( per > 0 )
       {
         p()->shadowlands_legacy.glory_rage += rage;
@@ -1625,6 +1628,10 @@ public:
           p()->shadowlands_legacy.glory_rage -= per * times;
           p()->buff.legacy_conquerors_banner->extend_duration(
               timespan_t::from_millis( rune->effectN( 3 ).base_value() ) * times );
+          // 25 Nov 2026 audit W6: Veteran's Repute lasts as long as the banner, so it is extended too (9.2.7 did).
+          if ( p()->buff.legacy_veterans_repute->check() )
+            p()->buff.legacy_veterans_repute->extend_duration(
+                timespan_t::from_millis( rune->effectN( 3 ).base_value() ) * times );
         }
       }
     }

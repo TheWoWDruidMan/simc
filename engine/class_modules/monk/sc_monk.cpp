@@ -1651,6 +1651,7 @@ struct blackout_kick_t : overwhelming_force_t<charred_passions_t<teachings_of_th
 
     p()->buff.shuffle->trigger(
         timespan_t::from_seconds( p()->baseline.brewmaster.blackout_kick->effectN( 2 ).base_value() ) );
+    p()->legacy_walk_with_the_ox();  // 25 Nov 2026 audit M6: every Shuffle source, not Keg Smash only
 
     p()->buff.blackout_combo->trigger();
 
@@ -1855,6 +1856,7 @@ struct spinning_crane_kick_t : public monk_melee_attack_t
 
       p()->buff.shuffle->trigger(
           timespan_t::from_seconds( p()->baseline.brewmaster.spinning_crane_kick_rank_2->effectN( 1 ).base_value() ) );
+      p()->legacy_walk_with_the_ox();  // 25 Nov 2026 audit M6
     }
   };
 
@@ -3008,16 +3010,8 @@ struct keg_smash_t : monk_melee_attack_t
     p()->action.flurry_strikes->execute( flurry_strikes_t::FLURRY_STRIKES );
     p()->buff.shuffle->trigger( timespan_t::from_seconds( data().effectN( 6 ).base_value() ) );
 
-    // BracketSim legacy compatibility: Walk with the Ox pulls Invoke Niuzao in
-    // whenever Shuffle is refreshed and Niuzao is on cooldown. The 0.5 s is
-    // effect 2 of conduit spell 337264, absent from Midnight and read from the
-    // archived 9.2.7 client data.
-    if ( p()->legacy_conduits.has( 57 ) )
-    {
-      cooldown_t* niuzao = p()->get_cooldown( "invoke_niuzao_the_black_ox" );
-      if ( niuzao->down() )
-        niuzao->adjust( timespan_t::from_millis( -500 ), true );
-    }
+    // BracketSim legacy compatibility: Walk with the Ox (see monk_t::legacy_walk_with_the_ox).
+    p()->legacy_walk_with_the_ox();
 
     timespan_t reduction = timespan_t::from_seconds( data().effectN( 4 ).base_value() );
     if ( p()->buff.blackout_combo->up() )
@@ -6279,6 +6273,18 @@ action_t *monk_t::create_action( std::string_view name, std::string_view options
     return new unity_within_t( this, options_str );
 
   return base_t::create_action( name, options_str );
+}
+
+// BracketSim legacy compatibility: Walk with the Ox (conduit 57) pulls Invoke Niuzao in by 0.5 s whenever Shuffle is
+// granted (9.2.7: Keg Smash, Blackout Kick and each Spinning Crane Kick tick) while Niuzao is on cooldown. The 0.5 s is
+// effect 2 of conduit spell 337264, absent from Midnight and read from the archived 9.2.7 client data.
+void monk_t::legacy_walk_with_the_ox()
+{
+  if ( !legacy_conduits.has( 57 ) )
+    return;
+  cooldown_t* niuzao = get_cooldown( "invoke_niuzao_the_black_ox" );
+  if ( niuzao->down() )
+    niuzao->adjust( timespan_t::from_millis( -500 ), true );
 }
 
 void monk_t::trigger_celestial_fortune( action_state_t *s )

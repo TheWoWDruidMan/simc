@@ -712,6 +712,14 @@ struct player_t : public actor_t
     std::vector<timespan_t> rallying_cry;
     std::vector<timespan_t> potion_bomb_of_power;
     int soleahs_secret_technique;
+    // BracketSim (25 Nov 2026, the author: Night Fae paladin blessings "as selectable external buff like PI", Level 60 only on
+    // the site): another player's Blessing of the Seasons, as Shadowlands 9.2.7's external_buffs options. Times in
+    // seconds; Spring heals only and is left out. seasons_of_plenty: that paladin wears Seasons of Plenty (Equinox 10 s
+    // after each blessing); the_long_summer_rank: that paladin's The Long Summer conduit rank (Summer lasts longer).
+    // Built for every player in the paladin module (paladin.cpp register_actor_initializers).
+    std::vector<timespan_t> blessing_of_summer, blessing_of_autumn, blessing_of_winter;
+    bool seasons_of_plenty = false;
+    unsigned the_long_summer_rank = 0;
   } external_buffs;
 
   struct gains_t

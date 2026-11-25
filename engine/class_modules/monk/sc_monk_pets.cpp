@@ -277,6 +277,10 @@ private:
     {
       double am = pet_melee_t::action_multiplier();
       am *= 1.0 + o()->talent.conduit_of_the_celestials.xuens_bond->effectN( 1 ).percent();
+      // BracketSim legacy (25 Nov 2026 audit M5): the Xuen's Bond CONDUIT (24) also makes Xuen deal more damage
+      // (9.2.7 sc_monk_pets.cpp xuen_pet_t composite_player_multiplier); only its Invoke Xuen cut was in. The talent of
+      // the same name drops the conduit (legacy_conduit::set_t::drop_talent_duplicates), so the two never add.
+      am *= 1.0 + o()->legacy_conduits.percent( 24 );
       return am;
     }
   };
@@ -295,6 +299,10 @@ private:
     {
       double am = pet_spell_t::action_multiplier();
       am *= 1.0 + o()->talent.conduit_of_the_celestials.xuens_bond->effectN( 1 ).percent();
+      // BracketSim legacy (25 Nov 2026 audit M5): the Xuen's Bond CONDUIT (24) also makes Xuen deal more damage
+      // (9.2.7 sc_monk_pets.cpp xuen_pet_t composite_player_multiplier); only its Invoke Xuen cut was in. The talent of
+      // the same name drops the conduit (legacy_conduit::set_t::drop_talent_duplicates), so the two never add.
+      am *= 1.0 + o()->legacy_conduits.percent( 24 );
       return am;
     }
   };

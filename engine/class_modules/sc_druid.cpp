@@ -6662,6 +6662,24 @@ struct thrash_t final : public trigger_claw_rampage_t<DRUID_GUARDIAN,
       dot_list = &p->dot_lists.thrash;
 
       original_max_stack = p->spec.thrash_bleed->max_stacks();
+
+      // BracketSim legacy compatibility (25 Nov 2026 audit D3): Luffa-Infused Embrace (339060) also makes the Thrash
+      // BLEED deal 20% more (effect 2, periodic) and stack once more (effect 4, +1 max stacks on 192090) - 9.2.7 applied
+      // the whole aura (apply_affecting_aura); only the hit and the radius were in.
+      if ( p->shadowlands_legacy.luffa_infused_embrace )
+      {
+        const spell_data_t* luffa = p->find_spell( 339060 );
+        base_td_multiplier *= 1.0 + luffa->effectN( 2 ).percent();
+        if ( luffa->effectN( 4 ).ok() && data().affected_by( luffa->effectN( 4 ) ) )
+          original_max_stack += as<int>( luffa->effectN( 4 ).base_value() );
+        dot_max_stack = original_max_stack;
+      }
+    }
+
+    void init() override
+    {
+      base_t::init();
+      dot_max_stack = original_max_stack;
     }
 
     void trigger_dot( action_state_t* s )
@@ -6723,10 +6741,14 @@ struct thrash_t final : public trigger_claw_rampage_t<DRUID_GUARDIAN,
          p()->form == BEAR_FORM &&
          rng().roll( p()->find_spell( 339056 )->effectN( 1 ).percent() ) )
     {
+      // 25 Nov 2026 audit D4: 9.2.7 fires a separate free Thrash 0.5 s later (thrash_bear_ursocs, free_cast URSOCS)
+      // that never touches Thrash's cooldown; re-running this action restarted the cooldown (dual skips that).
       auto extra = this;
-      make_event( *sim, 250_ms, [ extra, t = target ] {
+      make_event( *sim, 500_ms, [ extra, t = target ] {
         extra->proc = true;
+        extra->dual = true;
         extra->execute_on_target( t );
+        extra->dual = false;
         extra->proc = false;
       } );
     }
@@ -10135,9 +10157,8 @@ struct legacy_adaptive_swarm_damage_t final : public druid_spell_t
     travel_speed = 0;
     travel_delay = 0;
 
-    // BracketSim legacy compatibility: Evolved Swarm (conduit 278) adds to the
-    // damage Adaptive Swarm deals.
-    base_td_multiplier *= 1.0 + p->legacy_conduits.percent( 278 );
+    // Evolved Swarm (conduit 278) is NOT here: it raises the swarm's damage-taken bonus, not its own ticks
+    // (see parse_action_target_effects, 25 Nov 2026 audit D1).
   }
 
   void impact( action_state_t* s ) override
@@ -12370,11 +12391,13 @@ void druid_t::create_buffs()
       make_buff( this, "legacy_balance_of_all_things_arcane", find_spell( 339946 ) )
           ->set_default_value_from_effect( 1, 1.0 )
           ->set_reverse( true )
+          ->set_refresh_behavior( buff_refresh_behavior::DURATION )
           ->set_chance( shadowlands_legacy.balance_of_all_things ? 1.0 : 0.0 );
   buff.legacy_balance_of_all_things_nature =
       make_buff( this, "legacy_balance_of_all_things_nature", find_spell( 339943 ) )
           ->set_default_value_from_effect( 1, 1.0 )
           ->set_reverse( true )
+          ->set_refresh_behavior( buff_refresh_behavior::DURATION )
           ->set_chance( shadowlands_legacy.balance_of_all_things ? 1.0 : 0.0 );
   buff.legacy_eye_of_fearful_symmetry =
       make_buff( this, "legacy_eye_of_fearful_symmetry", find_spell( 339142 ) )
@@ -12647,14 +12670,17 @@ void druid_t::create_buffs()
   buff.legacy_sinful_hysteria =
       make_fallback( shadowlands_legacy.sinful_hysteria, this, "sinful_hysteria",
                      find_spell( 355315 ) );
+  if ( legacy_conduits.has( 280 ) )
+    buff.legacy_sinful_hysteria->add_invalidate( CACHE_CRIT_CHANCE );
 
   if ( shadowlands_legacy.sinful_hysteria )
   {
     buff.legacy_ravenous_frenzy->set_stack_change_callback(
         [ this ]( buff_t* b, int old_, int new_ ) {
+          // 25 Nov 2026 audit D6: 0.1 s per stack, as 9.2.7 ("spell data hasn't changed and still indicates 0.2s,
+          // but tooltip says 0.1s"); 354109's 0.2 was used here.
           if ( old_ && new_ )
-            b->extend_duration( timespan_t::from_seconds(
-                find_spell( 354109 )->effectN( 1 ).base_value() ) );
+            b->extend_duration( 100_ms );
           else if ( old_ )
             buff.legacy_sinful_hysteria->trigger( old_ );
         } );
@@ -14149,6 +14175,9 @@ void druid_t::init_rng()
   {
     bool guidance = talent.elunes_guidance.ok() || talent.ashamanes_guidance.ok() ||
                     talent.ursocs_guidance.ok() || talent.cenarius_guidance.ok();
+    // BracketSim legacy compatibility (25 Nov 2026 audit D5): the Celestial Spirits legendary uses the 1-in-2 deck for
+    // the exceptional spell too (9.2.7: get_shuffled_rng( ..., celestial_spirits ? 2 : convoke_the_spirits_deck )).
+    guidance = guidance || shadowlands_legacy.celestial_spirits;
 
     rngs.convoke = get_shuffled_rng( "convoke_the_spirits", 1, guidance ? 2 : options.convoke_the_spirits_deck );
   }
@@ -15115,7 +15144,11 @@ double druid_t::legacy_endless_thirst_crit() const
   if ( !legacy_conduits.has( 280 ) || !buff.legacy_ravenous_frenzy )
     return 0.0;
 
-  return buff.legacy_ravenous_frenzy->check() * legacy_conduits.percent( 280 ) / 10.0;
+  // 25 Nov 2026 audit D6: also while Sinful Hysteria's after-buff holds the stacks (9.2.7 adds both).
+  double stacks = buff.legacy_ravenous_frenzy->check();
+  if ( buff.legacy_sinful_hysteria )
+    stacks += buff.legacy_sinful_hysteria->check();
+  return stacks * legacy_conduits.percent( 280 ) / 10.0;
 }
 
 /*
@@ -16061,6 +16094,11 @@ void druid_t::parse_action_effects( action_t* action )
   // BracketSim legacy compatibility: Timeworn Dreambinder, +10% damage and -10% cost per stack on Starsurge and
   // Starfall (audit 3 C7, 11 Nov 2026: the buff went up and nothing read it).
   _a->parse_effects( buff.legacy_timeworn_dreambinder );
+  // BracketSim legacy compatibility (25 Nov 2026 audit D2): the Balance of All Things LEGENDARY's crit, 3% per stack
+  // (8 stacks, one lost per second) to the spells 339946 / 339943 list - 9.2.7 parse_buff_effects on both. The buffs went
+  // up and nothing read them.
+  _a->parse_effects( buff.legacy_balance_of_all_things_arcane );
+  _a->parse_effects( buff.legacy_balance_of_all_things_nature );
 
   // talent data for balance of all things only modifies effect#1 of the buff, and is missing modification to effect#3
   // which is done via hidden script. hack around this by overriding the value instead of normally parsing the talent.
@@ -16210,8 +16248,16 @@ void druid_t::parse_action_target_effects( action_t* action )
   // damage its target takes from the druid's spells while the swarm is on it.
   // Once, not per stack: 325733 effect 2 is flagged Suppress Points Stacking
   // (+25% with the swarm on the target; counted per stack it was about +95%).
-  _a->parse_target_effects( d_fn( &druid_td_t::dots_t::adaptive_swarm, false ),
-                            legacy_covenant.adaptive_swarm_damage );
+  // Evolved Swarm (conduit 278; 25 Nov 2026 audit D1): 341447 is a flat add to 325733 EFFECT 2 (property 12), so the
+  // damage-taken bonus becomes 25% + the conduit (9.2.7 parse_dot_debuffs( adaptive_swarm_damage, evolved_swarm ));
+  // the swarm's own ticks are unchanged. 325733 has only these two effects, so the override touches effect 2 alone.
+  if ( legacy_conduits.has( 278 ) )
+    _a->parse_target_effects( d_fn( &druid_td_t::dots_t::adaptive_swarm, false ),
+                              legacy_covenant.adaptive_swarm_damage,
+                              legacy_covenant.adaptive_swarm_damage->effectN( 2 ).percent() + legacy_conduits.percent( 278 ) );
+  else
+    _a->parse_target_effects( d_fn( &druid_td_t::dots_t::adaptive_swarm, false ),
+                              legacy_covenant.adaptive_swarm_damage );
 
   if ( talent.exacerbating_wounds.ok() )
     _a->parse_target_effects( d_fn( &druid_td_t::dots_t::dreadful_wound ), spec.dreadful_wound );

@@ -925,7 +925,7 @@ public:
     buff_t* legacy_abomination_limb = nullptr;
 
     // BracketSim legacy compatibility: Shadowlands runeforge legendaries.
-    buff_t* legacy_crimson_rune_weapon;
+    buff_t* legacy_crimson_rune_weapon = nullptr;
     buff_t* legacy_death_turf;
     buff_t* legacy_deaths_due_strength = nullptr;  // 324165, 30 Sep 2026
     buff_t* legacy_frenzied_monstrosity;
@@ -16414,6 +16414,9 @@ void death_knight_t::init_spells()
   shadowlands_legacy.frenzied_monstrosity       = legacy( 6950 );
   shadowlands_legacy.gorefiends_domination      = legacy( 6943 );
   shadowlands_legacy.koltiras_favor             = legacy( 6944 );
+  // 25 Nov 2026 re-check R2: the 0.7 s internal cooldown (9.2.7 cooldown.koltiras_favor_icd = internal_cooldown()) was never set.
+  if ( shadowlands_legacy.koltiras_favor )
+    cooldown.legacy_koltiras_favor_icd->duration = find_spell( 334583 )->internal_cooldown();
   shadowlands_legacy.phearomones                = legacy( 6954 );
   shadowlands_legacy.rage_of_the_frozen_champion = legacy( 7160 );
   shadowlands_legacy.rampant_transference       = legacy_unity( 7466, "night_fae" );
@@ -17555,6 +17558,7 @@ void death_knight_t::create_buffs()
   buffs.legacy_crimson_rune_weapon = make_buff( this, "legacy_crimson_rune_weapon", find_spell( 334526 ) )
                                          ->set_default_value_from_effect( 1 )
                                          ->set_affects_regen( true )
+                                         ->set_stack_change_callback( [ this ]( buff_t*, int, int ) { _runes.update_coefficient(); } )
                                          ->set_chance( shadowlands_legacy.crimson_rune_weapon ? 1.0 : 0.0 );
   // BracketSim legacy covenant (30 Sep 2026): Death's Due's Strength steal - +2% Strength per stack, 4 stacks, 12 s.
   buffs.legacy_deaths_due_strength = make_buff( this, "legacy_deaths_due_strength", find_spell( 324165 ) )
@@ -18793,6 +18797,11 @@ inline double death_knight_t::runes_per_second() const
   if ( player_t::buffs.memory_of_lucid_dreams && player_t::buffs.memory_of_lucid_dreams->check() )
     rps *= 1.0 + player_t::buffs.memory_of_lucid_dreams->data().effectN( 8 ).percent();
 
+  // BracketSim legacy (25 Nov 2026 re-check R1): Crimson Rune Weapon's 334526, runes regenerate 40% faster for 10 s
+  // (9.2.7 runes_per_second / rune_regen_coefficient). The buff went up and nothing read it.
+  if ( buffs.legacy_crimson_rune_weapon && buffs.legacy_crimson_rune_weapon->check() )
+    rps *= 1.0 + buffs.legacy_crimson_rune_weapon->check_value();
+
   return rps;
 }
 
@@ -18810,6 +18819,9 @@ inline double death_knight_t::rune_regen_coefficient() const
   // BracketSim legacy: Memory of Lucid Dreams major - Runes regenerate 100% faster (298357 effect 8).
   if ( player_t::buffs.memory_of_lucid_dreams && player_t::buffs.memory_of_lucid_dreams->check() )
     coeff /= 1.0 + player_t::buffs.memory_of_lucid_dreams->data().effectN( 8 ).percent();
+
+  if ( buffs.legacy_crimson_rune_weapon && buffs.legacy_crimson_rune_weapon->check() )
+    coeff /= 1.0 + buffs.legacy_crimson_rune_weapon->check_value();
 
   return coeff;
 }

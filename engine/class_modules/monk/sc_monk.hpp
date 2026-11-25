@@ -1387,6 +1387,7 @@ public:
 
   // Actions
   void trigger_celestial_fortune( action_state_t * );
+  void legacy_walk_with_the_ox();
 };
 
 namespace profileset_control

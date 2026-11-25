@@ -14994,8 +14994,12 @@ void player_t::create_options()
   add_option( opt_external_buff_times( "external_buffs.rallying_cry", external_buffs.rallying_cry ) );
   add_option( opt_external_buff_times( "external_buffs.potion_bomb_of_power", external_buffs.potion_bomb_of_power ) );
 
-  // Additional Options for Timed External Buffs
-  add_option( opt_obsoleted( "external_buffs.the_long_summer_rank" ) );
+  // BracketSim (25 Nov 2026): Night Fae paladin blessings from another player (see player.hpp external_buffs_t).
+  add_option( opt_external_buff_times( "external_buffs.blessing_of_summer", external_buffs.blessing_of_summer ) );
+  add_option( opt_external_buff_times( "external_buffs.blessing_of_autumn", external_buffs.blessing_of_autumn ) );
+  add_option( opt_external_buff_times( "external_buffs.blessing_of_winter", external_buffs.blessing_of_winter ) );
+  add_option( opt_bool( "external_buffs.seasons_of_plenty", external_buffs.seasons_of_plenty ) );
+  add_option( opt_uint( "external_buffs.the_long_summer_rank", external_buffs.the_long_summer_rank, 0, 15 ) );
 
   // Player only options
   if ( !is_enemy() && !is_pet() )
