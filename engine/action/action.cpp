@@ -4554,6 +4554,19 @@ void action_t::impact( action_state_t* s )
   {
     sim->print_log( "Target {} avoids {} {} ({})", *s->target, *player, *this, s->result );
   }
+
+  // marrowed_gemstone_pet_crit (27 Nov 2026, as 9.2.7 action_t::impact): a pet's critical hit counts toward its owner's
+  // Heirmir's Arsenal: Marrowed Gemstone (legacy_soulbind_effects.cpp), unless the gemstone is on its cooldown.
+  if ( s->result == RESULT_CRIT && player->type == PLAYER_PET )
+  {
+    if ( player_t* owner = debug_cast<pet_t*>( player )->owner )
+    {
+      auto counter = buff_t::find( owner, "marrowed_gemstone_charging" );
+      auto gem     = counter ? buff_t::find( owner, "marrowed_gemstone" ) : nullptr;
+      if ( counter && gem && gem->cooldown->up() )
+        counter->trigger();
+    }
+  }
 }
 
 void action_t::trigger_dot( action_state_t* s )

@@ -314,6 +314,9 @@ struct chance_on_hit_cb_t : public dbc_proc_callback_t
   // differently"): false for equip-aura procs (item effect trigger 1 - Souldrinker, No'Kaled), which the 14 Nov rules below
   // (off-hand items vs no-weapon hits, Main Gauche, Fury off-hand abilities, Keg Smash / Immolation Aura) were not measured on.
   bool chance_on_hit_item = true;
+  // Cat form (27 Nov 2026, see trigger): found once.
+  buff_t* cat_form     = nullptr;
+  bool cat_form_looked = false;
 
   chance_on_hit_cb_t( const special_effect_t& effect )
     : dbc_proc_callback_t( effect.item, effect ),
@@ -428,6 +431,45 @@ struct chance_on_hit_cb_t : public dbc_proc_callback_t
          ( state->action->data().flags( static_cast<spell_attribute>( 41u ) ) ||
            ( demon_blades && state->action->data().id() == 203796 ) ) )
       type = proc_trigger_type_e::TRIGGER_ACTION;
+
+    /*
+     * CAT FORM (27 Nov 2026, the author: a level 30 Feral Best in Slot picked Eskhandar's Right Claw over every two-hander - "fix
+     * it all, proven no assumptions"). the author's WarcraftLogs uploads, 5 Feral players wearing Dragonspine Trophy (1 PPM,
+     * 20 s cooldown) with a 3.6 s two-hander (Distant Land / Bloodfall), gear read per fight, hits with no other hit within
+     * 40 ms and outside the cooldown: cat auto attacks 60 procs / 3,450 = 1.74% (+-0.44) - the cat's own 1.0 s swing
+     * (1.67%), not the weapon's 3.6 s (6.0%); Shred 52 / 814 = 6.4%, Rake, Ferocious Bite and Thrash with it 88 / 1,367 =
+     * 6.4% - the WEAPON's 3.6 s (6.0%), not 1.0 s (1.67%). The engine rolled both at the cat weapon's 1.0 s for a PPM item
+     * (Dragonspine: Shred 1.67% against the game's 6.4%) and at the weapon's own speed for a weapon item with a fixed chance
+     * per hit (Eskhandar's Right Claw: 4.33% on every cat auto attack against 1.67%). In cat form an old chance-on-hit
+     * effect now rolls a PPM rate at 1.0 s on an auto attack and at the equipped weapon's own speed on an ability; a weapon
+     * item or enchant whose chance is set from its weapon's speed rolls that chance on an ability and that chance x 1.0 /
+     * speed on an auto attack. Bear form is not measured and is unchanged.
+     */
+    if ( chance_on_hit_item && listener->type == DRUID && state && state->action && !rppm )
+    {
+      if ( !cat_form_looked )
+      {
+        cat_form        = buff_t::find( listener, "cat_form" );
+        cat_form_looked = true;
+      }
+      const item_t& mh   = listener->items[ SLOT_MAIN_HAND ];
+      const double speed = mh.parsed.data.delay > 0 ? mh.parsed.data.delay / 1000.0 : 0.0;
+      if ( cat_form && cat_form->check() && speed > 0 && ( ppm > 0 || ( hand && proc_chance > 0 ) ) )
+      {
+        const bool swing        = state->action == listener->main_hand_attack;
+        const double old_chance = proc_chance;
+        const double old_ppm    = ppm;
+        if ( ppm > 0 )
+          proc_chance = ppm * ( swing ? 1.0 : speed ) / 60.0;
+        else if ( swing )
+          proc_chance = proc_chance * 1.0 / speed;
+        ppm = 0;
+        dbc_proc_callback_t::trigger( data, target, state, type );
+        proc_chance = old_chance;
+        ppm         = old_ppm;
+        return;
+      }
+    }
 
     dbc_proc_callback_t::trigger( data, target, state, type );
   }

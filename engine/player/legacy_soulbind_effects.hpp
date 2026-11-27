@@ -257,8 +257,7 @@ struct effects_t
   buff_t* valiant_strikes       = nullptr;
   action_t* effusive_anima      = nullptr;   // S3: the damage half of Effusive Anima Accelerator
 
-  // Quiet repeat drivers. A buff's own period is bounded by its duration, so
-  // anything that has to re-fire on a longer cadence than it lasts needs one.
+  // Marrowed Gemstone Charging: the critical strike counter (10 starts the gemstone; 27 Nov 2026).
   buff_t* marrowed_gemstone_driver  = nullptr;
 
   buff_t* soothing_shade         = nullptr;

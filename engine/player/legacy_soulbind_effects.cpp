@@ -711,23 +711,56 @@ void effects_t::create_buffs( player_t* p )
                             ->set_pct_buff_type( primary_pct );
 
   // "After landing 10 critical strikes, you gain 18% increased chance to
-  // critical strike for 10 sec. May only occur once per 60 sec." Any real
-  // rotation clears ten crits well inside the cooldown, so the cooldown is the
-  // binding constraint and this is driven off it rather than off a crit count.
+  // critical strike for 10 sec. May only occur once per 60 sec."
+  //
+  // 27 Nov 2026 (the author, a player's report: "granted on pull when it should require 10 crits first ... I don't think it
+  // should reactivate exactly 1min after the last every time"): it was given at 0 s and then every 60 s by a timer. Now as
+  // 9.2.7 heirmirs_arsenal_marrowed_gemstone (soulbinds.cpp) and the spell data (9.2.7 simc spell_query): each critical
+  // hit or heal adds a stack of Marrowed Gemstone Charging (327066, 9 stacks + 1); the 10th starts Marrowed Gemstone
+  // Enhancement (327069, +18% crit for 10 s) and empties the counter. Its cooldown is 327069's 10 s + Dull Gemstone
+  // (327073) 50 s = 60 s from the moment it starts, and crits landed during that minute do not count (9.2.7: "cooldown
+  // applies to both the buff AND the counter"), so the next one needs 10 NEW crits after the minute is up. A pet's
+  // critical hits count too (9.2.7 action_t::impact; here action.cpp marrowed_gemstone_pet_crit).
   marrowed_gemstone = make_buff( p, "marrowed_gemstone" )
                           ->set_duration( 10_s )
                           ->set_default_value( 0.18 )
                           ->set_pct_buff_type( STAT_PCT_BUFF_CRIT );
+  marrowed_gemstone->set_cooldown( 10_s + 50_s );
 
-  // A buff cannot drive its own repeat - its period is bounded by its duration -
-  // so the 60s cadence comes from a separate quiet driver.
-  marrowed_gemstone_driver = make_buff( p, "marrowed_gemstone_driver" )
-                                 ->set_quiet( true )
-                                 ->set_duration( timespan_t::zero() )
-                                 ->set_period( 60_s )
-                                 ->set_tick_callback( [ this ]( buff_t*, int, timespan_t ) {
-                                   marrowed_gemstone->trigger();
-                                 } );
+  if ( has( MARROWED_GEMSTONE ) )
+  {
+    // The counter exists only for a character with the trait (the pet hook in action.cpp looks for it by name).
+    marrowed_gemstone_driver = make_buff( p, "marrowed_gemstone_charging" )
+                                   ->set_max_stack( 10 )
+                                   ->set_duration( timespan_t::zero() )
+                                   ->set_expire_at_max_stack( true );
+    buff_t* gem = marrowed_gemstone;
+    marrowed_gemstone_driver->set_stack_change_callback( [ gem ]( buff_t* b, int, int ) {
+      if ( b->at_max_stacks() )
+        gem->trigger();
+    } );
+    struct marrowed_cb_t : public dbc_proc_callback_t
+    {
+      buff_t* gem;
+      marrowed_cb_t( player_t* pl, const special_effect_t& e, buff_t* g ) : dbc_proc_callback_t( pl, e ), gem( g ) {}
+      void trigger( const proc_data_t& data, player_t* tgt, action_state_t* s, proc_trigger_type_e type ) override
+      {
+        if ( gem->cooldown->down() )
+          return;
+        dbc_proc_callback_t::trigger( data, tgt, s, type );
+      }
+    };
+    auto marrow = new special_effect_t( p );
+    marrow->name_str     = "marrowed_gemstone_charging";
+    marrow->type         = SPECIAL_EFFECT_EQUIP;
+    // 326572's own proc flags (melee, ranged, spells, periodic, helpful and harmful), on a critical result only.
+    marrow->proc_flags_  = PF_MELEE | PF_MELEE_ABILITY | PF_RANGED | PF_RANGED_ABILITY | PF_NONE_HELPFUL |
+                           PF_NONE_HARMFUL | PF_MAGIC_HEAL | PF_MAGIC_SPELL | PF_PERIODIC;
+    marrow->proc_flags2_ = PF2_CRIT;
+    marrow->proc_chance_ = 1.0;
+    marrow->custom_buff  = marrowed_gemstone_driver;
+    new marrowed_cb_t( p, *marrow, marrowed_gemstone );
+  }
 
   // "Damaging an enemy above 90% health grants you 34 Mastery for 5 sec, up to
   // 5 stacks."
@@ -1314,11 +1347,7 @@ void effects_t::combat_begin( player_t* p )
       forgeborne_reveries->trigger( stacks );
   }
 
-  if ( has( MARROWED_GEMSTONE ) )
-  {
-    marrowed_gemstone->trigger();
-    marrowed_gemstone_driver->trigger();
-  }
+  // Marrowed Gemstone: nothing at the pull - it needs 10 critical strikes first (27 Nov 2026, see create_buffs).
 
   if ( has( BUILT_FOR_WAR ) )
     built_for_war->trigger( 5 );
