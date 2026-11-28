@@ -440,7 +440,19 @@ using namespace helpers;
         switch ( data().id() )
         {
           // 25 Nov 2026 audit #26: Drain Soul (198590) spends at the channel's end instead (drain_soul_t::last_tick).
-          case 686: case 29722: case 244670: case 434506: case 264178: case 1261153:
+          // 28 Nov 2026 (a level 60 Affliction log, 27 Shard procs): in game Malefic Grasp spends Decimating Bolt at
+          // the cast but never a Shard of Annihilation charge, and Shadow Bolt spends its Shard charge when it lands
+          // (shadow_bolt_t::impact; a bolt already in flight when Shard comes up spends one too), as 9.2.7 did
+          // (sc_warlock_affliction.cpp shadow_bolt_t::impact).
+          case 1261153:
+            p()->buffs.legacy_decimating_bolt->decrement();
+            break;
+          case 686:
+            p()->buffs.legacy_decimating_bolt->decrement();
+            if ( !affliction() )
+              p()->buffs.legacy_shard_of_annihilation->decrement();
+            break;
+          case 29722: case 244670: case 434506: case 264178:
             p()->buffs.legacy_decimating_bolt->decrement();
             p()->buffs.legacy_shard_of_annihilation->decrement();
             break;
@@ -636,7 +648,14 @@ using namespace helpers;
       // Shadow Bolt and Drain Soul by its value for EACH affliction dot on the
       // target, which is the whole of what makes it worth anything.
       if ( affected_by.legacy_withering_bolt )
-        m *= 1.0 + p()->legacy_conduits.percent( 203 ) * affected_by.legacy_withering_bolt_scale * td( t )->count_affliction_dots();
+      {
+        // 28 Nov 2026 (a level 60 Affliction log): in game Unstable Affliction does not count - Shadow Bolt hits the
+        // same with Agony + Corruption + Unstable Affliction up as with Agony + Corruption, and Corruption + Unstable
+        // Affliction hits like one DoT (Shadowlands counted its own Unstable Affliction, 316099; Midnight's is a new
+        // spell, 1259790).
+        int dots = td( t )->count_affliction_dots() - ( td( t )->dots.unstable_affliction->is_ticking() ? 1 : 0 );
+        m *= 1.0 + p()->legacy_conduits.percent( 203 ) * affected_by.legacy_withering_bolt_scale * dots;
+      }
 
       return m;
     }
@@ -1246,6 +1265,11 @@ using namespace helpers;
     void impact( action_state_t* s ) override
     {
       warlock_spell_t::impact( s );
+
+      // BracketSim legacy (28 Nov 2026): Affliction's Shadow Bolt spends a Shard of Annihilation charge as it lands
+      // (see the cast-time switch in warlock_spell_t::execute).
+      if ( affliction() && !background )
+        p()->buffs.legacy_shard_of_annihilation->decrement();
 
       if ( result_is_hit( s->result ) )
       {

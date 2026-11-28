@@ -36,7 +36,7 @@ namespace warlock
     auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
     {
       return legacy( bonus_id ) ||
-             ( legacy( 8129 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
+             ( shadowlands_legacy.legacy_shadowlands_enabled && legacy_bonus_worn( 8129 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
     };
 
     shadowlands_legacy.contained_perpetual_explosion        = legacy_unity( 7713, "venthyr" );
@@ -832,7 +832,14 @@ namespace warlock
         make_buff( this, "decimating_bolt", find_spell( 325299 ) )
             // 25 Nov 2026 audit #26: one stack with Drain Soul - it empowers a whole channel (9.2.7 sc_warlock.cpp:1176-1179).
             ->set_max_stack( talents.drain_soul.ok() ? 1 : std::max( 1, as<int>( find_spell( 325299 )->max_stacks() ) ) )
-            ->set_chance( legacy_covenant.decimating_bolt->ok() ? 1.0 : 0.0 );
+            ->set_chance( legacy_covenant.decimating_bolt->ok() ? 1.0 : 0.0 )
+            // 28 Nov 2026 (a level 60 Affliction log, 27 Shard procs): Shard of Annihilation charges left over end 5 s
+            // after the Decimating Bolt empowerment ends (all 17 such cases 4.99-5.02 s), not at its own 44 s.
+            ->set_stack_change_callback( [ this ]( buff_t*, int, int cur ) {
+              if ( cur == 0 && specialization() == WARLOCK_AFFLICTION && buffs.legacy_shard_of_annihilation->check() &&
+                   buffs.legacy_shard_of_annihilation->remains() > 5_s )
+                buffs.legacy_shard_of_annihilation->extend_duration( 5_s - buffs.legacy_shard_of_annihilation->remains() );
+            } );
 
     // Languishing Soul Detritus (bonus 7710, Kyrian): critical strike chance after Scouring Tithe. 356255 is the
     // version for a Tithe that refunds Soul Shards (+45%), 360953 the one for a Tithe that runs out (+15%); the

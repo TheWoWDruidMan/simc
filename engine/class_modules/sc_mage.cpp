@@ -7275,7 +7275,7 @@ void mage_t::init_spells()
   auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
   {
     return legacy( bonus_id ) ||
-           ( legacy( 8123 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
+           ( options.legacy_shadowlands_enabled && legacy_bonus_worn( 8123 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
   };
 
   // Death's Fathom reaches a mage three ways: its own bonus id, Unity worn as a
@@ -7283,7 +7283,7 @@ void mage_t::init_spells()
   // option predates the covenant route and profiles may still set it, so it is
   // kept as an explicit override rather than removed.
   shadowlands_legacy.deaths_fathom = legacy_unity( 7475, "necrolord" ) ||
-    ( options.legacy_shadowlands_enabled && has_bonus_id( 8123 ) &&
+    ( options.legacy_shadowlands_enabled && legacy_bonus_worn( 8123 ) &&
       util::str_compare_ci( options.legacy_unity_power, "deaths_fathom" ) );
 
   shadowlands_legacy.arcane_bombardment   = legacy( 6927 );

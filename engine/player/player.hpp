@@ -1173,6 +1173,10 @@ public:
   // BracketSim, 25 Oct 2026: a taken class or spec talent of this name - it overrides the same-named Shadowlands
   // legendary or conduit in game.
   bool legacy_talent_taken( std::string_view name ) const;
+  // BracketSim, 28 Nov 2026: a worn item carries this Shadowlands legacy bonus - on its bonus ids, or built in: the
+  // vendor Unity belts (items 190464-190475) carry the Unity spell the class Unity bonus (8119-8130) would add, and no
+  // bonus id. Shadowlands SimulationCraft matched Unity the same two ways (player_t::find_runeforge_legendary).
+  bool legacy_bonus_worn( int bonus_id ) const;
   void strip_legacy_talent_duplicates();
   player_talent_t find_talent_spell( talent_tree tree, unsigned spell_id, specialization_e s = SPEC_NONE  ) const;
   player_talent_t find_talent_spell( unsigned talent_entry_id ) const;

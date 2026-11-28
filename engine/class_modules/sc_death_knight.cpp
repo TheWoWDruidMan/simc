@@ -16398,7 +16398,7 @@ void death_knight_t::init_spells()
   auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
   {
     return legacy( bonus_id ) ||
-           ( legacy( 8119 ) && util::str_compare_ci( options.legacy_covenant, covenant_name ) );
+           ( options.legacy_shadowlands_enabled && legacy_bonus_worn( 8119 ) && util::str_compare_ci( options.legacy_covenant, covenant_name ) );
     // Death Knight keeps its covenant choice on options rather than on a
     // `chosen` member of legacy_covenant_t, which every other class uses.
   };

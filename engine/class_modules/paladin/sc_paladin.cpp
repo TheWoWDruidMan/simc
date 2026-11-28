@@ -5049,7 +5049,7 @@ void paladin_t::init_spells()
   auto legacy_unity = [ & ]( int bonus_id, std::string_view covenant_name )
   {
     return legacy( bonus_id ) ||
-           ( legacy( 8125 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
+           ( shadowlands_legacy.legacy_shadowlands_enabled && legacy_bonus_worn( 8125 ) && util::str_compare_ci( legacy_covenant.chosen, covenant_name ) );
   };
 
   shadowlands_legacy.seasons_of_plenty            = legacy_unity( 7702, "night_fae" );

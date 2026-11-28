@@ -11931,7 +11931,7 @@ void rogue_t::init_spells()
   {
     return options.legacy_shadowlands_enabled &&
            ( has_bonus_id( bonus_id ) ||
-             ( has_bonus_id( 8127 ) &&
+             ( legacy_bonus_worn( 8127 ) &&
                util::str_compare_ci( legacy_covenant.chosen, covenant_name ) ) );
   };
 

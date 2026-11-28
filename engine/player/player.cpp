@@ -1989,6 +1989,25 @@ void player_t::parse_temporary_enchants()
   }
 }
 
+bool player_t::legacy_bonus_worn( int bonus_id ) const
+{
+  if ( range::any_of( items, [ bonus_id ]( const item_t& item ) {
+         return range::contains( item.parsed.bonus_id, bonus_id );
+       } ) )
+    return true;
+  for ( const auto& entry : dbc->item_bonus( as<unsigned>( bonus_id ) ) )
+  {
+    if ( entry.type != ITEM_BONUS_ADD_ITEM_EFFECT )
+      continue;
+    unsigned spell_id = item_effect_t::find( entry.value_1, dbc->ptr ).spell_id;
+    if ( spell_id && range::any_of( items, [ spell_id ]( const item_t& item ) {
+           return range::contains( item.parsed.data.effects, spell_id, &item_effect_t::spell_id );
+         } ) )
+      return true;
+  }
+  return false;
+}
+
 bool player_t::legacy_talent_taken( std::string_view name ) const
 {
   return find_talent_spell( talent_tree::CLASS, name ).ok() ||
