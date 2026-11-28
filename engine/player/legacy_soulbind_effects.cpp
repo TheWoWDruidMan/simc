@@ -8,6 +8,7 @@
 #include "action/action_state.hpp"
 #include "action/dbc_proc_callback.hpp"
 #include "action/dot.hpp"
+#include "action/residual_action.hpp"
 #include "item/special_effect.hpp"
 #include "action/spell.hpp"
 #include "buff/buff.hpp"
@@ -200,10 +201,14 @@ int active_enemies( const player_t* p )
   return std::max( n, 1 );
 }
 
-// Head-to-back slots carrying a stat enchant. Forgeborne Reveries reads this. As Shadowlands SimulationCraft counts them
-// (soulbinds.cpp forgeborne_reveries, audit BS-29, 22 Nov 2026): slots SLOT_HEAD..SLOT_BACK (rings included, weapons
-// not) whose enchant carries a stat; an enchant that is only a proc or a use does not count. A hand-typed stat enchant
-// (enchant=...stats) counts.
+// Head-to-back slots whose enchant feeds Forgeborne Reveries. Slots SLOT_HEAD..SLOT_BACK (rings included, weapons not),
+// as Shadowlands SimulationCraft (soulbinds.cpp forgeborne_reveries, audit BS-29, 22 Nov 2026).
+// 28 Nov 2026 (a player's level 60 log, the author: "everything that was odd to you ... proven"): in game only an enchant that
+// carries spell 348272 counts - the Shadowlands armor enchants (6163-6170, 6202-6220, 6230, 6265...), whose 348272 adds 1
+// to Forgeborne's stat and armor effects. Shadowlands simc counted any stat enchant, which was the same thing when every
+// player wore Shadowlands enchants; in Legacy older enchants are common and count for nothing. His six older stat enchants
+// gave 0%: COMBATANT_INFO Intellect 465 and in-combat spell power 484, both exactly the sim with Forgeborne at 0 (+3% read
+// 478 / 497). A hand-typed enchant (enchant=...stats) has no 348272 and no longer counts.
 int enchanted_armor_pieces( const player_t* p )
 {
   int n = 0;
@@ -216,12 +221,15 @@ int enchanted_armor_pieces( const player_t* p )
     if ( i.parsed.enchant_id != 0 )
     {
       const auto& ench = p->dbc->item_enchantment( i.parsed.enchant_id );
-      if ( std::find( std::begin( ench.ench_type ), std::end( ench.ench_type ), ITEM_ENCHANTMENT_STAT ) !=
-           std::end( ench.ench_type ) )
-        n++;
+      for ( size_t k = 0; k < std::size( ench.ench_type ); k++ )
+      {
+        if ( ench.ench_type[ k ] == ITEM_ENCHANTMENT_EQUIP_SPELL && ench.ench_prop[ k ] == 348272 )
+        {
+          n++;
+          break;
+        }
+      }
     }
-    else if ( !i.parsed.encoded_enchant.empty() )
-      n++;
   }
   return n;
 }
@@ -273,6 +281,48 @@ struct pustule_eruption_t : public spell_t
  * $points = max(SP, AP) x 0.3312 x (1 + versatility). As Shadowlands SimulationCraft did, the DoT lands on the target after
  * the delay - a boss is standing on the burrs.
  */
+/*
+ * MNEMONIC EQUIPMENT (28 Nov 2026, a player's level 60 Affliction log, the author: "everything that was odd to you ... proven").
+ * "When you damage an enemy that's below 35% health, 3% of the damage done is repeated over 5 sec." It was a flat x1.03
+ * on every hit below 35%. The log (351687, 1,049 ticks) shows what the game does, which is Shadowlands SimulationCraft's
+ * model (soulbinds.cpp mnemonic_equipment, a residual periodic): each hit adds 3% of its damage to a pool that is spread
+ * over a fresh 5 ticks, 1 sec apart, and whatever is left when the target dies is lost (Shriekwing: 25,594 of 2.56% of
+ * his damage below 35%; short-lived trash 0.06-2.3%). Replaying his own hits tick by tick: spells that are procs - Dark
+ * Harvest, Shadowbolt Volley, Decimating Bolt - add nothing (error 13.6% with them, 5.0% without), and a tick is the
+ * stored amount with nothing multiplying it again (game tick = 3% of the final hit). Midnight's export has no 351687, so
+ * the numbers are hand-set here.
+ */
+struct mnemonic_equipment_t : public residual_action::residual_periodic_action_t<spell_t>
+{
+  mnemonic_equipment_t( player_t* p )
+    : residual_action::residual_periodic_action_t<spell_t>( "mnemonic_equipment", p, spell_data_t::nil() )
+  {
+    id = 351687;   // the report's icon and tooltip
+    school = SCHOOL_SHADOW;
+    dot_duration = 5_s;
+    base_tick_time = 1_s;
+    hasted_ticks = false;
+    tick_may_crit = false;
+  }
+
+  void init() override
+  {
+    residual_action::residual_periodic_action_t<spell_t>::init();
+    // The pool holds the hits' final damage: no player, target or versatility multiplier applies to it again.
+    snapshot_flags = update_flags = 0;
+  }
+
+  // A hit while it is running re-spreads the pool over exactly 5 more ticks on the same 1 s clock. The log: ticks every
+  // 1.0 s however the hits fall (108 of 109 gaps), and a fresh 5 replays his Shriekwing ticks to 5.0% where the default
+  // refresh (5 s from the hit, so 6 ticks) gives 11.5%.
+  timespan_t calculate_dot_refresh_duration( const dot_t* d, timespan_t ) const override
+  {
+    const timespan_t tick = base_tick_time;
+    const timespan_t dur = dot_duration;
+    return ( d->tick_event ? d->time_to_next_full_tick() : tick ) + dur - tick;
+  }
+};
+
 struct spiked_burrs_t : public spell_t
 {
   spiked_burrs_t( player_t* p ) : spell_t( "spiked_burrs", p )
@@ -563,6 +613,34 @@ void effects_t::create_buffs( player_t* p )
 
   if ( has( NEWFOUND_RESOLVE ) )
     newfound_doubt = p->get_shuffled_rng( "newfound_resolve", 1, 30 );
+
+  if ( has( MNEMONIC_EQUIPMENT ) )
+  {
+    struct mnemonic_cb_t : public dbc_proc_callback_t
+    {
+      action_t* repeat;
+      mnemonic_cb_t( player_t* pl, const special_effect_t& e, action_t* r ) : dbc_proc_callback_t( pl, e ), repeat( r ) {}
+      void trigger( const proc_data_t&, player_t* t, action_state_t* s, proc_trigger_type_e type ) override
+      {
+        // A proc (a background spell's hit) cannot trigger it, as the log shows; nor can its own ticks.
+        if ( type == proc_trigger_type_e::TRIGGER_ACTION_PROC || !s || !s->action || s->action == repeat )
+          return;
+        if ( !s->action->harmful || !t || t == listener || !t->is_enemy() || s->result_amount <= 0 )
+          return;
+        if ( t->health_percentage() >= 35.0 )
+          return;
+        residual_action::trigger( repeat, t, s->result_amount * 0.03 );
+      }
+    };
+    mnemonic_equipment = new mnemonic_equipment_t( p );
+    auto mn = new special_effect_t( p );
+    mn->name_str     = "mnemonic_equipment";
+    mn->type         = SPECIAL_EFFECT_EQUIP;
+    mn->proc_flags_  = PF_ALL_DAMAGE | PF_PERIODIC;
+    mn->proc_flags2_ = PF2_ALL_HIT | PF2_PERIODIC_DAMAGE;
+    mn->proc_chance_ = 1.0;
+    new mnemonic_cb_t( p, *mn, mnemonic_equipment );
+  }
 
   if ( has( NIYAS_TOOLS_BURRS ) )
   {
@@ -1468,12 +1546,8 @@ double effects_t::target_multiplier( const player_t* p, const player_t* t ) cons
     }
   }
 
-  // "When you damage an enemy that's below 35% health, 3% of the damage done is
-  // repeated over 5 sec." Modelled as the multiplier it amounts to rather than
-  // as a separate periodic action, because it has no spell data to build one
-  // from and the repeat cannot itself repeat.
-  if ( has( MNEMONIC_EQUIPMENT ) && t->health_percentage() < 35.0 )
-    m *= 1.03;
+  // Mnemonic Equipment is no longer a multiplier here: 28 Nov 2026 it is the rolling repeat it is in game
+  // (mnemonic_equipment_t, built in create_buffs).
 
   if ( kevins_wrath && kevins_wrath->check() && t == kevins_wrath_target )
     m *= 1.0 + kevins_wrath->check_value();

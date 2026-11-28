@@ -280,6 +280,7 @@ struct effects_t
   const player_t* kevins_wrath_target = nullptr;
   buff_t* newfound_resolve      = nullptr;
   action_t* spiked_burrs        = nullptr;
+  action_t* mnemonic_equipment  = nullptr;   // 28 Nov 2026: the rolling 5 s repeat
   shuffled_rng_t* newfound_doubt = nullptr;   // built at init, as class modules do (a mid-fight build crashed)
   buff_t* party_favors[ 4 ]     = {};        // the Mad Duke's Teas this actor may drink (one per fight)
   buff_t* trembling_pustules    = nullptr;   // Pustule Eruption: pustules from Fleshcraft
